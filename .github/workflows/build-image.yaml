@@ -14,7 +14,7 @@ on:
 jobs:
   build_bundle:
     name: build_bundle
-    if: github.repository == 'ramendr/ceph-volsync-plugin'
+    if: github.repository == 'rakshith-r/ceph-volsync-plugin'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
@@ -29,12 +29,18 @@ jobs:
         id: tag
         run: |
           if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "tag=latest" >> $GITHUB_OUTPUT
+            tag="latest"
+            echo "Generated tag: $tag"
+            echo "tag=$tag" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref_name }}" == release-* ]]; then
             version=$(echo "${{ github.ref_name }}" | sed 's/release-//')
-            echo "tag=v${version}-latest" >> $GITHUB_OUTPUT
+            tag="v${version}-latest"
+            echo "Generated tag: $tag"
+            echo "tag=$tag" >> $GITHUB_OUTPUT
           else
-            echo "tag=latest" >> $GITHUB_OUTPUT
+            tag="latest"
+            echo "Generated tag: $tag"
+            echo "tag=$tag" >> $GITHUB_OUTPUT
           fi
 
       - name: Generate the bundle contents
@@ -58,7 +64,7 @@ jobs:
 
   build_controller:
     name: build_controller
-    if: github.repository == 'ramendr/ceph-volsync-plugin'
+    if: github.repository == 'rakshith-r/ceph-volsync-plugin'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
@@ -74,12 +80,18 @@ jobs:
         id: tag
         run: |
           if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "tag=latest" >> $GITHUB_OUTPUT
+            tag="latest"
+            echo "Generated tag: $tag"
+            echo "tag=$tag" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref_name }}" == release-* ]]; then
             version=$(echo "${{ github.ref_name }}" | sed 's/release-//')
-            echo "tag=v${version}-latest" >> $GITHUB_OUTPUT
+            tag="v${version}-latest"
+            echo "Generated tag: $tag"
+            echo "tag=$tag" >> $GITHUB_OUTPUT
           else
-            echo "tag=latest" >> $GITHUB_OUTPUT
+            tag="latest"
+            echo "Generated tag: $tag"
+            echo "tag=$tag" >> $GITHUB_OUTPUT
           fi
 
       - name: Login to quay.io
@@ -101,7 +113,7 @@ jobs:
 
   build_mover:
     name: build_mover
-    if: github.repository == 'ramendr/ceph-volsync-plugin'
+    if: github.repository == 'rakshith-r/ceph-volsync-plugin'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
@@ -117,12 +129,18 @@ jobs:
         id: tag
         run: |
           if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "tag=latest" >> $GITHUB_OUTPUT
+            tag="latest"
+            echo "Generated tag: $tag"
+            echo "tag=$tag" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref_name }}" == release-* ]]; then
             version=$(echo "${{ github.ref_name }}" | sed 's/release-//')
-            echo "tag=v${version}-latest" >> $GITHUB_OUTPUT
+            tag="v${version}-latest"
+            echo "Generated tag: $tag"
+            echo "tag=$tag" >> $GITHUB_OUTPUT
           else
-            echo "tag=latest" >> $GITHUB_OUTPUT
+            tag="latest"
+            echo "Generated tag: $tag"
+            echo "tag=$tag" >> $GITHUB_OUTPUT
           fi
 
       - name: Login to quay.io
@@ -133,7 +151,7 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
-      - name: Build and push sidecar container image
+      - name: Build and push mover container image
         uses: docker/build-push-action@v6
         with:
           context: .
