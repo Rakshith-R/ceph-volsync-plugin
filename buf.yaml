@@ -1,0 +1,9 @@
+version: v2
+modules:
+  - path: internal/mover/proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - STANDARD
