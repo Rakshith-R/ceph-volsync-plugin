@@ -27,6 +27,7 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/source"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
+	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -45,21 +46,46 @@ type Config struct {
 }
 
 func main() {
-	if err := runMover(); err != nil {
+	if err := newRootCommand().Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func runMover() error {
-	// Load configuration from environment variables
-	config := Config{
-		WorkerType:         getEnvOrDefault("WORKER_TYPE", ""),
-		DestinationAddress: getEnvOrDefault("DESTINATION_ADDRESS", ""),
-		LogLevel:           getEnvOrDefault("LOG_LEVEL", "info"),
-		ServerPort:         getEnvOrDefault("SERVER_PORT", "8080"),
+func newRootCommand() *cobra.Command {
+	var config Config
+
+	cmd := &cobra.Command{
+		Use:   "mover",
+		Short: "Ceph VolSync Plugin Mover",
+		Long: `A data mover component for the Ceph VolSync Plugin that can operate as either a source or destination worker.
+		
+This component handles data synchronization tasks between storage systems as part of the
+Ceph VolSync Plugin architecture.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runMover(config)
+		},
 	}
 
+	// Add flags
+	cmd.Flags().StringVar(&config.WorkerType, "worker-type", "",
+		fmt.Sprintf("Worker type (required): %s or %s", WorkerTypeSource, WorkerTypeDestination))
+	cmd.Flags().StringVar(&config.DestinationAddress, "destination-address", "",
+		"Destination address for data transfer (optional, format: host:port)")
+	cmd.Flags().StringVar(&config.LogLevel, "log-level", "info",
+		"Log level: debug, info, warn, error")
+	cmd.Flags().StringVar(&config.ServerPort, "server-port", "8080",
+		"Port for gRPC server (default: 8080)")
+
+	// Mark required flags
+	if err := cmd.MarkFlagRequired("worker-type"); err != nil {
+		panic(fmt.Sprintf("Failed to mark worker-type flag as required: %v", err))
+	}
+
+	return cmd
+}
+
+func runMover(config Config) error {
 	// Setup logging
 	logger, err := setupLogger(config.LogLevel)
 	if err != nil {
@@ -103,21 +129,14 @@ func runMover() error {
 		worker := destination.NewWorker(logger, destConfig)
 		return worker.Run(ctx)
 	default:
-		return fmt.Errorf("invalid worker type: %s. Must be set via WORKER_TYPE environment variable to '%s' or '%s'",
-			config.WorkerType, WorkerTypeSource, WorkerTypeDestination)
+		// This should never happen due to validation, but included for completeness
+		return fmt.Errorf("invalid worker type: %s", config.WorkerType)
 	}
-}
-
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
 
 func validateWorkerType(workerType string) error {
 	if workerType != WorkerTypeSource && workerType != WorkerTypeDestination {
-		return fmt.Errorf("invalid worker-type '%s': must be '%s' or '%s'. Set via WORKER_TYPE environment variable",
+		return fmt.Errorf("invalid worker-type '%s': must be '%s' or '%s'",
 			workerType, WorkerTypeSource, WorkerTypeDestination)
 	}
 	return nil
