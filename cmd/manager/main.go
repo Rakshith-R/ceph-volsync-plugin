@@ -26,6 +26,9 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/RamenDR/ceph-volsync-plugin/internal/controller"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/cephfs"
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -42,12 +45,22 @@ import (
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+
+	//sdgo:embed ./../../config/openshift/mover_scc.yaml
+	// CephVolsyncPluginMoverSCCYamlRaw []byte
+
+	// See each mover_<movertype>_register.go where they add themselves to
+	// enabledMovers
+	enabledMovers = []func() error{}
 )
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
+	utilruntime.Must(volsyncv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+
+	enabledMovers = append(enabledMovers, cephfs.Register)
 }
 
 // nolint:gocyclo
@@ -174,6 +187,14 @@ func main() {
 		})
 	}
 
+	// Register enabled movers
+	for _, moverRegisterFunc := range enabledMovers {
+		if err := moverRegisterFunc(); err != nil {
+			setupLog.Error(err, "unable to register mover")
+			os.Exit(1)
+		}
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
@@ -198,6 +219,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.ReplicationSourceReconciler{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor("replicationsource-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ReplicationSource")
+		os.Exit(1)
+	}
+	if err = (&controller.ReplicationDestinationReconciler{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor("replicationdestination-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ReplicationDestination")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
