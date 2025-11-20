@@ -39,7 +39,7 @@ const (
 	cephfsMoverName    = "cephfs"
 	// defaultCephFSContainerImage is the default container image for the
 	// cephfs data mover
-	defaultCephFSContainerImage = "quay.io/ramendr/ceph-volsync-plugin-mover:latest"
+	defaultCephFSContainerImage = "ghcr.io/rakshith-r/ceph-volsync-mover:s0.1"
 	// Command line flag will be checked first
 	// If command line flag not set, the RELATED_IMAGE_ env var will be used
 	cephfsContainerImageFlag   = "mover-image"
