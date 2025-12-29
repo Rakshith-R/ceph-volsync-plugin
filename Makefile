@@ -67,6 +67,10 @@ IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
 # MOVER_IMG defines the image:tag used for the mover plugin image.
 MOVER_IMG ?= $(MOVER_IMAGE_TAG_BASE):v$(VERSION)
 
+# RSYNC_VERSION allows specifying a particular version of rsync to install (e.g., "3.2.7-r0")
+# Leave empty to install the latest available version
+RSYNC_VERSION ?=
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -236,7 +240,9 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 
 .PHONY: docker-build-mover
 docker-build-mover: ## Build docker image with the mover.
-	$(CONTAINER_TOOL) build -t ${MOVER_IMG} -f build/Containerfile.mover .
+	$(CONTAINER_TOOL) build -t ${MOVER_IMG} \
+		$(if $(RSYNC_VERSION),--build-arg RSYNC_VERSION=$(RSYNC_VERSION),) \
+		-f build/Containerfile.mover .
 
 .PHONY: docker-push-mover
 docker-push-mover: ## Push docker image with the mover.
@@ -248,7 +254,9 @@ docker-buildx-mover: ## Build and push docker image for the mover for cross-plat
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' build/Containerfile.mover > build/Containerfile.mover.cross
 	- $(CONTAINER_TOOL) buildx create --name ceph-volsync-plugin-mover-builder
 	$(CONTAINER_TOOL) buildx use ceph-volsync-plugin-mover-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${MOVER_IMG} -f build/Containerfile.mover.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${MOVER_IMG} \
+		$(if $(RSYNC_VERSION),--build-arg RSYNC_VERSION=$(RSYNC_VERSION),) \
+		-f build/Containerfile.mover.cross .
 	- $(CONTAINER_TOOL) buildx rm ceph-volsync-plugin-mover-builder
 	rm build/Containerfile.mover.cross
 

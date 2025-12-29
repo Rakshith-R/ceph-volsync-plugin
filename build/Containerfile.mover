@@ -2,6 +2,8 @@
 FROM golang:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
+# Allow specifying rsync version (e.g., "3.2.7-r0" or leave empty for latest)
+ARG RSYNC_VERSION=""
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -24,7 +26,11 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o mo
 
 # Use Alpine Linux as minimal base image to package the mover binary and install stunnel
 FROM alpine:latest
-RUN apk add --no-cache stunnel bash
+
+# Install dependencies: stunnel, bash, and rsync
+# If RSYNC_VERSION is set, install that specific version; otherwise install latest
+RUN apk add --no-cache stunnel bash rsync${RSYNC_VERSION:+=$RSYNC_VERSION}
+
 WORKDIR /
 COPY --from=builder /workspace/mover .
 COPY build/stunnel.sh /stunnel.sh
