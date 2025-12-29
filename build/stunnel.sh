@@ -2,6 +2,7 @@
 
 # stunnel.sh - Setup stunnel and invoke mover with proper arguments
 # This script configures stunnel based on worker type and invokes the mover
+# Supports dual tunnels: gRPC (always enabled) and rsync (optional)
 
 set -e
 
@@ -10,6 +11,11 @@ WORKER_TYPE="${WORKER_TYPE:-}"
 DESTINATION_ADDRESS="${DESTINATION_ADDRESS:-}"
 DESTINATION_PORT="${DESTINATION_PORT:-8000}"
 SERVER_PORT="${SERVER_PORT:-8080}"
+
+# Optional rsync tunnel configuration
+ENABLE_RSYNC_TUNNEL="${ENABLE_RSYNC_TUNNEL:-false}"
+RSYNC_PORT="${RSYNC_PORT:-8873}"
+RSYNC_DAEMON_PORT="${RSYNC_DAEMON_PORT:-8873}"
 
 # Validate required parameters
 if [[ -z "$WORKER_TYPE" ]]; then
@@ -29,7 +35,21 @@ if [[ ! -f "$PSK_FILE" ]]; then
     exit 1
 fi
 
-echo "Starting stunnel setup for worker type: $WORKER_TYPE"
+# Normalize ENABLE_RSYNC_TUNNEL to true/false
+case "${ENABLE_RSYNC_TUNNEL,,}" in
+    true|1|yes|on)
+        ENABLE_RSYNC_TUNNEL="true"
+        ;;
+    *)
+        ENABLE_RSYNC_TUNNEL="false"
+        ;;
+esac
+
+if [[ "$ENABLE_RSYNC_TUNNEL" == "true" ]]; then
+    echo "Starting dual stunnel setup (gRPC + rsync) for worker type: $WORKER_TYPE"
+else
+    echo "Starting stunnel setup (gRPC only) for worker type: $WORKER_TYPE"
+fi
 
 # Create stunnel configuration directory
 mkdir -p /tmp/stunnel
@@ -52,14 +72,27 @@ EOF
 if [[ "$WORKER_TYPE" == "destination" ]]; then
     echo "Configuring stunnel as server (destination)"
     
-    # Destination acts as stunnel server
+    # Destination acts as stunnel server for gRPC
     cat >> "$STUNNEL_CONF" << EOF
-[rsync-tls]
+; gRPC tunnel - for mover communication
+[grpc-tls]
 accept = $DESTINATION_PORT
 connect = 127.0.0.1:$SERVER_PORT
 EOF
 
-    echo "Starting stunnel server on port $DESTINATION_PORT, forwarding to $SERVER_PORT"
+    echo "  - gRPC tunnel on port $DESTINATION_PORT → 127.0.0.1:$SERVER_PORT"
+    
+    # Add rsync tunnel if enabled
+    if [[ "$ENABLE_RSYNC_TUNNEL" == "true" ]]; then
+        cat >> "$STUNNEL_CONF" << EOF
+
+; Rsync tunnel - for rsync daemon communication
+[rsync-tls]
+accept = $RSYNC_PORT
+connect = 127.0.0.1:$RSYNC_DAEMON_PORT
+EOF
+        echo "  - Rsync tunnel on port $RSYNC_PORT → 127.0.0.1:$RSYNC_DAEMON_PORT"
+    fi
     
 elif [[ "$WORKER_TYPE" == "source" ]]; then
     echo "Configuring stunnel as client (source)"
@@ -69,15 +102,29 @@ elif [[ "$WORKER_TYPE" == "source" ]]; then
         exit 1
     fi
     
-    # Source acts as stunnel client
+    # Source acts as stunnel client for gRPC
     cat >> "$STUNNEL_CONF" << EOF
-[rsync-tls]
+; gRPC tunnel - for mover communication
+[grpc-tls]
 client = yes
 accept = 127.0.0.1:8001
 connect = $DESTINATION_ADDRESS:$DESTINATION_PORT
 EOF
 
-    echo "Starting stunnel client connecting to $DESTINATION_ADDRESS:$DESTINATION_PORT"
+    echo "  - gRPC tunnel: 127.0.0.1:8001 → $DESTINATION_ADDRESS:$DESTINATION_PORT"
+    
+    # Add rsync tunnel if enabled
+    if [[ "$ENABLE_RSYNC_TUNNEL" == "true" ]]; then
+        cat >> "$STUNNEL_CONF" << EOF
+
+; Rsync tunnel - for rsync daemon communication
+[rsync-tls]
+client = yes
+accept = 127.0.0.1:8873
+connect = $DESTINATION_ADDRESS:$RSYNC_PORT
+EOF
+        echo "  - Rsync tunnel: 127.0.0.1:8873 → $DESTINATION_ADDRESS:$RSYNC_PORT"
+    fi
 fi
 
 # Start stunnel in background
@@ -106,6 +153,48 @@ fi
 
 echo "stunnel started successfully with PID $STUNNEL_PID_VAL"
 
+# Start rsync daemon on destination if rsync tunnel is enabled
+RSYNC_PID_VAL=""
+if [[ "$WORKER_TYPE" == "destination" && "$ENABLE_RSYNC_TUNNEL" == "true" ]]; then
+    echo "Starting rsync daemon on port $RSYNC_DAEMON_PORT"
+    
+    # Create rsync configuration
+    RSYNCD_CONF="/tmp/rsyncd.conf"
+    cat > "$RSYNCD_CONF" << EOF
+# Rsync daemon configuration
+uid = root
+gid = root
+use chroot = no
+max connections = 4
+pid file = /tmp/rsyncd.pid
+log file = /tmp/rsyncd.log
+
+[data]
+    path = /data
+    comment = Data volume
+    read only = false
+    list = yes
+    auth users = *
+    secrets file = /keys/psk.txt
+EOF
+
+    # Start rsync daemon
+    rsync --daemon --config="$RSYNCD_CONF" --port="$RSYNC_DAEMON_PORT" --no-detach &
+    RSYNC_PID_VAL=$!
+    
+    # Wait a moment for rsync daemon to start
+    sleep 2
+    
+    # Check if rsync daemon started successfully
+    if ! kill -0 $RSYNC_PID_VAL 2>/dev/null; then
+        echo "Error: rsync daemon failed to start"
+        cat /tmp/rsyncd.log 2>/dev/null || echo "No rsync daemon log available"
+        exit 1
+    fi
+    
+    echo "rsync daemon started successfully with PID $RSYNC_PID_VAL"
+fi
+
 # Prepare mover arguments
 MOVER_ARGS="--worker-type=$WORKER_TYPE --server-port=$SERVER_PORT"
 
@@ -119,6 +208,15 @@ echo "Starting mover with arguments: $MOVER_ARGS"
 # Function to cleanup on exit
 cleanup() {
     echo "Cleaning up..."
+    
+    # Stop rsync daemon if it's running
+    if [[ -n "$RSYNC_PID_VAL" ]] && kill -0 $RSYNC_PID_VAL 2>/dev/null; then
+        echo "Stopping rsync daemon (PID: $RSYNC_PID_VAL)"
+        kill $RSYNC_PID_VAL
+        wait $RSYNC_PID_VAL 2>/dev/null || true
+    fi
+    
+    # Stop stunnel
     if kill -0 $STUNNEL_PID_VAL 2>/dev/null; then
         echo "Stopping stunnel (PID: $STUNNEL_PID_VAL)"
         kill $STUNNEL_PID_VAL

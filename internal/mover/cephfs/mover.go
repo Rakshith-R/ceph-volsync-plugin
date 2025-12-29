@@ -413,6 +413,20 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 			Value: serverPort,
 		})
 
+		// Enable rsync tunnel by default for CephFS mover
+		containerEnv = append(containerEnv, corev1.EnvVar{
+			Name:  "ENABLE_RSYNC_TUNNEL",
+			Value: "true",
+		})
+		containerEnv = append(containerEnv, corev1.EnvVar{
+			Name:  "RSYNC_PORT",
+			Value: "8873",
+		})
+		containerEnv = append(containerEnv, corev1.EnvVar{
+			Name:  "RSYNC_DAEMON_PORT",
+			Value: "8873",
+		})
+
 		// containerCmd := []string{"/bin/bash", "-c", "/mover-rsync-tls/server.sh"} // cmd for replicationDestination job
 		if m.isSource {
 			// Set dest address/port if necessary
