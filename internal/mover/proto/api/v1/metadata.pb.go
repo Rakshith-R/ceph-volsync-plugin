@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: mover/version/v1/metadata.proto
+// source: api/v1/metadata.proto
 
-package versionv1
+package apiv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -30,7 +30,7 @@ type GetMetadataRequest struct {
 
 func (x *GetMetadataRequest) Reset() {
 	*x = GetMetadataRequest{}
-	mi := &file_mover_version_v1_metadata_proto_msgTypes[0]
+	mi := &file_api_v1_metadata_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -42,7 +42,7 @@ func (x *GetMetadataRequest) String() string {
 func (*GetMetadataRequest) ProtoMessage() {}
 
 func (x *GetMetadataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mover_version_v1_metadata_proto_msgTypes[0]
+	mi := &file_api_v1_metadata_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -55,7 +55,7 @@ func (x *GetMetadataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMetadataRequest.ProtoReflect.Descriptor instead.
 func (*GetMetadataRequest) Descriptor() ([]byte, []int) {
-	return file_mover_version_v1_metadata_proto_rawDescGZIP(), []int{0}
+	return file_api_v1_metadata_proto_rawDescGZIP(), []int{0}
 }
 
 // UpdateMetadataRequest updates metadata.
@@ -68,7 +68,7 @@ type UpdateMetadataRequest struct {
 
 func (x *UpdateMetadataRequest) Reset() {
 	*x = UpdateMetadataRequest{}
-	mi := &file_mover_version_v1_metadata_proto_msgTypes[1]
+	mi := &file_api_v1_metadata_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -80,7 +80,7 @@ func (x *UpdateMetadataRequest) String() string {
 func (*UpdateMetadataRequest) ProtoMessage() {}
 
 func (x *UpdateMetadataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mover_version_v1_metadata_proto_msgTypes[1]
+	mi := &file_api_v1_metadata_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -93,7 +93,7 @@ func (x *UpdateMetadataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateMetadataRequest.ProtoReflect.Descriptor instead.
 func (*UpdateMetadataRequest) Descriptor() ([]byte, []int) {
-	return file_mover_version_v1_metadata_proto_rawDescGZIP(), []int{1}
+	return file_api_v1_metadata_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *UpdateMetadataRequest) GetValues() map[string]string {
@@ -113,7 +113,7 @@ type Metadata struct {
 
 func (x *Metadata) Reset() {
 	*x = Metadata{}
-	mi := &file_mover_version_v1_metadata_proto_msgTypes[2]
+	mi := &file_api_v1_metadata_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -125,7 +125,7 @@ func (x *Metadata) String() string {
 func (*Metadata) ProtoMessage() {}
 
 func (x *Metadata) ProtoReflect() protoreflect.Message {
-	mi := &file_mover_version_v1_metadata_proto_msgTypes[2]
+	mi := &file_api_v1_metadata_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -138,7 +138,7 @@ func (x *Metadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metadata.ProtoReflect.Descriptor instead.
 func (*Metadata) Descriptor() ([]byte, []int) {
-	return file_mover_version_v1_metadata_proto_rawDescGZIP(), []int{2}
+	return file_api_v1_metadata_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Metadata) GetValues() map[string]string {
@@ -148,54 +148,55 @@ func (x *Metadata) GetValues() map[string]string {
 	return nil
 }
 
-var File_mover_version_v1_metadata_proto protoreflect.FileDescriptor
+var File_api_v1_metadata_proto protoreflect.FileDescriptor
 
-const file_mover_version_v1_metadata_proto_rawDesc = "" +
+const file_api_v1_metadata_proto_rawDesc = "" +
 	"\n" +
-	"\x1fmover/version/v1/metadata.proto\x12\x10mover.version.v1\"\x14\n" +
-	"\x12GetMetadataRequest\"\x9f\x01\n" +
-	"\x15UpdateMetadataRequest\x12K\n" +
-	"\x06values\x18\x01 \x03(\v23.mover.version.v1.UpdateMetadataRequest.ValuesEntryR\x06values\x1a9\n" +
+	"\x15api/v1/metadata.proto\x12\x06api.v1\"\x14\n" +
+	"\x12GetMetadataRequest\"\x95\x01\n" +
+	"\x15UpdateMetadataRequest\x12A\n" +
+	"\x06values\x18\x01 \x03(\v2).api.v1.UpdateMetadataRequest.ValuesEntryR\x06values\x1a9\n" +
 	"\vValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x85\x01\n" +
-	"\bMetadata\x12>\n" +
-	"\x06values\x18\x01 \x03(\v2&.mover.version.v1.Metadata.ValuesEntryR\x06values\x1a9\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"{\n" +
+	"\bMetadata\x124\n" +
+	"\x06values\x18\x01 \x03(\v2\x1c.api.v1.Metadata.ValuesEntryR\x06values\x1a9\n" +
 	"\vValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xa9\x01\n" +
-	"\x0fMetadataService\x12G\n" +
-	"\x03Get\x12$.mover.version.v1.GetMetadataRequest\x1a\x1a.mover.version.v1.Metadata\x12M\n" +
-	"\x06Update\x12'.mover.version.v1.UpdateMetadataRequest\x1a\x1a.mover.version.v1.MetadataB\xca\x01\n" +
-	"\x14com.mover.version.v1B\rMetadataProtoP\x01ZAgithub.com/RamenDR/ceph-volsync-plugin/mover/version/v1;versionv1\xa2\x02\x03MVX\xaa\x02\x10Mover.Version.V1\xca\x02\x10Mover\\Version\\V1\xe2\x02\x1cMover\\Version\\V1\\GPBMetadata\xea\x02\x12Mover::Version::V1b\x06proto3"
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\x81\x01\n" +
+	"\x0fMetadataService\x123\n" +
+	"\x03Get\x12\x1a.api.v1.GetMetadataRequest\x1a\x10.api.v1.Metadata\x129\n" +
+	"\x06Update\x12\x1d.api.v1.UpdateMetadataRequest\x1a\x10.api.v1.MetadataB\x89\x01\n" +
+	"\n" +
+	"com.api.v1B\rMetadataProtoP\x01Z3github.com/RamenDR/ceph-volsync-plugin/api/v1;apiv1\xa2\x02\x03AXX\xaa\x02\x06Api.V1\xca\x02\x06Api\\V1\xe2\x02\x12Api\\V1\\GPBMetadata\xea\x02\aApi::V1b\x06proto3"
 
 var (
-	file_mover_version_v1_metadata_proto_rawDescOnce sync.Once
-	file_mover_version_v1_metadata_proto_rawDescData []byte
+	file_api_v1_metadata_proto_rawDescOnce sync.Once
+	file_api_v1_metadata_proto_rawDescData []byte
 )
 
-func file_mover_version_v1_metadata_proto_rawDescGZIP() []byte {
-	file_mover_version_v1_metadata_proto_rawDescOnce.Do(func() {
-		file_mover_version_v1_metadata_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_mover_version_v1_metadata_proto_rawDesc), len(file_mover_version_v1_metadata_proto_rawDesc)))
+func file_api_v1_metadata_proto_rawDescGZIP() []byte {
+	file_api_v1_metadata_proto_rawDescOnce.Do(func() {
+		file_api_v1_metadata_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_api_v1_metadata_proto_rawDesc), len(file_api_v1_metadata_proto_rawDesc)))
 	})
-	return file_mover_version_v1_metadata_proto_rawDescData
+	return file_api_v1_metadata_proto_rawDescData
 }
 
-var file_mover_version_v1_metadata_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_mover_version_v1_metadata_proto_goTypes = []any{
-	(*GetMetadataRequest)(nil),    // 0: mover.version.v1.GetMetadataRequest
-	(*UpdateMetadataRequest)(nil), // 1: mover.version.v1.UpdateMetadataRequest
-	(*Metadata)(nil),              // 2: mover.version.v1.Metadata
-	nil,                           // 3: mover.version.v1.UpdateMetadataRequest.ValuesEntry
-	nil,                           // 4: mover.version.v1.Metadata.ValuesEntry
+var file_api_v1_metadata_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_api_v1_metadata_proto_goTypes = []any{
+	(*GetMetadataRequest)(nil),    // 0: api.v1.GetMetadataRequest
+	(*UpdateMetadataRequest)(nil), // 1: api.v1.UpdateMetadataRequest
+	(*Metadata)(nil),              // 2: api.v1.Metadata
+	nil,                           // 3: api.v1.UpdateMetadataRequest.ValuesEntry
+	nil,                           // 4: api.v1.Metadata.ValuesEntry
 }
-var file_mover_version_v1_metadata_proto_depIdxs = []int32{
-	3, // 0: mover.version.v1.UpdateMetadataRequest.values:type_name -> mover.version.v1.UpdateMetadataRequest.ValuesEntry
-	4, // 1: mover.version.v1.Metadata.values:type_name -> mover.version.v1.Metadata.ValuesEntry
-	0, // 2: mover.version.v1.MetadataService.Get:input_type -> mover.version.v1.GetMetadataRequest
-	1, // 3: mover.version.v1.MetadataService.Update:input_type -> mover.version.v1.UpdateMetadataRequest
-	2, // 4: mover.version.v1.MetadataService.Get:output_type -> mover.version.v1.Metadata
-	2, // 5: mover.version.v1.MetadataService.Update:output_type -> mover.version.v1.Metadata
+var file_api_v1_metadata_proto_depIdxs = []int32{
+	3, // 0: api.v1.UpdateMetadataRequest.values:type_name -> api.v1.UpdateMetadataRequest.ValuesEntry
+	4, // 1: api.v1.Metadata.values:type_name -> api.v1.Metadata.ValuesEntry
+	0, // 2: api.v1.MetadataService.Get:input_type -> api.v1.GetMetadataRequest
+	1, // 3: api.v1.MetadataService.Update:input_type -> api.v1.UpdateMetadataRequest
+	2, // 4: api.v1.MetadataService.Get:output_type -> api.v1.Metadata
+	2, // 5: api.v1.MetadataService.Update:output_type -> api.v1.Metadata
 	4, // [4:6] is the sub-list for method output_type
 	2, // [2:4] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -203,26 +204,26 @@ var file_mover_version_v1_metadata_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_mover_version_v1_metadata_proto_init() }
-func file_mover_version_v1_metadata_proto_init() {
-	if File_mover_version_v1_metadata_proto != nil {
+func init() { file_api_v1_metadata_proto_init() }
+func file_api_v1_metadata_proto_init() {
+	if File_api_v1_metadata_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_mover_version_v1_metadata_proto_rawDesc), len(file_mover_version_v1_metadata_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_v1_metadata_proto_rawDesc), len(file_api_v1_metadata_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_mover_version_v1_metadata_proto_goTypes,
-		DependencyIndexes: file_mover_version_v1_metadata_proto_depIdxs,
-		MessageInfos:      file_mover_version_v1_metadata_proto_msgTypes,
+		GoTypes:           file_api_v1_metadata_proto_goTypes,
+		DependencyIndexes: file_api_v1_metadata_proto_depIdxs,
+		MessageInfos:      file_api_v1_metadata_proto_msgTypes,
 	}.Build()
-	File_mover_version_v1_metadata_proto = out.File
-	file_mover_version_v1_metadata_proto_goTypes = nil
-	file_mover_version_v1_metadata_proto_depIdxs = nil
+	File_api_v1_metadata_proto = out.File
+	file_api_v1_metadata_proto_goTypes = nil
+	file_api_v1_metadata_proto_depIdxs = nil
 }

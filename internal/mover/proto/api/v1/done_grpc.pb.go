@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             (unknown)
-// source: mover/version/v1/done.proto
+// source: api/v1/done.proto
 
-package versionv1
+package apiv1
 
 import (
 	context "context"
@@ -19,7 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DoneService_Done_FullMethodName = "/mover.version.v1.DoneService/Done"
+	DoneService_Done_FullMethodName = "/api.v1.DoneService/Done"
 )
 
 // DoneServiceClient is the client API for DoneService service.
@@ -116,7 +116,7 @@ func _DoneService_Done_Handler(srv interface{}, ctx context.Context, dec func(in
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var DoneService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "mover.version.v1.DoneService",
+	ServiceName: "api.v1.DoneService",
 	HandlerType: (*DoneServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -125,5 +125,5 @@ var DoneService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "mover/version/v1/done.proto",
+	Metadata: "api/v1/done.proto",
 }

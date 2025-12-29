@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package mover.version.v1;
+package api.v1;
 
-option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto";
+option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1";
 
 // MetadataService provides checkpoint and state persistence APIs.
 service MetadataService {
