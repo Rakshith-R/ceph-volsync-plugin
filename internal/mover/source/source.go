@@ -63,19 +63,32 @@ func (w *Worker) Run(ctx context.Context) error {
 		defer conn.Close()
 
 		// Create version service client
-		client := versionv1.NewVersionServiceClient(conn)
+		versionClient := versionv1.NewVersionServiceClient(conn)
 
 		// Call GetVersion with timeout
 		callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 
-		resp, err := client.GetVersion(callCtx, &versionv1.GetVersionRequest{})
+		resp, err := versionClient.GetVersion(callCtx, &versionv1.GetVersionRequest{})
 		if err != nil {
 			w.logger.Error(err, "Failed to get version from destination")
 			return fmt.Errorf("failed to get version from destination: %w", err)
-		} else {
-			w.logger.Info("Retrieved version from destination", "version", resp.GetVersion())
 		}
+		w.logger.Info("Retrieved version from destination", "version", resp.GetVersion())
+
+		// Create done service client
+		doneClient := versionv1.NewDoneServiceClient(conn)
+
+		// Call Done to signal completion and request graceful shutdown
+		doneCtx, doneCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer doneCancel()
+
+		_, err = doneClient.Done(doneCtx, &versionv1.DoneRequest{})
+		if err != nil {
+			w.logger.Error(err, "Failed to send Done signal to destination")
+			return fmt.Errorf("failed to send Done signal to destination: %w", err)
+		}
+		w.logger.Info("Successfully sent Done signal to destination")
 
 		return nil
 

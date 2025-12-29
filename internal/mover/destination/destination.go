@@ -35,8 +35,7 @@ type Config struct {
 // VersionServer implements the VersionService gRPC server
 type VersionServer struct {
 	versionv1.UnimplementedVersionServiceServer
-	version      string
-	shutdownChan chan struct{}
+	version string
 }
 
 // GetVersion returns version information
@@ -44,7 +43,17 @@ func (s *VersionServer) GetVersion(ctx context.Context, req *versionv1.GetVersio
 	response := &versionv1.GetVersionResponse{
 		Version: s.version,
 	}
+	return response, nil
+}
 
+// DoneServer implements the DoneService gRPC server
+type DoneServer struct {
+	versionv1.UnimplementedDoneServiceServer
+	shutdownChan chan struct{}
+}
+
+// Done signals completion and triggers graceful shutdown
+func (s *DoneServer) Done(ctx context.Context, req *versionv1.DoneRequest) (*versionv1.DoneResponse, error) {
 	// Signal shutdown after responding to the request
 	go func() {
 		select {
@@ -54,7 +63,7 @@ func (s *VersionServer) GetVersion(ctx context.Context, req *versionv1.GetVersio
 		}
 	}()
 
-	return response, nil
+	return &versionv1.DoneResponse{}, nil
 }
 
 // Worker represents a destination worker instance
@@ -83,12 +92,17 @@ func (w *Worker) Run(ctx context.Context) error {
 
 	// Create version service
 	versionServer := &VersionServer{
-		version:      "v1.0.0", // TODO: Get from build info or config
+		version: "v1.0.0", // TODO: Get from build info or config
+	}
+
+	// Create done service
+	doneServer := &DoneServer{
 		shutdownChan: shutdownChan,
 	}
 
-	// Register version service
+	// Register services
 	versionv1.RegisterVersionServiceServer(server, versionServer)
+	versionv1.RegisterDoneServiceServer(server, doneServer)
 
 	// Setup listener
 	lis, err := net.Listen("tcp", ":"+w.config.ServerPort)
@@ -115,7 +129,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	case err := <-serverErr:
 		return err
 	case <-shutdownChan:
-		w.logger.Info("Destination worker shutting down after GetVersion request")
+		w.logger.Info("Destination worker shutting down after Done request")
 		server.GracefulStop()
 		return nil
 	}

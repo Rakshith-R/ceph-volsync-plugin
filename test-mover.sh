@@ -151,13 +151,30 @@ fi
 
 if ${CONTAINER_CMD} logs mover-source 2>&1 | grep -q "Retrieved version from destination"; then
     echo "   ✓ Source: Successfully connected to destination and retrieved version"
-    echo ""
-    echo "=== TEST PASSED ==="
 else
     echo "   ✗ Source: Did not retrieve version from destination"
     echo ""
     echo "=== TEST FAILED ==="
     exit 1
+fi
+
+if ${CONTAINER_CMD} logs mover-source 2>&1 | grep -q "Successfully sent Done signal to destination"; then
+    echo "   ✓ Source: Successfully sent Done signal to destination"
+else
+    echo "   ✗ Source: Did not send Done signal to destination"
+    echo ""
+    echo "=== TEST FAILED ==="
+    exit 1
+fi
+
+if ${CONTAINER_CMD} logs mover-destination 2>&1 | grep -q "Destination worker shutting down after Done request"; then
+    echo "   ✓ Destination: Received Done signal and shutting down gracefully"
+    echo ""
+    echo "=== TEST PASSED ==="
+else
+    echo "   ℹ Destination: Done signal status unclear"
+    echo ""
+    echo "=== TEST COMPLETED ==="
 fi
 
 echo ""
