@@ -123,12 +123,38 @@ else
 fi
 
 # Check if source connected to destination
-if ${CONTAINER_CMD} logs mover-source 2>&1 | grep -q "Retrieved version from destination\|Connecting to destination"; then
-    echo "   ✓ Source: Successfully connected to destination"
+if ${CONTAINER_CMD} logs mover-source 2>&1 | grep -q "Retrieved version from destination"; then
+    echo "   ✓ Source: Successfully retrieved version from destination"
+else
+    echo "   ✗ Source: Failed to retrieve version from destination"
+    exit 1
+fi
+
+# Check if source sent Done signal
+if ${CONTAINER_CMD} logs mover-source 2>&1 | grep -q "Successfully sent Done signal to destination"; then
+    echo "   ✓ Source: Successfully sent Done signal to destination"
+else
+    echo "   ✗ Source: Failed to send Done signal to destination"
+    exit 1
+fi
+
+# Wait a moment for destination to process Done signal
+sleep 2
+
+# Check destination final logs
+echo ""
+echo "   Destination logs (last 20 lines):"
+echo "   ---"
+${CONTAINER_CMD} logs mover-destination 2>&1 | tail -20
+echo "   ---"
+
+# Check if destination received Done signal and is shutting down
+if ${CONTAINER_CMD} logs mover-destination 2>&1 | grep -q "Destination worker shutting down after Done request"; then
+    echo "   ✓ Destination: Received Done signal and shutting down gracefully"
     echo ""
     echo "=== TEST PASSED ==="
 else
-    echo "   ℹ Source: Mover started, checking connection status..."
+    echo "   ℹ Destination: Done signal status unclear"
     echo ""
     echo "=== TEST COMPLETED ==="
 fi
