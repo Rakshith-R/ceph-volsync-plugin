@@ -22,11 +22,12 @@ COPY internal/ internal/
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o mover cmd/mover/main.go
 
-# Use distroless as minimal base image to package the mover binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+# Use Alpine Linux as minimal base image to package the mover binary and install stunnel
+FROM alpine:latest
+RUN apk add --no-cache stunnel bash
 WORKDIR /
 COPY --from=builder /workspace/mover .
-USER 65532:65532
+COPY build/stunnel.sh /stunnel.sh
+RUN chmod +x /stunnel.sh
 
-ENTRYPOINT ["/mover"]
+ENTRYPOINT ["/stunnel.sh"]
