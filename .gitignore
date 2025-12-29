@@ -33,6 +33,8 @@ bundle
 # env file
 .env
 
+readme/
+
 # Editor/IDE
 # .idea/
 # .vscode/

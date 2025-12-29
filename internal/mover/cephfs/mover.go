@@ -392,6 +392,27 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		blockVolume := utils.PvcIsBlockMode(dataPVC)
 
 		containerEnv := []corev1.EnvVar{}
+
+		// Add WORKER_TYPE environment variable for stunnel.sh
+		workerType := "destination"
+		if m.isSource {
+			workerType = "source"
+		}
+		containerEnv = append(containerEnv, corev1.EnvVar{
+			Name:  "WORKER_TYPE",
+			Value: workerType,
+		})
+
+		// Add SERVER_PORT for stunnel.sh configuration
+		serverPort := "8080"
+		if m.port != nil {
+			serverPort = strconv.Itoa(int(*m.port))
+		}
+		containerEnv = append(containerEnv, corev1.EnvVar{
+			Name:  "SERVER_PORT",
+			Value: serverPort,
+		})
+
 		// containerCmd := []string{"/bin/bash", "-c", "/mover-rsync-tls/server.sh"} // cmd for replicationDestination job
 		if m.isSource {
 			// Set dest address/port if necessary
@@ -408,7 +429,6 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 			// Set read-only for volume in repl source job spec if the PVC only supports read-only
 			readOnlyVolume = utils.PvcIsReadOnly(dataPVC)
 		}
-		if 
 		podSpec := &job.Spec.Template.Spec
 		podSpec.Containers = []corev1.Container{{
 			Name: "rsync-tls",
@@ -422,6 +442,7 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 				},
 				Privileged:             ptr.To(false),
 				ReadOnlyRootFilesystem: ptr.To(true),
+				RunAsUser:              ptr.To[int64](0), // Run as root for stunnel
 			},
 		}}
 		volumeMounts := []corev1.VolumeMount{}

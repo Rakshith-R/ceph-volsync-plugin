@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
+	cephPluginMover "github.com/RamenDR/ceph-volsync-plugin/internal/mover"
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"github.com/backube/volsync/controllers/mover"
 	sm "github.com/backube/volsync/controllers/statemachine"
@@ -162,7 +163,7 @@ func rdHasMover(rd *volsyncv1alpha1.ReplicationDestination) bool {
 
 func newRDMachine(rd *volsyncv1alpha1.ReplicationDestination, c client.Client,
 	l logr.Logger, er events.EventRecorder, privilegedMoverOk bool) (*rdMachine, error) {
-	dataMover, err := mover.GetDestinationMoverFromCatalog(c, l, er, rd, privilegedMoverOk)
+	dataMover, err := cephPluginMover.GetDestinationMoverFromCatalog(c, l, er, rd, privilegedMoverOk)
 	if err != nil {
 		return nil, err
 	}

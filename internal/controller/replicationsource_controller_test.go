@@ -27,12 +27,12 @@ import (
 func TestRsHasMover(t *testing.T) {
 	testCases := []struct {
 		name     string
-		rs       volsyncv1alpha1.ReplicationSource
+		rs       *volsyncv1alpha1.ReplicationSource
 		expected bool
 	}{
 		{
 			name: "No mover",
-			rs: volsyncv1alpha1.ReplicationSource{
+			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-rs",
 					Namespace: "test-ns",
@@ -43,7 +43,7 @@ func TestRsHasMover(t *testing.T) {
 		},
 		{
 			name: "Rclone mover",
-			rs: volsyncv1alpha1.ReplicationSource{
+			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-rs",
 					Namespace: "test-ns",
@@ -56,7 +56,7 @@ func TestRsHasMover(t *testing.T) {
 		},
 		{
 			name: "Restic mover",
-			rs: volsyncv1alpha1.ReplicationSource{
+			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-rs",
 					Namespace: "test-ns",
@@ -69,7 +69,7 @@ func TestRsHasMover(t *testing.T) {
 		},
 		{
 			name: "Rsync mover",
-			rs: volsyncv1alpha1.ReplicationSource{
+			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-rs",
 					Namespace: "test-ns",
@@ -82,7 +82,7 @@ func TestRsHasMover(t *testing.T) {
 		},
 		{
 			name: "RsyncTLS mover",
-			rs: volsyncv1alpha1.ReplicationSource{
+			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-rs",
 					Namespace: "test-ns",
