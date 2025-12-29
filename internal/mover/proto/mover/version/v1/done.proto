@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package mover.version.v1;
+
+option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto";
+
+
+// DoneService signals completion and requests graceful shutdown.
+service DoneService {
+  // Done indicates the sender has completed all work.
+  // On success, the server should exit gracefully with exit code 0.
+  rpc Done(DoneRequest) returns (DoneResponse);
+}
+
+// --------------------
+// Requests
+// --------------------
+
+// Explicit empty request for forward compatibility.
+message DoneRequest {}
+
+// --------------------
+// Responses
+// --------------------
+
+// DoneResponse is empty on success.
+// Errors are reported via gRPC status codes.
+message DoneResponse {}

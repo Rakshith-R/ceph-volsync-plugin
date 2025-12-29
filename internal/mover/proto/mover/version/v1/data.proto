@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package mover.version.v1;
+
+option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto";
+
+// DataService provides block-level write APIs.
+service DataService {
+  // Write writes one or more changed blocks.
+  rpc Write(WriteRequest) returns (WriteResponse);
+}
+
+// --------------------
+// Core Types
+// --------------------
+
+// ChangedBlock represents a modified data range.
+message ChangedBlock {
+  // Byte offset where the write should begin.
+  uint64 offset = 1;
+
+  // Length of the write in bytes.
+  uint64 length = 2;
+
+  // Data payload. May be empty if is_zero is true.
+  bytes data = 3;
+
+  // Indicates this write represents a zeroed range.
+  bool is_zero = 4;
+}
+
+// --------------------
+// Requests
+// --------------------
+
+// WriteRequest represents a batched write operation.
+message WriteRequest {
+  // Target path or object identifier.
+  string path = 1;
+
+  // List of changed blocks to be written.
+  repeated ChangedBlock blocks = 2;
+}
+
+// --------------------
+// Responses
+// --------------------
+
+// WriteResponse is empty on success.
+// Errors are reported via gRPC status codes.
+message WriteResponse {}
