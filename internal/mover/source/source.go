@@ -25,7 +25,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/mover/version/v1"
+	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
+	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/version/v1"
 )
 
 // Config holds configuration for the source worker
@@ -77,13 +78,13 @@ func (w *Worker) Run(ctx context.Context) error {
 		w.logger.Info("Retrieved version from destination", "version", resp.GetVersion())
 
 		// Create done service client
-		doneClient := versionv1.NewDoneServiceClient(conn)
+		doneClient := apiv1.NewDoneServiceClient(conn)
 
 		// Call Done to signal completion and request graceful shutdown
 		doneCtx, doneCancel := context.WithTimeout(ctx, 10*time.Second)
 		defer doneCancel()
 
-		_, err = doneClient.Done(doneCtx, &versionv1.DoneRequest{})
+		_, err = doneClient.Done(doneCtx, &apiv1.DoneRequest{})
 		if err != nil {
 			w.logger.Error(err, "Failed to send Done signal to destination")
 			return fmt.Errorf("failed to send Done signal to destination: %w", err)

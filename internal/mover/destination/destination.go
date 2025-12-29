@@ -24,7 +24,8 @@ import (
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
 
-	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/mover/version/v1"
+	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
+	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/version/v1"
 )
 
 // Config holds configuration for the destination worker
@@ -48,12 +49,12 @@ func (s *VersionServer) GetVersion(ctx context.Context, req *versionv1.GetVersio
 
 // DoneServer implements the DoneService gRPC server
 type DoneServer struct {
-	versionv1.UnimplementedDoneServiceServer
+	apiv1.UnimplementedDoneServiceServer
 	shutdownChan chan struct{}
 }
 
 // Done signals completion and triggers graceful shutdown
-func (s *DoneServer) Done(ctx context.Context, req *versionv1.DoneRequest) (*versionv1.DoneResponse, error) {
+func (s *DoneServer) Done(ctx context.Context, req *apiv1.DoneRequest) (*apiv1.DoneResponse, error) {
 	// Signal shutdown after responding to the request
 	go func() {
 		select {
@@ -63,7 +64,7 @@ func (s *DoneServer) Done(ctx context.Context, req *versionv1.DoneRequest) (*ver
 		}
 	}()
 
-	return &versionv1.DoneResponse{}, nil
+	return &apiv1.DoneResponse{}, nil
 }
 
 // Worker represents a destination worker instance
@@ -102,7 +103,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 	// Register services
 	versionv1.RegisterVersionServiceServer(server, versionServer)
-	versionv1.RegisterDoneServiceServer(server, doneServer)
+	apiv1.RegisterDoneServiceServer(server, doneServer)
 
 	// Setup listener
 	lis, err := net.Listen("tcp", ":"+w.config.ServerPort)
