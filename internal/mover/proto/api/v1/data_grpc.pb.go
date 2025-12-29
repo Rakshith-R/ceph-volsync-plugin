@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             (unknown)
-// source: mover/version/v1/data.proto
+// source: api/v1/data.proto
 
-package versionv1
+package apiv1
 
 import (
 	context "context"
@@ -19,7 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DataService_Write_FullMethodName = "/mover.version.v1.DataService/Write"
+	DataService_Write_FullMethodName = "/api.v1.DataService/Write"
 )
 
 // DataServiceClient is the client API for DataService service.
@@ -114,7 +114,7 @@ func _DataService_Write_Handler(srv interface{}, ctx context.Context, dec func(i
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var DataService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "mover.version.v1.DataService",
+	ServiceName: "api.v1.DataService",
 	HandlerType: (*DataServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -123,5 +123,5 @@ var DataService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "mover/version/v1/data.proto",
+	Metadata: "api/v1/data.proto",
 }

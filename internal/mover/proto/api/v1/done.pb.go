@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: mover/version/v1/done.proto
+// source: api/v1/done.proto
 
-package versionv1
+package apiv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -30,7 +30,7 @@ type DoneRequest struct {
 
 func (x *DoneRequest) Reset() {
 	*x = DoneRequest{}
-	mi := &file_mover_version_v1_done_proto_msgTypes[0]
+	mi := &file_api_v1_done_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -42,7 +42,7 @@ func (x *DoneRequest) String() string {
 func (*DoneRequest) ProtoMessage() {}
 
 func (x *DoneRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mover_version_v1_done_proto_msgTypes[0]
+	mi := &file_api_v1_done_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -55,7 +55,7 @@ func (x *DoneRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DoneRequest.ProtoReflect.Descriptor instead.
 func (*DoneRequest) Descriptor() ([]byte, []int) {
-	return file_mover_version_v1_done_proto_rawDescGZIP(), []int{0}
+	return file_api_v1_done_proto_rawDescGZIP(), []int{0}
 }
 
 // DoneResponse is empty on success.
@@ -68,7 +68,7 @@ type DoneResponse struct {
 
 func (x *DoneResponse) Reset() {
 	*x = DoneResponse{}
-	mi := &file_mover_version_v1_done_proto_msgTypes[1]
+	mi := &file_api_v1_done_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -80,7 +80,7 @@ func (x *DoneResponse) String() string {
 func (*DoneResponse) ProtoMessage() {}
 
 func (x *DoneResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mover_version_v1_done_proto_msgTypes[1]
+	mi := &file_api_v1_done_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -93,40 +93,41 @@ func (x *DoneResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DoneResponse.ProtoReflect.Descriptor instead.
 func (*DoneResponse) Descriptor() ([]byte, []int) {
-	return file_mover_version_v1_done_proto_rawDescGZIP(), []int{1}
+	return file_api_v1_done_proto_rawDescGZIP(), []int{1}
 }
 
-var File_mover_version_v1_done_proto protoreflect.FileDescriptor
+var File_api_v1_done_proto protoreflect.FileDescriptor
 
-const file_mover_version_v1_done_proto_rawDesc = "" +
+const file_api_v1_done_proto_rawDesc = "" +
 	"\n" +
-	"\x1bmover/version/v1/done.proto\x12\x10mover.version.v1\"\r\n" +
+	"\x11api/v1/done.proto\x12\x06api.v1\"\r\n" +
 	"\vDoneRequest\"\x0e\n" +
-	"\fDoneResponse2T\n" +
-	"\vDoneService\x12E\n" +
-	"\x04Done\x12\x1d.mover.version.v1.DoneRequest\x1a\x1e.mover.version.v1.DoneResponseB\xc6\x01\n" +
-	"\x14com.mover.version.v1B\tDoneProtoP\x01ZAgithub.com/RamenDR/ceph-volsync-plugin/mover/version/v1;versionv1\xa2\x02\x03MVX\xaa\x02\x10Mover.Version.V1\xca\x02\x10Mover\\Version\\V1\xe2\x02\x1cMover\\Version\\V1\\GPBMetadata\xea\x02\x12Mover::Version::V1b\x06proto3"
+	"\fDoneResponse2@\n" +
+	"\vDoneService\x121\n" +
+	"\x04Done\x12\x13.api.v1.DoneRequest\x1a\x14.api.v1.DoneResponseB\x85\x01\n" +
+	"\n" +
+	"com.api.v1B\tDoneProtoP\x01Z3github.com/RamenDR/ceph-volsync-plugin/api/v1;apiv1\xa2\x02\x03AXX\xaa\x02\x06Api.V1\xca\x02\x06Api\\V1\xe2\x02\x12Api\\V1\\GPBMetadata\xea\x02\aApi::V1b\x06proto3"
 
 var (
-	file_mover_version_v1_done_proto_rawDescOnce sync.Once
-	file_mover_version_v1_done_proto_rawDescData []byte
+	file_api_v1_done_proto_rawDescOnce sync.Once
+	file_api_v1_done_proto_rawDescData []byte
 )
 
-func file_mover_version_v1_done_proto_rawDescGZIP() []byte {
-	file_mover_version_v1_done_proto_rawDescOnce.Do(func() {
-		file_mover_version_v1_done_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_mover_version_v1_done_proto_rawDesc), len(file_mover_version_v1_done_proto_rawDesc)))
+func file_api_v1_done_proto_rawDescGZIP() []byte {
+	file_api_v1_done_proto_rawDescOnce.Do(func() {
+		file_api_v1_done_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_api_v1_done_proto_rawDesc), len(file_api_v1_done_proto_rawDesc)))
 	})
-	return file_mover_version_v1_done_proto_rawDescData
+	return file_api_v1_done_proto_rawDescData
 }
 
-var file_mover_version_v1_done_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_mover_version_v1_done_proto_goTypes = []any{
-	(*DoneRequest)(nil),  // 0: mover.version.v1.DoneRequest
-	(*DoneResponse)(nil), // 1: mover.version.v1.DoneResponse
+var file_api_v1_done_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_api_v1_done_proto_goTypes = []any{
+	(*DoneRequest)(nil),  // 0: api.v1.DoneRequest
+	(*DoneResponse)(nil), // 1: api.v1.DoneResponse
 }
-var file_mover_version_v1_done_proto_depIdxs = []int32{
-	0, // 0: mover.version.v1.DoneService.Done:input_type -> mover.version.v1.DoneRequest
-	1, // 1: mover.version.v1.DoneService.Done:output_type -> mover.version.v1.DoneResponse
+var file_api_v1_done_proto_depIdxs = []int32{
+	0, // 0: api.v1.DoneService.Done:input_type -> api.v1.DoneRequest
+	1, // 1: api.v1.DoneService.Done:output_type -> api.v1.DoneResponse
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -134,26 +135,26 @@ var file_mover_version_v1_done_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_mover_version_v1_done_proto_init() }
-func file_mover_version_v1_done_proto_init() {
-	if File_mover_version_v1_done_proto != nil {
+func init() { file_api_v1_done_proto_init() }
+func file_api_v1_done_proto_init() {
+	if File_api_v1_done_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_mover_version_v1_done_proto_rawDesc), len(file_mover_version_v1_done_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_v1_done_proto_rawDesc), len(file_api_v1_done_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_mover_version_v1_done_proto_goTypes,
-		DependencyIndexes: file_mover_version_v1_done_proto_depIdxs,
-		MessageInfos:      file_mover_version_v1_done_proto_msgTypes,
+		GoTypes:           file_api_v1_done_proto_goTypes,
+		DependencyIndexes: file_api_v1_done_proto_depIdxs,
+		MessageInfos:      file_api_v1_done_proto_msgTypes,
 	}.Build()
-	File_mover_version_v1_done_proto = out.File
-	file_mover_version_v1_done_proto_goTypes = nil
-	file_mover_version_v1_done_proto_depIdxs = nil
+	File_api_v1_done_proto = out.File
+	file_api_v1_done_proto_goTypes = nil
+	file_api_v1_done_proto_depIdxs = nil
 }

@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: mover/version/v1/version.proto
+// source: version/v1/version.proto
 
 package versionv1
 
@@ -30,7 +30,7 @@ type GetVersionRequest struct {
 
 func (x *GetVersionRequest) Reset() {
 	*x = GetVersionRequest{}
-	mi := &file_mover_version_v1_version_proto_msgTypes[0]
+	mi := &file_version_v1_version_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -42,7 +42,7 @@ func (x *GetVersionRequest) String() string {
 func (*GetVersionRequest) ProtoMessage() {}
 
 func (x *GetVersionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mover_version_v1_version_proto_msgTypes[0]
+	mi := &file_version_v1_version_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -55,7 +55,7 @@ func (x *GetVersionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetVersionRequest.ProtoReflect.Descriptor instead.
 func (*GetVersionRequest) Descriptor() ([]byte, []int) {
-	return file_mover_version_v1_version_proto_rawDescGZIP(), []int{0}
+	return file_version_v1_version_proto_rawDescGZIP(), []int{0}
 }
 
 // GetVersionResponse contains version information
@@ -69,7 +69,7 @@ type GetVersionResponse struct {
 
 func (x *GetVersionResponse) Reset() {
 	*x = GetVersionResponse{}
-	mi := &file_mover_version_v1_version_proto_msgTypes[1]
+	mi := &file_version_v1_version_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -81,7 +81,7 @@ func (x *GetVersionResponse) String() string {
 func (*GetVersionResponse) ProtoMessage() {}
 
 func (x *GetVersionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_mover_version_v1_version_proto_msgTypes[1]
+	mi := &file_version_v1_version_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -94,7 +94,7 @@ func (x *GetVersionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetVersionResponse.ProtoReflect.Descriptor instead.
 func (*GetVersionResponse) Descriptor() ([]byte, []int) {
-	return file_mover_version_v1_version_proto_rawDescGZIP(), []int{1}
+	return file_version_v1_version_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *GetVersionResponse) GetVersion() string {
@@ -104,39 +104,42 @@ func (x *GetVersionResponse) GetVersion() string {
 	return ""
 }
 
-var File_mover_version_v1_version_proto protoreflect.FileDescriptor
+var File_version_v1_version_proto protoreflect.FileDescriptor
 
-const file_mover_version_v1_version_proto_rawDesc = "" +
+const file_version_v1_version_proto_rawDesc = "" +
 	"\n" +
-	"\x1emover/version/v1/version.proto\x12\x10mover.version.v1\"\x13\n" +
+	"\x18version/v1/version.proto\x12\n" +
+	"version.v1\"\x13\n" +
 	"\x11GetVersionRequest\".\n" +
 	"\x12GetVersionResponse\x12\x18\n" +
-	"\aversion\x18\x01 \x01(\tR\aversion2i\n" +
-	"\x0eVersionService\x12W\n" +
+	"\aversion\x18\x01 \x01(\tR\aversion2]\n" +
+	"\x0eVersionService\x12K\n" +
 	"\n" +
-	"GetVersion\x12#.mover.version.v1.GetVersionRequest\x1a$.mover.version.v1.GetVersionResponseB\xc9\x01\n" +
-	"\x14com.mover.version.v1B\fVersionProtoP\x01ZAgithub.com/RamenDR/ceph-volsync-plugin/mover/version/v1;versionv1\xa2\x02\x03MVX\xaa\x02\x10Mover.Version.V1\xca\x02\x10Mover\\Version\\V1\xe2\x02\x1cMover\\Version\\V1\\GPBMetadata\xea\x02\x12Mover::Version::V1b\x06proto3"
+	"GetVersion\x12\x1d.version.v1.GetVersionRequest\x1a\x1e.version.v1.GetVersionResponseB\xa4\x01\n" +
+	"\x0ecom.version.v1B\fVersionProtoP\x01Z;github.com/RamenDR/ceph-volsync-plugin/version/v1;versionv1\xa2\x02\x03VXX\xaa\x02\n" +
+	"Version.V1\xca\x02\n" +
+	"Version\\V1\xe2\x02\x16Version\\V1\\GPBMetadata\xea\x02\vVersion::V1b\x06proto3"
 
 var (
-	file_mover_version_v1_version_proto_rawDescOnce sync.Once
-	file_mover_version_v1_version_proto_rawDescData []byte
+	file_version_v1_version_proto_rawDescOnce sync.Once
+	file_version_v1_version_proto_rawDescData []byte
 )
 
-func file_mover_version_v1_version_proto_rawDescGZIP() []byte {
-	file_mover_version_v1_version_proto_rawDescOnce.Do(func() {
-		file_mover_version_v1_version_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_mover_version_v1_version_proto_rawDesc), len(file_mover_version_v1_version_proto_rawDesc)))
+func file_version_v1_version_proto_rawDescGZIP() []byte {
+	file_version_v1_version_proto_rawDescOnce.Do(func() {
+		file_version_v1_version_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_version_v1_version_proto_rawDesc), len(file_version_v1_version_proto_rawDesc)))
 	})
-	return file_mover_version_v1_version_proto_rawDescData
+	return file_version_v1_version_proto_rawDescData
 }
 
-var file_mover_version_v1_version_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_mover_version_v1_version_proto_goTypes = []any{
-	(*GetVersionRequest)(nil),  // 0: mover.version.v1.GetVersionRequest
-	(*GetVersionResponse)(nil), // 1: mover.version.v1.GetVersionResponse
+var file_version_v1_version_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_version_v1_version_proto_goTypes = []any{
+	(*GetVersionRequest)(nil),  // 0: version.v1.GetVersionRequest
+	(*GetVersionResponse)(nil), // 1: version.v1.GetVersionResponse
 }
-var file_mover_version_v1_version_proto_depIdxs = []int32{
-	0, // 0: mover.version.v1.VersionService.GetVersion:input_type -> mover.version.v1.GetVersionRequest
-	1, // 1: mover.version.v1.VersionService.GetVersion:output_type -> mover.version.v1.GetVersionResponse
+var file_version_v1_version_proto_depIdxs = []int32{
+	0, // 0: version.v1.VersionService.GetVersion:input_type -> version.v1.GetVersionRequest
+	1, // 1: version.v1.VersionService.GetVersion:output_type -> version.v1.GetVersionResponse
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -144,26 +147,26 @@ var file_mover_version_v1_version_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_mover_version_v1_version_proto_init() }
-func file_mover_version_v1_version_proto_init() {
-	if File_mover_version_v1_version_proto != nil {
+func init() { file_version_v1_version_proto_init() }
+func file_version_v1_version_proto_init() {
+	if File_version_v1_version_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_mover_version_v1_version_proto_rawDesc), len(file_mover_version_v1_version_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_version_v1_version_proto_rawDesc), len(file_version_v1_version_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_mover_version_v1_version_proto_goTypes,
-		DependencyIndexes: file_mover_version_v1_version_proto_depIdxs,
-		MessageInfos:      file_mover_version_v1_version_proto_msgTypes,
+		GoTypes:           file_version_v1_version_proto_goTypes,
+		DependencyIndexes: file_version_v1_version_proto_depIdxs,
+		MessageInfos:      file_version_v1_version_proto_msgTypes,
 	}.Build()
-	File_mover_version_v1_version_proto = out.File
-	file_mover_version_v1_version_proto_goTypes = nil
-	file_mover_version_v1_version_proto_depIdxs = nil
+	File_version_v1_version_proto = out.File
+	file_version_v1_version_proto_goTypes = nil
+	file_version_v1_version_proto_depIdxs = nil
 }

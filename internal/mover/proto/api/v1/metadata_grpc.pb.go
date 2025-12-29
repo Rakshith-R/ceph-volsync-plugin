@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             (unknown)
-// source: mover/version/v1/metadata.proto
+// source: api/v1/metadata.proto
 
-package versionv1
+package apiv1
 
 import (
 	context "context"
@@ -19,8 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MetadataService_Get_FullMethodName    = "/mover.version.v1.MetadataService/Get"
-	MetadataService_Update_FullMethodName = "/mover.version.v1.MetadataService/Update"
+	MetadataService_Get_FullMethodName    = "/api.v1.MetadataService/Get"
+	MetadataService_Update_FullMethodName = "/api.v1.MetadataService/Update"
 )
 
 // MetadataServiceClient is the client API for MetadataService service.
@@ -150,7 +150,7 @@ func _MetadataService_Update_Handler(srv interface{}, ctx context.Context, dec f
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var MetadataService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "mover.version.v1.MetadataService",
+	ServiceName: "api.v1.MetadataService",
 	HandlerType: (*MetadataServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -163,5 +163,5 @@ var MetadataService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "mover/version/v1/metadata.proto",
+	Metadata: "api/v1/metadata.proto",
 }
