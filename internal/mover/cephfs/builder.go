@@ -142,6 +142,7 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 		sourceStatus:      source.Status.RsyncTLS,
 		latestMoverStatus: source.Status.LatestMoverStatus,
 		moverConfig:       volsyncv1alpha1.MoverConfig{},
+		options:           source.Spec.External.Parameters,
 	}, nil
 }
 

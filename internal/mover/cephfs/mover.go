@@ -81,6 +81,7 @@ type Mover struct {
 	// Destination-only fields
 	destStatus     *volsyncv1alpha1.ReplicationDestinationRsyncTLSStatus
 	cleanupTempPVC bool
+	options        map[string]string
 }
 
 var _ mover.Mover = &Mover{}
@@ -427,6 +428,8 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 			Value: "8873",
 		})
 
+		containerEnv = append(containerEnv, corev1.EnvVar{Name: "VOLUME_HANDLE", Value: dataPVC.Spec.VolumeName})
+
 		// containerCmd := []string{"/bin/bash", "-c", "/mover-rsync-tls/server.sh"} // cmd for replicationDestination job
 		if m.isSource {
 			// Set dest address/port if necessary
@@ -442,6 +445,15 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 
 			// Set read-only for volume in repl source job spec if the PVC only supports read-only
 			readOnlyVolume = utils.PvcIsReadOnly(dataPVC)
+
+			// targetSnapshotHandle
+			if targetSnapshotHandle, ok := m.options["targetSnapshotHandle"]; ok {
+				containerEnv = append(containerEnv, corev1.EnvVar{Name: "TARGET_SNAPSHOT_HANDLE", Value: targetSnapshotHandle})
+			}
+			// baseSnapshotHandle
+			if baseSnapshotHandle, ok := m.options["baseSnapshotHandle"]; ok {
+				containerEnv = append(containerEnv, corev1.EnvVar{Name: "BASE_SNAPSHOT_HANDLE", Value: baseSnapshotHandle})
+			}
 		}
 		podSpec := &job.Spec.Template.Spec
 		podSpec.Containers = []corev1.Container{{
