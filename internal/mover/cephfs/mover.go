@@ -34,6 +34,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -54,6 +55,11 @@ const (
 	tlsContainerPort = 8000
 
 	volSyncCephFSPrefix = mover.VolSyncPrefix + "cephfs-"
+
+	// cleanupLabelKey matches the private constant in utils package
+	// We need it here to query snapshots with cleanup label
+	cleanupLabelKey          = utils.VolsyncLabelPrefix + "/cleanup"
+	preserveLastSnapLabelKey = utils.VolsyncLabelPrefix + "/preserve-last-snapshot"
 )
 
 // Mover is the reconciliation logic for the CephFS-based data mover.
@@ -306,12 +312,118 @@ func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 		}
 	}
 
-	err := utils.CleanupObjects(ctx, m.client, m.logger, m.owner, cleanupTypes)
+	// Preserve the newest snapshot before cleanup
+	err := m.preserveNewestSnapshot(ctx)
+	if err != nil {
+		return mover.InProgress(), err
+	}
+
+	err = utils.CleanupObjects(ctx, m.client, m.logger, m.owner, cleanupTypes)
 	if err != nil {
 		return mover.InProgress(), err
 	}
 	m.logger.V(1).Info("Cleanup complete")
 	return mover.Complete(), nil
+}
+
+// preserveNewestSnapshot ensures only the latest (newest) snapshot is preserved by:
+// 1. Finding the newest snapshot with cleanup label (if exists)
+// 2. If no cleanup snapshots exist, preserve the newest from already preserved snapshots
+// 3. Mark all other preserved snapshots for cleanup
+//
+// This guarantees at least one snapshot is always preserved.
+func (m *Mover) preserveNewestSnapshot(ctx context.Context) error {
+	// Use OR selector to efficiently get snapshots with either cleanup OR preserve label in one call
+	selector, err := labels.Parse(cleanupLabelKey + "," + preserveLastSnapLabelKey)
+	if err != nil {
+		return err
+	}
+
+	listOptions := []client.ListOption{
+		client.MatchingLabelsSelector{Selector: selector},
+		client.InNamespace(m.owner.GetNamespace()),
+	}
+	snapList := &snapv1.VolumeSnapshotList{}
+	err = m.client.List(ctx, snapList, listOptions...)
+	if err != nil {
+		return err
+	}
+
+	// Separate snapshots into two groups while finding the newest overall
+	var snapshotsForCleanup []*snapv1.VolumeSnapshot
+	var preservedSnapshots []*snapv1.VolumeSnapshot
+	var newestSnapshot *snapv1.VolumeSnapshot
+
+	cleanupUID := string(m.owner.GetUID())
+	for i := range snapList.Items {
+		snap := &snapList.Items[i]
+		snapLabels := snap.GetLabels()
+
+		// Check if marked for cleanup by this owner
+		if uid, hasCleanup := snapLabels[cleanupLabelKey]; hasCleanup && uid == cleanupUID {
+			snapshotsForCleanup = append(snapshotsForCleanup, snap)
+			// Prioritize cleanup snapshots as newest
+			if newestSnapshot == nil || snap.CreationTimestamp.After(newestSnapshot.CreationTimestamp.Time) {
+				newestSnapshot = snap
+			}
+		}
+
+		// Check if marked as preserved
+		if _, hasPreserve := snapLabels[preserveLastSnapLabelKey]; hasPreserve {
+			preservedSnapshots = append(preservedSnapshots, snap)
+		}
+	}
+
+	// Fallback: if no cleanup snapshots, preserve newest from already preserved
+	if newestSnapshot == nil {
+		for _, snap := range preservedSnapshots {
+			if newestSnapshot == nil || snap.CreationTimestamp.After(newestSnapshot.CreationTimestamp.Time) {
+				newestSnapshot = snap
+			}
+		}
+	}
+
+	// If we found a snapshot to preserve, ensure it has the preserve label
+	if newestSnapshot != nil {
+		updated := false
+		updated = utils.AddLabel(newestSnapshot, preserveLastSnapLabelKey, "true") || updated
+		updated = utils.UnmarkForCleanup(newestSnapshot) || updated
+
+		if updated {
+			err = m.client.Update(ctx, newestSnapshot)
+			if err != nil {
+				m.logger.Error(err, "failed to update latest snapshot with preserve label",
+					"snapshot", newestSnapshot.Name)
+				return err
+			}
+			m.logger.V(1).Info("Preserved latest snapshot", "snapshot", newestSnapshot.Name)
+		}
+
+		// Mark all other preserved snapshots for cleanup
+		for _, snap := range preservedSnapshots {
+			// Skip the snapshot we're preserving
+			if snap.Name == newestSnapshot.Name {
+				continue
+			}
+
+			// Remove preserve label and mark for cleanup
+			updated := false
+			updated = utils.RemoveLabel(snap, preserveLastSnapLabelKey) || updated
+			updated = utils.MarkForCleanup(m.owner, snap) || updated
+
+			if updated {
+				err = m.client.Update(ctx, snap)
+				if err != nil {
+					m.logger.Error(err, "failed to mark previously preserved snapshot for cleanup",
+						"snapshot", snap.Name)
+					return err
+				}
+				m.logger.V(1).Info("Marked previously preserved snapshot for cleanup", "snapshot", snap.Name)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
@@ -325,7 +437,8 @@ func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeCl
 		m.logger.Error(err, "unable to get source PVC", "PVC", client.ObjectKeyFromObject(srcPVC))
 		return nil, err
 	}
-	dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction()
+	dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() +
+		"-" + strconv.FormatInt(time.Now().Unix(), 10)
 	pvc, err := m.vh.EnsurePVCFromSrc(ctx, m.logger, srcPVC, dataName, true)
 	if err != nil {
 		// If the error was a copy TriggerTimeoutError, update the latestMoverStatus to indicate error
