@@ -22,9 +22,11 @@ package cephfs
 import (
 	"flag"
 	"fmt"
+	"strconv"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/viper"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -110,12 +112,56 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 		source.Status.LatestMoverStatus = &volsyncv1alpha1.MoverStatus{}
 	}
 
+	options := source.Spec.External.Parameters
+	if len(options) == 0 {
+		return nil, fmt.Errorf("missing external parameters in cephfs replication source")
+	}
+
+	copyMethod := volsyncv1alpha1.CopyMethodNone
+	rawCopyMethod, ok := source.Spec.External.Parameters["copyMethod"]
+	if !ok {
+		copyMethod = volsyncv1alpha1.CopyMethodType(rawCopyMethod)
+	}
+
+	var (
+		storageClassName, volumeSnapshotClassName, secretKey, address *string
+		port                                                          *int32
+	)
+
+	storageClassNameStr, ok := options["storageClassName"]
+	if ok {
+		storageClassName = &storageClassNameStr
+	}
+	volumeSnapshotClassNameStr, ok := options["volumeSnapshotClassName"]
+	if ok {
+		volumeSnapshotClassName = &volumeSnapshotClassNameStr
+	}
+	secretKeyStr, ok := options["secretKey"]
+	if ok {
+		secretKey = &secretKeyStr
+	}
+	addressStr, ok := options["address"]
+	if ok {
+		address = &addressStr
+	}
+	portStr, ok := options["port"]
+	if ok {
+		portInt, err := strconv.ParseInt(portStr, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid port value: %w", err)
+		}
+		portInt32 := int32(portInt)
+		port = &portInt32
+	}
+
 	vh, err := volumehandler.NewVolumeHandler(
 		volumehandler.WithClient(client),
 		volumehandler.WithRecorder(eventRecorder),
 		volumehandler.WithOwner(source),
 		volumehandler.FromSource(&volsyncv1alpha1.ReplicationSourceVolumeOptions{
-			CopyMethod: volsyncv1alpha1.CopyMethodNone,
+			CopyMethod:              copyMethod,
+			StorageClassName:        storageClassName,
+			VolumeSnapshotClassName: volumeSnapshotClassName,
 		}),
 	)
 	if err != nil {
@@ -135,6 +181,9 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 		vh:                vh,
 		saHandler:         saHandler,
 		containerImage:    rb.getCephFSContainerImage(),
+		key:               secretKey,
+		address:           address,
+		port:              port,
 		isSource:          isSource,
 		paused:            source.Spec.Paused,
 		mainPVCName:       &source.Spec.SourcePVC,
@@ -164,12 +213,49 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 		destination.Status.LatestMoverStatus = &volsyncv1alpha1.MoverStatus{}
 	}
 
+	options := destination.Spec.External.Parameters
+	if len(options) == 0 {
+		return nil, fmt.Errorf("missing external parameters in cephfs replication destination")
+	}
+
+	copyMethod := volsyncv1alpha1.CopyMethodNone
+	rawCopyMethod, ok := options["copyMethod"]
+	if ok {
+		copyMethod = volsyncv1alpha1.CopyMethodType(rawCopyMethod)
+	}
+
+	var (
+		storageClassName, volumeSnapshotClassName, keySecret *string
+		serviceType                                          *corev1.ServiceType
+		serviceAnnotations                                   map[string]string
+	)
+
+	storageClassNameStr, ok := options["storageClassName"]
+	if ok {
+		storageClassName = &storageClassNameStr
+	}
+	volumeSnapshotClassNameStr, ok := options["volumeSnapshotClassName"]
+	if ok {
+		volumeSnapshotClassName = &volumeSnapshotClassNameStr
+	}
+	keySecretStr, ok := options["keySecret"]
+	if ok {
+		keySecret = &keySecretStr
+	}
+	serviceTypeStr, ok := options["serviceType"]
+	if ok {
+		svcType := corev1.ServiceType(serviceTypeStr)
+		serviceType = &svcType
+	}
+
 	vh, err := volumehandler.NewVolumeHandler(
 		volumehandler.WithClient(client),
 		volumehandler.WithRecorder(eventRecorder),
 		volumehandler.WithOwner(destination),
 		volumehandler.FromDestination(&volsyncv1alpha1.ReplicationDestinationVolumeOptions{
-			CopyMethod: volsyncv1alpha1.CopyMethodNone,
+			CopyMethod:              copyMethod,
+			StorageClassName:        storageClassName,
+			VolumeSnapshotClassName: volumeSnapshotClassName,
 		}),
 	)
 	if err != nil {
@@ -181,23 +267,27 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 	saHandler := utils.NewSAHandler(client, destination, isSource, privileged,
 		nil) // No specific SA for cephfs mover
 
-	var destPVC = destination.Spec.External.Parameters["DestinationPVC"]
+	var destPVC = options["destinationPVC"]
 
 	return &Mover{
-		client:            client,
-		logger:            logger.WithValues("method", "CephFS"),
-		eventRecorder:     eventRecorder,
-		owner:             destination,
-		vh:                vh,
-		saHandler:         saHandler,
-		containerImage:    rb.getCephFSContainerImage(),
-		isSource:          isSource,
-		paused:            destination.Spec.Paused,
-		mainPVCName:       &destPVC,
-		cleanupTempPVC:    false, // Not applicable for cephfs
-		privileged:        privileged,
-		destStatus:        destination.Status.RsyncTLS,
-		latestMoverStatus: destination.Status.LatestMoverStatus,
-		moverConfig:       volsyncv1alpha1.MoverConfig{},
+		client:             client,
+		logger:             logger.WithValues("method", "CephFS"),
+		eventRecorder:      eventRecorder,
+		owner:              destination,
+		vh:                 vh,
+		saHandler:          saHandler,
+		containerImage:     rb.getCephFSContainerImage(),
+		key:                keySecret,
+		serviceType:        serviceType,
+		serviceAnnotations: serviceAnnotations,
+		isSource:           isSource,
+		paused:             destination.Spec.Paused,
+		mainPVCName:        &destPVC,
+		cleanupTempPVC:     false, // Not applicable for cephfs
+		privileged:         privileged,
+		destStatus:         destination.Status.RsyncTLS,
+		latestMoverStatus:  destination.Status.LatestMoverStatus,
+		moverConfig:        volsyncv1alpha1.MoverConfig{},
+		options:            options,
 	}, nil
 }
