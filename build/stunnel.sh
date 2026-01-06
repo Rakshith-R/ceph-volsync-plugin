@@ -137,6 +137,23 @@ stunnel "$STUNNEL_CONF"
 # Wait a moment for stunnel to start and write PID file
 sleep 2
 
+# Wait for stunnel to be ready to accept connections
+if [[ "$WORKER_TYPE" == "source" ]]; then
+    echo "Waiting for stunnel client ports to be ready..."
+    for i in {1..30}; do
+        if nc -z 127.0.0.1 8001 2>/dev/null && nc -z 127.0.0.1 8873 2>/dev/null; then
+            echo "Stunnel client ports are ready"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo "Error: Stunnel client ports not ready after 30 seconds"
+            cat /tmp/stunnel.log 2>/dev/null || echo "No stunnel log available"
+            exit 1
+        fi
+        sleep 1
+    done
+fi
+
 # Check if stunnel started successfully by checking PID file
 if [[ ! -f "$STUNNEL_PID" ]]; then
     echo "Error: stunnel failed to start - PID file not created"
