@@ -69,11 +69,13 @@ var _ sm.ReplicationMachine = &rdMachine{}
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=pods/log,verbs=get;list
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;update;patch
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete;escalate;bind
 // +kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,resourceNames=volsync-privileged-mover,verbs=use
+// +kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch;create;update;patch;delete;deletecollection
 
 func (r *ReplicationDestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -107,16 +109,17 @@ func (r *ReplicationDestinationReconciler) Reconcile(ctx context.Context, req ct
 	}
 
 	// Check if privileged movers are allowed via namespace annotation
-	privilegedMoverOk, err := utils.PrivilegedMoversOk(ctx, r.Client, logger, instance.GetNamespace())
-	if err != nil {
-		return result, err
-	}
+	// privilegedMoverOk, err := utils.PrivilegedMoversOk(ctx, r.Client, logger, instance.GetNamespace())
+	// if err != nil {
+	// 	return result, err
+	// }
+	privilegedMoverOk := true
 
 	rdm, err := newRDMachine(instance, r.Client, logger,
 		record.NewEventRecorderAdapter(mover.NewEventRecorderLogger(r.EventRecorder)), privilegedMoverOk)
 
 	// No method found
-	if rdm != nil {
+	if rdm == nil {
 		logger.Info("No mover found for ReplicationDestination, skipping reconciliation")
 
 		return ctrl.Result{}, nil

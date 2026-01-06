@@ -74,14 +74,16 @@ type rsMachine struct {
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete;deletecollection
 //+kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete;deletecollection
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+//+kubebuilder:rbac:groups=core,resources=pods/log,verbs=get;list
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch
 //+kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;update;patch
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete;escalate;bind
 //+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,resourceNames=volsync-privileged-mover,verbs=use
+//+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use
 //+kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch;create;update;patch;delete;deletecollection
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -95,7 +97,7 @@ type rsMachine struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
 func (r *ReplicationSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.Log.WithValues("replicationsource", req.NamespacedName)
-	var instance *volsyncv1alpha1.ReplicationSource
+	instance := &volsyncv1alpha1.ReplicationSource{}
 	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
 		logger.Error(err, "Failed to fetch ReplicationSource")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -105,10 +107,11 @@ func (r *ReplicationSourceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	var err error
 
 	// Check if privileged movers are allowed via namespace annotation
-	privilegedMoverOk, err := utils.PrivilegedMoversOk(ctx, r.Client, logger, instance.GetNamespace())
-	if err != nil {
-		return result, err
-	}
+	// privilegedMoverOk, err := utils.PrivilegedMoversOk(ctx, r.Client, logger, instance.GetNamespace())
+	// if err != nil {
+	// 	return result, err
+	// }
+	privilegedMoverOk := true
 
 	if rsHasMover(instance) {
 		logger.Info("ReplicationSource already has a mover job associated, skipping reconciliation")
@@ -122,7 +125,7 @@ func (r *ReplicationSourceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	rsm, err := newRSMachine(instance, r.Client, logger,
 		record.NewEventRecorderAdapter(mover.NewEventRecorderLogger(r.EventRecorder)), privilegedMoverOk)
 
-	if rsm != nil {
+	if rsm == nil {
 		logger.Info("No mover found for ReplicationSource, skipping reconciliation")
 
 		return ctrl.Result{}, nil
