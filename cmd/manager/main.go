@@ -25,10 +25,13 @@ import (
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/controller"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/cephfs"
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
+	"github.com/backube/volsync/controllers/utils"
+	v1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -58,9 +61,20 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(volsyncv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(v1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
 	enabledMovers = append(enabledMovers, cephfs.Register)
+}
+
+func initPodLogsClient(cfg *rest.Config) {
+	_, err := utils.InitPodLogsClient(cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to create client-go clientset for pod logs")
+		os.Exit(1)
+	}
+	setupLog.Info("Mover Status Log", "log max bytes", utils.GetMoverLogMaxBytes(),
+		"tail lines", utils.GetMoverLogTailLines(), "debug", utils.IsMoverLogDebug())
 }
 
 // nolint:gocyclo
@@ -195,7 +209,8 @@ func main() {
 		}
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	cfg := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -219,8 +234,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	initPodLogsClient(cfg)
+
 	if err = (&controller.ReplicationSourceReconciler{
 		Client:        mgr.GetClient(),
+		Log:           ctrl.Log.WithName("controllers").WithName("ReplicationSource"),
 		Scheme:        mgr.GetScheme(),
 		EventRecorder: mgr.GetEventRecorderFor("replicationsource-controller"),
 	}).SetupWithManager(mgr); err != nil {
@@ -229,6 +247,7 @@ func main() {
 	}
 	if err = (&controller.ReplicationDestinationReconciler{
 		Client:        mgr.GetClient(),
+		Log:           ctrl.Log.WithName("controllers").WithName("ReplicationDestination"),
 		Scheme:        mgr.GetScheme(),
 		EventRecorder: mgr.GetEventRecorderFor("replicationdestination-controller"),
 	}).SetupWithManager(mgr); err != nil {
