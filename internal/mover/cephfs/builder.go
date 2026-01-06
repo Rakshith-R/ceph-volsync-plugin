@@ -25,6 +25,10 @@ import (
 	"strconv"
 	"strings"
 
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
+	"github.com/backube/volsync/controllers/mover"
+	"github.com/backube/volsync/controllers/utils"
+	"github.com/backube/volsync/controllers/volumehandler"
 	"github.com/go-logr/logr"
 	"github.com/spf13/viper"
 	corev1 "k8s.io/api/core/v1"
@@ -32,10 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cephPluginMover "github.com/RamenDR/ceph-volsync-plugin/internal/mover"
-	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
-	"github.com/backube/volsync/controllers/mover"
-	"github.com/backube/volsync/controllers/utils"
-	"github.com/backube/volsync/controllers/volumehandler"
 )
 
 const (
@@ -45,9 +45,9 @@ const (
 	// cephfs data mover
 	defaultCephFSContainerImage = "ghcr.io/rakshith-r/ceph-volsync-mover:s0.1"
 	// Command line flag will be checked first
-	// If command line flag not set, the RELATED_IMAGE_ env var will be used
+	// If command line flag not set, the MOVER_IMAGE env var will be used
 	cephfsContainerImageFlag   = "mover-image"
-	cephfsContainerImageEnvVar = "RELATED_IMAGE_CEPHFS_CONTAINER"
+	cephfsContainerImageEnvVar = "MOVER_IMAGE"
 )
 
 type Builder struct {

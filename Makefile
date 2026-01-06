@@ -264,7 +264,7 @@ docker-buildx-mover: ## Build and push docker image for the mover for cross-plat
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default > dist/install.yaml
+	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g' > dist/install.yaml
 
 ##@ Deployment
 
@@ -283,11 +283,14 @@ uninstall: ## Uninstall VolSync CRDs from K8s cluster.
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g' | $(KUBECTL) apply -f -
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: build-push-deploy
+build-push-deploy: docker-build docker-push docker-build-mover docker-push-mover deploy ## Build, push, and deploy. Usage: make build-push-deploy IMG=... MOVER_IMG=...
 
 ##@ Dependencies
 
@@ -388,7 +391,7 @@ bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metada
 	cd config/manifests/bases && $(KUSTOMIZE) edit add annotation --force 'olm.skipRange':"$(SKIP_RANGE)"
 	cd config/manifests/bases && $(KUSTOMIZE) edit add patch --name ceph-volsync-plugin-operator.v0.0.1 --kind ClusterServiceVersion\
 		--patch '[{"op": "replace", "path": "/spec/replaces", "value": "$(REPLACES)"}]'
-	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
+	$(KUSTOMIZE) build config/manifests | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g' | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
 	$(OPERATOR_SDK) bundle validate ./bundle
 
 .PHONY: bundle-build
