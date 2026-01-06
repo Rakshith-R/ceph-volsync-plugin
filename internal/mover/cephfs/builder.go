@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/viper"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	cephPluginMover "github.com/RamenDR/ceph-volsync-plugin/internal/mover"
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"github.com/backube/volsync/controllers/mover"
 	"github.com/backube/volsync/controllers/utils"
@@ -37,7 +39,7 @@ import (
 )
 
 const (
-	cephfsProviderName = "openshift-storage.cephfs.csi.ceph.com"
+	cephfsProviderName = "cephfs.csi.ceph.com"
 	cephfsMoverName    = "cephfs"
 	// defaultCephFSContainerImage is the default container image for the
 	// cephfs data mover
@@ -62,7 +64,7 @@ func Register() error {
 		return err
 	}
 
-	mover.Register(b)
+	cephPluginMover.Register(b)
 	return nil
 }
 
@@ -99,7 +101,7 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 	eventRecorder events.EventRecorder,
 	source *volsyncv1alpha1.ReplicationSource, privileged bool) (mover.Mover, error) {
 	// Only build if the CR belongs to us
-	if source.Spec.External == nil || source.Spec.External.Provider != cephfsProviderName {
+	if source.Spec.External == nil || strings.HasPrefix(source.Spec.External.Provider, cephfsProviderName) {
 		return nil, nil
 	}
 
@@ -119,7 +121,7 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 
 	copyMethod := volsyncv1alpha1.CopyMethodNone
 	rawCopyMethod, ok := source.Spec.External.Parameters["copyMethod"]
-	if !ok {
+	if ok {
 		copyMethod = volsyncv1alpha1.CopyMethodType(rawCopyMethod)
 	}
 
@@ -200,7 +202,7 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 	eventRecorder events.EventRecorder,
 	destination *volsyncv1alpha1.ReplicationDestination, privileged bool) (mover.Mover, error) {
 	// Only build if the CR belongs to us
-	if destination.Spec.External == nil || destination.Spec.External.Parameters["mover"] != cephfsMoverName {
+	if destination.Spec.External == nil || strings.HasPrefix(destination.Spec.External.Provider, cephfsProviderName) {
 		return nil, nil
 	}
 
