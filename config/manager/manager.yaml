@@ -65,6 +65,9 @@ spec:
           - --health-probe-bind-address=:8081
         image: controller:latest
         name: manager
+        env:
+        - name: MOVER_IMAGE
+          value: MOVER_IMAGE_PLACEHOLDER
         ports: []
         securityContext:
           allowPrivilegeEscalation: false
