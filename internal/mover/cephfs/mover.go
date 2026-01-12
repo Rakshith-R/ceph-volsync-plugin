@@ -49,10 +49,12 @@ import (
 )
 
 const (
-	mountPath        = "/data"
-	devicePath       = "/dev/block"
-	dataVolumeName   = "data"
-	tlsContainerPort = 8000
+	mountPath         = "/data"
+	devicePath        = "/dev/block"
+	dataVolumeName    = "data"
+	tlsContainerPort  = 8000
+	defaultServerPort = "8080"
+	defaultRsyncPort  = "8873"
 
 	volSyncCephFSPrefix = mover.VolSyncPrefix + "cephfs-"
 
@@ -206,7 +208,7 @@ func (m *Mover) updateStatusAddress(address *string) {
 	publishEvent := false
 	if !m.isSource {
 		if m.destStatus.Address == nil ||
-			address != nil && *m.destStatus.Address != *address {
+			(address != nil && *m.destStatus.Address != *address) {
 			publishEvent = true
 		}
 		m.destStatus.Address = address
@@ -254,7 +256,7 @@ func (m *Mover) ensureSecrets(ctx context.Context) (*string, error) {
 
 	err := m.client.Get(ctx, client.ObjectKeyFromObject(keySecret), keySecret)
 	if client.IgnoreNotFound(err) != nil {
-		m.logger.Error(err, "error retreiving key")
+		m.logger.Error(err, "error retrieving key")
 		return nil, err
 	}
 
@@ -326,6 +328,46 @@ func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 	return mover.Complete(), nil
 }
 
+// getDataName returns name to be used for source PVC.
+// It returns the name of the
+// - latest VolumeSnapshot with cleanup label owned by this mover if such snapshot exists
+// - Otherwise, it generates a new unique name using owner name, direction, and timestamp
+func (m *Mover) getDataName(ctx context.Context) (string, error) {
+	// Find the latest snapshot with a cleanup label owned by this mover (using owner UID).
+	cleanupUID := string(m.owner.GetUID())
+	selector, err := labels.Parse(cleanupLabelKey + "=" + cleanupUID)
+	if err != nil {
+		return "", err
+	}
+	listOptions := []client.ListOption{
+		client.MatchingLabelsSelector{Selector: selector},
+		client.InNamespace(m.owner.GetNamespace()),
+	}
+	snapList := &snapv1.VolumeSnapshotList{}
+	if err := m.client.List(ctx, snapList, listOptions...); err != nil {
+		return "", err
+	}
+
+	var latestSnapshot *snapv1.VolumeSnapshot
+	for i := range snapList.Items {
+		snap := &snapList.Items[i]
+		if latestSnapshot == nil || snap.CreationTimestamp.After(latestSnapshot.CreationTimestamp.Time) {
+			latestSnapshot = snap
+		}
+	}
+
+	if latestSnapshot != nil {
+		return latestSnapshot.Name, nil
+	}
+
+	// Fallback to generating a unique name if no such snapshot exists.
+	suffix := strconv.FormatInt(time.Now().Unix(), 10)
+
+	dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() + "-" + suffix
+
+	return dataName, nil
+}
+
 // preserveNewestSnapshot ensures only the latest (newest) snapshot is preserved by:
 // 1. Finding the newest snapshot with cleanup label (if exists)
 // 2. If no cleanup snapshots exist, preserve the newest from already preserved snapshots
@@ -333,53 +375,54 @@ func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 //
 // This guarantees at least one snapshot is always preserved.
 func (m *Mover) preserveNewestSnapshot(ctx context.Context) error {
-	// Use OR selector to efficiently get snapshots with either cleanup OR preserve label in one call
-	selector, err := labels.Parse(cleanupLabelKey + "," + preserveLastSnapLabelKey)
+	// We need to find snapshots with EITHER cleanup label OR preserve label.
+	// Since Kubernetes label selectors use AND logic for comma-separated keys,
+	// we need two separate queries and merge the results.
+
+	// First, get snapshots with cleanup label owned by this mover
+	cleanupSelector, err := labels.Parse(cleanupLabelKey + "=" + string(m.owner.GetUID()))
 	if err != nil {
 		return err
 	}
-
-	listOptions := []client.ListOption{
-		client.MatchingLabelsSelector{Selector: selector},
+	cleanupListOptions := []client.ListOption{
+		client.MatchingLabelsSelector{Selector: cleanupSelector},
 		client.InNamespace(m.owner.GetNamespace()),
 	}
-	snapList := &snapv1.VolumeSnapshotList{}
-	err = m.client.List(ctx, snapList, listOptions...)
-	if err != nil {
+	cleanupSnapList := &snapv1.VolumeSnapshotList{}
+	if err := m.client.List(ctx, cleanupSnapList, cleanupListOptions...); err != nil {
 		return err
 	}
 
-	// Separate snapshots into two groups while finding the newest overall
-	var snapshotsForCleanup []*snapv1.VolumeSnapshot
-	var preservedSnapshots []*snapv1.VolumeSnapshot
-	var newestSnapshot *snapv1.VolumeSnapshot
-
-	cleanupUID := string(m.owner.GetUID())
-	for i := range snapList.Items {
-		snap := &snapList.Items[i]
-		snapLabels := snap.GetLabels()
-
-		// Check if marked for cleanup by this owner
-		if uid, hasCleanup := snapLabels[cleanupLabelKey]; hasCleanup && uid == cleanupUID {
-			snapshotsForCleanup = append(snapshotsForCleanup, snap)
-			// Prioritize cleanup snapshots as newest
-			if newestSnapshot == nil || snap.CreationTimestamp.After(newestSnapshot.CreationTimestamp.Time) {
-				newestSnapshot = snap
-			}
-		}
-
-		// Check if marked as preserved
-		if _, hasPreserve := snapLabels[preserveLastSnapLabelKey]; hasPreserve {
-			preservedSnapshots = append(preservedSnapshots, snap)
-		}
+	// Then, get snapshots with preserve label
+	preserveSelector, err := labels.Parse(preserveLastSnapLabelKey)
+	if err != nil {
+		return err
+	}
+	preserveListOptions := []client.ListOption{
+		client.MatchingLabelsSelector{Selector: preserveSelector},
+		client.InNamespace(m.owner.GetNamespace()),
+	}
+	preserveSnapList := &snapv1.VolumeSnapshotList{}
+	if err := m.client.List(ctx, preserveSnapList, preserveListOptions...); err != nil {
+		return err
 	}
 
-	// Fallback: if no cleanup snapshots, preserve newest from already preserved
-	if newestSnapshot == nil {
-		for _, snap := range preservedSnapshots {
-			if newestSnapshot == nil || snap.CreationTimestamp.After(newestSnapshot.CreationTimestamp.Time) {
-				newestSnapshot = snap
-			}
+	// Merge the lists, avoiding duplicates using a map
+	snapMap := make(map[string]*snapv1.VolumeSnapshot)
+	for i := range cleanupSnapList.Items {
+		snap := &cleanupSnapList.Items[i]
+		snapMap[snap.Name] = snap
+	}
+	for i := range preserveSnapList.Items {
+		snap := &preserveSnapList.Items[i]
+		snapMap[snap.Name] = snap
+	}
+
+	// Find the newest snapshot from the merged map
+	var newestSnapshot *snapv1.VolumeSnapshot
+	for _, snap := range snapMap {
+		if newestSnapshot == nil || snap.CreationTimestamp.After(newestSnapshot.CreationTimestamp.Time) {
+			newestSnapshot = snap
 		}
 	}
 
@@ -399,8 +442,8 @@ func (m *Mover) preserveNewestSnapshot(ctx context.Context) error {
 			m.logger.V(1).Info("Preserved latest snapshot", "snapshot", newestSnapshot.Name)
 		}
 
-		// Mark all other preserved snapshots for cleanup
-		for _, snap := range preservedSnapshots {
+		// Mark all other snapshots for cleanup
+		for _, snap := range snapMap {
 			// Skip the snapshot we're preserving
 			if snap.Name == newestSnapshot.Name {
 				continue
@@ -437,8 +480,15 @@ func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeCl
 		m.logger.Error(err, "unable to get source PVC", "PVC", client.ObjectKeyFromObject(srcPVC))
 		return nil, err
 	}
-	dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() +
-		"-" + strconv.FormatInt(time.Now().Unix(), 10)
+	if m.vh.IsCopyMethodDirect() {
+		return srcPVC, nil
+	}
+
+	dataName, err := m.getDataName(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	pvc, err := m.vh.EnsurePVCFromSrc(ctx, m.logger, srcPVC, dataName, true)
 	if err != nil {
 		// If the error was a copy TriggerTimeoutError, update the latestMoverStatus to indicate error
@@ -450,6 +500,7 @@ func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeCl
 			// for the user to update the copy Trigger for too long)
 			return pvc, nil
 		}
+		return nil, err
 	}
 	return pvc, nil
 }
@@ -518,7 +569,7 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		})
 
 		// Add SERVER_PORT for stunnel.sh configuration
-		serverPort := "8080"
+		serverPort := defaultServerPort
 		if m.port != nil {
 			serverPort = strconv.Itoa(int(*m.port))
 		}
@@ -534,16 +585,15 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		})
 		containerEnv = append(containerEnv, corev1.EnvVar{
 			Name:  "RSYNC_PORT",
-			Value: "8873",
+			Value: defaultRsyncPort,
 		})
 		containerEnv = append(containerEnv, corev1.EnvVar{
 			Name:  "RSYNC_DAEMON_PORT",
-			Value: "8873",
+			Value: defaultRsyncPort,
 		})
 
 		containerEnv = append(containerEnv, corev1.EnvVar{Name: "VOLUME_HANDLE", Value: dataPVC.Spec.VolumeName})
 
-		// containerCmd := []string{"/bin/bash", "-c", "/mover-rsync-tls/server.sh"} // cmd for replicationDestination job
 		if m.isSource {
 			// Set dest address/port if necessary
 			if m.address != nil {
@@ -553,8 +603,6 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 				connectPort := strconv.Itoa(int(*m.port))
 				containerEnv = append(containerEnv, corev1.EnvVar{Name: "DESTINATION_PORT", Value: connectPort})
 			}
-			// Set container cmd for the replicationSource job
-			// containerCmd = []string{"/bin/bash", "-c", "/mover-rsync-tls/client.sh"}
 
 			// Set read-only for volume in repl source job spec if the PVC only supports read-only
 			readOnlyVolume = utils.PvcIsReadOnly(dataPVC)
@@ -570,9 +618,8 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		}
 		podSpec := &job.Spec.Template.Spec
 		podSpec.Containers = []corev1.Container{{
-			Name: "rsync-tls",
-			Env:  containerEnv,
-			// Command: containerCmd,
+			Name:  "rsync-tls",
+			Env:   containerEnv,
 			Image: m.containerImage,
 			SecurityContext: &corev1.SecurityContext{
 				AllowPrivilegeEscalation: ptr.To(false),
