@@ -29,6 +29,15 @@ import (
 	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/version/v1"
 )
 
+const (
+	// connectionTimeout is the timeout for the first RPC call which establishes the connection.
+	// This is longer because it includes DNS resolution, TCP handshake, and TLS negotiation.
+	connectionTimeout = 60 * time.Second
+
+	// rpcTimeout is the timeout for subsequent RPC calls after connection is established.
+	rpcTimeout = 30 * time.Second
+)
+
 // Config holds configuration for the source worker
 type Config struct {
 	DestinationAddress string
@@ -56,24 +65,32 @@ func (w *Worker) Run(ctx context.Context) error {
 	if w.config.DestinationAddress != "" {
 		w.logger.Info("Connecting to destination", "address", w.config.DestinationAddress)
 
-		// Establish gRPC connection
-		conn, err := grpc.NewClient(w.config.DestinationAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		// Create gRPC connection (non-blocking, connection established lazily)
+		conn, err := grpc.NewClient(
+			w.config.DestinationAddress,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
 		if err != nil {
-			return fmt.Errorf("failed to connect to destination %s: %w", w.config.DestinationAddress, err)
+			return fmt.Errorf("failed to create gRPC client for destination %s: %w", w.config.DestinationAddress, err)
 		}
 		defer conn.Close()
 
 		// Create version service client
 		versionClient := versionv1.NewVersionServiceClient(conn)
 
-		// Call GetVersion with timeout
-		callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		// Call GetVersion with longer timeout to allow for connection establishment
+		// The first RPC call will trigger connection establishment, so we need more time
+		callCtx, cancel := context.WithTimeout(ctx, connectionTimeout)
 		defer cancel()
+
+		w.logger.Info("Calling GetVersion on destination", "establishingConnection", true)
 
 		resp, err := versionClient.GetVersion(callCtx, &versionv1.GetVersionRequest{})
 		if err != nil {
-			w.logger.Error(err, "Failed to get version from destination")
-			return fmt.Errorf("failed to get version from destination: %w", err)
+			w.logger.Error(err, "Failed to get version from destination",
+				"address", w.config.DestinationAddress,
+				"hint", "Ensure the destination service is running and accessible")
+			return fmt.Errorf("failed to get version from destination %s: %w", w.config.DestinationAddress, err)
 		}
 		w.logger.Info("Retrieved version from destination", "version", resp.GetVersion())
 
@@ -81,7 +98,8 @@ func (w *Worker) Run(ctx context.Context) error {
 		doneClient := apiv1.NewDoneServiceClient(conn)
 
 		// Call Done to signal completion and request graceful shutdown
-		doneCtx, doneCancel := context.WithTimeout(ctx, 10*time.Second)
+		// Connection is already established, so use shorter timeout
+		doneCtx, doneCancel := context.WithTimeout(ctx, rpcTimeout)
 		defer doneCancel()
 
 		_, err = doneClient.Done(doneCtx, &apiv1.DoneRequest{})
@@ -92,28 +110,6 @@ func (w *Worker) Run(ctx context.Context) error {
 		w.logger.Info("Successfully sent Done signal to destination")
 
 		return nil
-
-		// Continue with periodic version checks every 30 seconds
-		// ticker := time.NewTicker(30 * time.Second)
-		// defer ticker.Stop()
-
-		// 	for {
-		// 		select {
-		// 		case <-ctx.Done():
-		// 			w.logger.Info("Source worker shutting down")
-		// 			return ctx.Err()
-		// 		case <-ticker.C:
-		// 			callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		// 			resp, err := client.GetVersion(callCtx, &versionv1.GetVersionRequest{})
-		// 			cancel()
-
-		// 			if err != nil {
-		// 				w.logger.Error(err, "Failed to get version from destination")
-		// 			} else {
-		// 				w.logger.Info("Version check", "version", resp.GetVersion())
-		// 			}
-		// 		}
-		// 	}
 	} else {
 		w.logger.Info("No destination address provided, running without version checks")
 		<-ctx.Done()
