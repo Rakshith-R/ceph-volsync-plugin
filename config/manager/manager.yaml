@@ -68,6 +68,8 @@ spec:
         env:
         - name: MOVER_IMAGE
           value: MOVER_IMAGE_PLACEHOLDER
+        - name: CEPH_CSI_CONFIGMAP_NAME
+          value: ceph-csi-config
         ports: []
         securityContext:
           allowPrivilegeEscalation: false

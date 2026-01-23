@@ -1,0 +1,24 @@
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: src
+spec:    
+  sourcePVC: src-pvc
+  trigger: 
+    # manual: "hash-1" 
+    # every 5 minutes
+    schedule: "*/5 * * * *"
+  external:
+    provider: "openshift-storage.cephfs.csi.ceph.com" # driver name
+    parameters:
+      secretKey: volsync-cephfs-dest
+      address: volsync-cephfs-dst-dest
+      # port: 
+      # serviceType: <ClusterIP(default) | LoadBalancer>
+      
+      # destinationPVC: dest-pvc
+      
+      storageClassName: rook-cephfs
+      volumeSnapshotClassName: csi-cephfsplugin-snapclass 
+      
+      copyMethod: Snapshot
