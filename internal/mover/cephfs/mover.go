@@ -440,10 +440,11 @@ func (m *Mover) ensureSnapshotWithStatusLabel(ctx context.Context, logger logr.L
 		utils.MarkForCleanup(m.owner, snapshot)
 		utils.AddLabel(snapshot, m.snapshotStatusLabelKey(), snapshotStatusCurrent)
 
+		vsClassName := m.options["volumeSnapshotClassName"]
 		// Set snapshot spec if creating
 		if snapshot.CreationTimestamp.IsZero() {
 			snapshot.Spec.Source.PersistentVolumeClaimName = &src.Name
-			snapshot.Spec.VolumeSnapshotClassName = src.Spec.StorageClassName
+			snapshot.Spec.VolumeSnapshotClassName = &vsClassName
 		}
 
 		return nil
@@ -669,6 +670,14 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		})
 
 		containerEnv = append(containerEnv, corev1.EnvVar{Name: "VOLUME_HANDLE", Value: dataPVC.Spec.VolumeName})
+		containerEnv = append(containerEnv, corev1.EnvVar{
+			Name: "POD_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.namespace",
+				},
+			},
+		})
 
 		if m.isSource {
 			// Set dest address/port if necessary

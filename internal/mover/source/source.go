@@ -479,8 +479,10 @@ func initSnapDiffChan(mountInfo *cephfs.MountInfo, dataVolumePath, rootPath, rel
 		for len(dirEntryList) > 0 {
 			for i := range len(dirEntryList) {
 				currentEntry := dirEntryList[i]
-				currentRelPath := currentEntry.DirEntry.Name()
-				if currentRelPath == "" {
+				currentRelPath := ""
+				if currentEntry.DirEntry != nil {
+					currentRelPath = currentEntry.DirEntry.Name()
+				} else {
 					currentRelPath = relPath
 				}
 				diffConfig := cephfs.SnapDiffConfig{

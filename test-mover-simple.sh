@@ -15,7 +15,7 @@ cleanup() {
     echo "Cleaning up..."
     ${CONTAINER_CMD} rm -f mover-destination 2>/dev/null || true
     ${CONTAINER_CMD} rm -f mover-source 2>/dev/null || true
-    rm -rf /tmp/mover-test
+    # rm -rf /tmp/mover-test
     echo "Cleanup complete"
 }
 
@@ -103,7 +103,7 @@ ${CONTAINER_CMD} logs mover-source 2>&1 | tee /tmp/mover-test/logs/source.log
 echo ""
 echo "   Source logs (first 30 lines):"
 echo "   ---"
-head -30 /tmp/mover-test/logs/source.log
+head -90 /tmp/mover-test/logs/source.log
 echo "   ---"
 
 # Check if source stunnel started
