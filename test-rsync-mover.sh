@@ -33,15 +33,20 @@ mkdir -p /tmp/mover-test/dest-data
 # Generate a simple PSK (in production, use proper random generation)
 PSK_KEY=$(cat /dev/urandom | tr -dc 'a-f0-9' | fold -w 128 | head -n 1)
 echo "volsync:${PSK_KEY}" > /tmp/mover-test/keys/psk.txt
+
+# build latest mover container image
+echo ""
+echo "Building latest ceph-volsync-mover container image..."
+make docker-build-mover MOVER_IMG=localhost/ceph-volsync-mover:test 
 chmod 600 /tmp/mover-test/keys/psk.txt
 echo "   PSK file created: /tmp/mover-test/keys/psk.txt"
 
 # Create test data on source
 echo "   Creating test data..."
-echo "test file 1" > /tmp/mover-test/source-data/file1.txt
-echo "test file 2" > /tmp/mover-test/source-data/file2.txt
-mkdir -p /tmp/mover-test/source-data/subdir
-echo "test file 3" > /tmp/mover-test/source-data/subdir/file3.txt
+# echo "test file 1" > /tmp/mover-test/source-data/file1.txt
+# echo "test file 2" > /tmp/mover-test/source-data/file2.txt
+# mkdir -p /tmp/mover-test/source-data/subdir
+# echo "test file 3" > /tmp/mover-test/source-data/subdir/file3.txt
 echo "   Test data created in /tmp/mover-test/source-data"
 
 # Create Podman network
@@ -49,6 +54,8 @@ echo ""
 echo "2. Creating Podman network..."
 ${CONTAINER_CMD} network create mover-test-net
 echo "   Network 'mover-test-net' created"
+
+
 
 # Start destination (server) container with rsync enabled
 echo ""

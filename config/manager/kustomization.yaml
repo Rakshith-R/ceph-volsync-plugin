@@ -4,10 +4,6 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 images:
 - name: controller
-<<<<<<< HEAD
   newName: quay.io/ramendr/ceph-volsync-plugin-operator
   newTag: v0.0.1
-=======
-  newName: ghcr.io/rakshith-r/ceph-volsync-plugin-operator
-  newTag: pp-v2
->>>>>>> 15998e4 (t4)
+

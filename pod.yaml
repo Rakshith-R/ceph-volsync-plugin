@@ -1,0 +1,36 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: writer
+spec:
+  containers:
+    - name: web-server
+      image: ghcr.io/rakshith-r/ceph-volsync-plugin-mover:pp-v20
+      command: ["sleep", "infinity"]
+      volumeMounts:
+        - name: mypvc
+          mountPath: /data/
+  volumes:
+    - name: mypvc
+      persistentVolumeClaim:
+        claimName: src-pvc
+        readOnly: false
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: reader
+spec:
+  containers:
+    - name: web-server
+      image: ghcr.io/rakshith-r/ceph-volsync-plugin-mover:pp-v20
+      command: ["sleep", "infinity"]
+      volumeMounts:
+        - name: mypvc
+          mountPath: /data/
+  volumes:
+    - name: mypvc
+      persistentVolumeClaim:
+        claimName: dest-pvc
+        readOnly: true

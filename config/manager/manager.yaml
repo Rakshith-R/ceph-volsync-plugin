@@ -70,6 +70,8 @@ spec:
           value: MOVER_IMAGE_PLACEHOLDER
         - name: CEPH_CSI_CONFIGMAP_NAME
           value: ceph-csi-config
+        - name: MOVER_CLUSTER_ROLE_NAME
+          value: mover-role
         ports: []
         securityContext:
           allowPrivilegeEscalation: false

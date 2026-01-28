@@ -19,6 +19,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -52,7 +53,6 @@ const (
 	initialDelay  = 2 * time.Second
 	backoffFactor = 2
 	sourceDir     = "/data"
-	stunnelPort   = "8873" // Local stunnel port that forwards to destination rsync daemon
 	fileListPath  = "/tmp/filelist.txt"
 )
 
@@ -130,13 +130,26 @@ func (w *Worker) Run(ctx context.Context) error {
 	targetSnapshotHandle := os.Getenv("TARGET_SNAPSHOT_HANDLE")
 	volumeHandle := os.Getenv("VOLUME_HANDLE")
 	if baseSnapshotHandle == "" || targetSnapshotHandle == "" || volumeHandle == "" {
-		w.logger.Info("BASE_SNAPSHOT_HANDLE environment variable not set or empty")
+		w.logger.Info("Snapshot handles not set, using rsync on /data")
 		// just use rsync on /data
 		err := w.rsync()
 		if err != nil {
 			w.logger.Error(err, "rsync failed")
 			return fmt.Errorf("rsync failed: %w", err)
 		}
+
+		// Create done service client and signal completion
+		doneClient := apiv1.NewDoneServiceClient(conn)
+		doneCtx, doneCancel := context.WithTimeout(ctx, rpcTimeout)
+		defer doneCancel()
+
+		_, err = doneClient.Done(doneCtx, &apiv1.DoneRequest{})
+		if err != nil {
+			w.logger.Error(err, "Failed to send Done signal to destination")
+			return fmt.Errorf("failed to send Done signal to destination: %w", err)
+		}
+		w.logger.Info("Successfully sent Done signal to destination")
+		return nil
 	}
 	//decode
 	baseSnapID := &ceph.CSIIdentifier{}
@@ -184,9 +197,15 @@ func (w *Worker) Run(ctx context.Context) error {
 	for k, v := range secret.Data {
 		data[k] = string(v)
 	}
-	creds, err := ceph.NewUserCredentials(data)
+	creds, err := ceph.NewAdminCredentials(data)
+	if err != nil {
+		return fmt.Errorf("failed to get creds %v:%w", data, err)
+	}
 
 	mons, err := ceph.Mons(ceph.CsiConfigFile, volumeID.ClusterID)
+	if err != nil {
+		return fmt.Errorf("failed to mons: %w", data)
+	}
 
 	cc := &ceph.ClusterConnection{}
 	if err := cc.Connect(mons, creds); err != nil {
@@ -197,6 +216,10 @@ func (w *Worker) Run(ctx context.Context) error {
 	mountInfo, err := cc.CreateMountFromRados()
 	if err != nil {
 		return fmt.Errorf("failed to create cephfs from rados: %w", err)
+	}
+	err = mountInfo.Mount()
+	if err != nil {
+		return fmt.Errorf("failed to init mount info: %w", err)
 	}
 
 	fsa, err := cc.GetFSAdmin()
@@ -209,8 +232,12 @@ func (w *Worker) Run(ctx context.Context) error {
 		return err
 	}
 	subVolumePath, err := fsa.SubVolumePath(volume, subVolumeGroup, subVolumeName)
+	if err != nil {
+		return fmt.Errorf("failed to get subvolume path: %w", err)
+	}
 	rootPath := path.Dir(subVolumePath)
 	relPath := path.Base(subVolumePath)
+	log.Default().Printf("Subvolume path: %s, rootPath: %s, relPath: %s\n", subVolumePath, rootPath, relPath)
 
 	dataVolumePath := "/data"
 	resultChan := initSnapDiffChan(mountInfo, dataVolumePath, rootPath, relPath, baseSnapName, targetSnapName)
@@ -243,7 +270,8 @@ func (w *Worker) Run(ctx context.Context) error {
 // This implements the bash script logic from the comments above
 func (w *Worker) rsync() error {
 	startTime := time.Now()
-	rsyncTarget := fmt.Sprintf("rsync://127.0.0.1:%s/data", stunnelPort)
+	rsyncDaemonPort := os.Getenv("RSYNC_DAEMON_PORT")
+	rsyncTarget := fmt.Sprintf("rsync://127.0.0.1:%s/data", rsyncDaemonPort)
 
 	w.logger.Info("Starting rsync synchronization", "target", rsyncTarget)
 
@@ -259,6 +287,13 @@ func (w *Worker) rsync() error {
 		rcA, err := w.createFileListAndSync(rsyncTarget)
 		if err != nil {
 			w.logger.Error(err, "Failed to create file list or sync", "retry", retry)
+		}
+
+		// Small delay between rsync passes to allow the rsync daemon to clean up the connection
+		// This prevents "Connection reset by peer" errors when the second pass starts
+		// immediately after the first pass completes
+		if rcA == 0 {
+			time.Sleep(1 * time.Second)
 		}
 
 		// Second pass: delete extra files on destination
@@ -426,6 +461,7 @@ func processSnapDiffResults(ctx context.Context, resultChan chan snapDiffResult,
 }
 
 // processEntry replaces relPath with dataVolumePath in the entry path and rsyncs the entry.
+// If the entry does not exist on source, it will be deleted from the destination.
 func processEntry(entry *cephfs.SnapDiffEntry, relPath, dataVolumePath string) error {
 	// Get the entry path
 	entryPath := entry.DirEntry.Name()
@@ -442,9 +478,20 @@ func processEntry(entry *cephfs.SnapDiffEntry, relPath, dataVolumePath string) e
 	// Source path is the transformed path (file on the local filesystem)
 	sourcePath := transformedPath
 
+	// Check if the source path exists
+	if _, err := os.Stat(sourcePath); err != nil {
+		if os.IsNotExist(err) {
+			// File or directory does not exist on source, delete from destination
+			return deleteFromDestination(transformedPath)
+		}
+		// Some other error occurred (permission denied, etc.)
+		return fmt.Errorf("failed to stat entry %s: %w", sourcePath, err)
+	}
+
 	// Build rsync target with the transformed path
 	// The destination path should also have relPath replaced with dataVolumePath
-	rsyncTarget := fmt.Sprintf("rsync://127.0.0.1:%s%s", stunnelPort, transformedPath)
+	rsyncDaemonPort := os.Getenv("RSYNC_DAEMON_PORT")
+	rsyncTarget := fmt.Sprintf("rsync://127.0.0.1:%s%s", rsyncDaemonPort, transformedPath)
 
 	// Rsync the specific entry
 	rsyncArgs := []string{
@@ -461,6 +508,42 @@ func processEntry(entry *cephfs.SnapDiffEntry, relPath, dataVolumePath string) e
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to rsync entry %s: %w", sourcePath, err)
+	}
+
+	return nil
+}
+
+// deleteFromDestination deletes a file or directory from the destination using rsync.
+// It uses rsync's --delete flag with include/exclude patterns to target the specific entry.
+func deleteFromDestination(transformedPath string) error {
+	rsyncDaemonPort := os.Getenv("RSYNC_DAEMON_PORT")
+	parentDir := path.Dir(transformedPath)
+	fileName := path.Base(transformedPath)
+
+	rsyncTarget := fmt.Sprintf("rsync://127.0.0.1:%s%s/", rsyncDaemonPort, parentDir)
+
+	// Use rsync to delete the specific file/directory from destination
+	// --include specifies the file to delete, --exclude=* ignores everything else
+	// --delete will remove the file from destination since it doesn't exist in source
+	rsyncArgs := []string{
+		"-rx",
+		"--delete",
+		fmt.Sprintf("--include=%s", fileName),
+		"--exclude=*",
+		"--itemize-changes",
+		"--info=stats2,misc2",
+		parentDir + "/",
+		rsyncTarget,
+	}
+
+	log.Printf("Deleting entry %s from destination", transformedPath)
+
+	cmd := exec.Command("rsync", rsyncArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to delete entry %s from destination: %w", transformedPath, err)
 	}
 
 	return nil
@@ -492,6 +575,8 @@ func initSnapDiffChan(mountInfo *cephfs.MountInfo, dataVolumePath, rootPath, rel
 					Snap1:    baseSnapName,
 					Snap2:    targetSnapName,
 				}
+				log.Default().Printf("Opening snap diff for rootPath=%s, relPath=%s, snap1=%s, snap2=%s\n",
+					diffConfig.RootPath, diffConfig.RelPath, diffConfig.Snap1, diffConfig.Snap2)
 
 				diffInfo, err := cephfs.OpenSnapDiff(diffConfig)
 				if err != nil {
@@ -510,7 +595,11 @@ func initSnapDiffChan(mountInfo *cephfs.MountInfo, dataVolumePath, rootPath, rel
 						break
 					}
 					if entry.DirEntry.DType() == cephfs.DTypeDir {
-						newDirEntryList = append(newDirEntryList, entry)
+						name := entry.DirEntry.Name()
+						if !(name == "." || name == "..") {
+							// append only if it is not current or previous directory.
+							newDirEntryList = append(newDirEntryList, entry)
+						}
 						continue
 					}
 					resultChan <- snapDiffResult{Entry: entry}

@@ -4,8 +4,9 @@ metadata:
   name: dest
 spec:  
   # trigger: 
-  #   manual: "hash-1" 
-    # schedule: "@daily"
+  #   manual: "hash-1"
+  # every 5 minutes 
+    # schedule: "*/5 * * * *"
   external: 
     provider: "openshift-storage.cephfs.csi.ceph.com" # driver name
     parameters:
@@ -18,3 +19,8 @@ spec:
       volumeSnapshotClassName: csi-cephfsplugin-snapclass 
       
       copyMethod: Snapshot
+
+      # copyMethod: Direct
+      # baseSnapshotName: <base-snapshot-name> # required for Diff sync
+      # targetSnapshotName: <target-snapshot-name> # required for Diff sync
+      # parentVolumeName: <parent-volume-name> # required for Diff sync 
