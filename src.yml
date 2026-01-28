@@ -5,9 +5,9 @@ metadata:
 spec:    
   sourcePVC: src-pvc
   trigger: 
-    # manual: "hash-1" 
+    manual: "hash-4" 
     # every 5 minutes
-    schedule: "*/5 * * * *"
+    # schedule: "*/3 * * * *"
   external:
     provider: "openshift-storage.cephfs.csi.ceph.com" # driver name
     parameters:
@@ -21,4 +21,7 @@ spec:
       storageClassName: rook-cephfs
       volumeSnapshotClassName: csi-cephfsplugin-snapclass 
       
-      copyMethod: Snapshot
+      copyMethod: Direct
+      baseSnapshotName: snap-2 # required for Diff sync
+      targetSnapshotName: snap-3 # required for Diff sync
+      volumeName: pvc-dc07406a-028b-4d4f-863c-0dd6f7a5ec23  # required for Diff sync

@@ -21,6 +21,7 @@ package cephfs
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/backube/volsync/controllers/utils"
 	"github.com/go-logr/logr"
@@ -64,20 +65,41 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 			d.Service.Spec.Type = corev1.ServiceTypeClusterIP
 		}
 		d.Service.Spec.Selector = d.Selector
-		if len(d.Service.Spec.Ports) != 1 {
-			d.Service.Spec.Ports = []corev1.ServicePort{{}}
+		if len(d.Service.Spec.Ports) != 2 {
+			d.Service.Spec.Ports = []corev1.ServicePort{{}, {}}
 		}
-		d.Service.Spec.Ports[0].Name = "rsync-tls"
+		d.Service.Spec.Ports[0].Name = "cephfs-mover"
 		if d.Port != nil {
 			d.Service.Spec.Ports[0].Port = *d.Port
 		} else {
 			d.Service.Spec.Ports[0].Port = 8000
 		}
 		d.Service.Spec.Ports[0].Protocol = corev1.ProtocolTCP
-		d.Service.Spec.Ports[0].TargetPort = intstr.FromInt(tlsContainerPort)
+		port, err := strconv.ParseInt(defaultServerStunnelPort, 10, 32)
+		if err != nil {
+			logger.Error(err, "Parsing default stunnel port failed")
+			return err
+		}
+		d.Service.Spec.Ports[0].TargetPort = intstr.FromInt32(int32(port))
 		if d.Service.Spec.Type == corev1.ServiceTypeClusterIP {
 			d.Service.Spec.Ports[0].NodePort = 0
 		}
+		d.Service.Spec.Ports[1].Name = "rsync-server"
+		if d.Port != nil {
+			d.Service.Spec.Ports[1].Port = *d.Port
+		} else {
+			d.Service.Spec.Ports[1].Port = 8873
+		}
+		d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP
+		port, err = strconv.ParseInt(defaultRsyncStunnelPort, 10, 32)
+		if err != nil {
+			logger.Error(err, "Parsing default rsync stunnel port failed")
+			return err
+		}
+		d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(int32(port))
+		// if d.Service.Spec.Type == corev1.ServiceTypeClusterIP {
+		// 	d.Service.Spec.Ports[1].NodePort = 0
+		// }
 		return nil
 	})
 	if err != nil {

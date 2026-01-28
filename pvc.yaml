@@ -7,7 +7,7 @@ metadata:
     group: snapshot-test
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 10Gi
@@ -21,7 +21,7 @@ metadata:
     group: snapshot-test
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 10Gi

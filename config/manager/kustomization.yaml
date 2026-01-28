@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/rakshith-r/ceph-volsync-plugin-operator
-  newTag: pp-v2
+  newTag: pp-v22
