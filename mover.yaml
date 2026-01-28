@@ -1,0 +1,218 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: "2026-01-26T15:43:00Z"
+  generateName: volsync-cephfs-src-src-
+  generation: 1
+  labels:
+    app.kubernetes.io/component: cephfs-mover
+    app.kubernetes.io/created-by: volsync
+    app.kubernetes.io/name: src-src
+    app.kubernetes.io/part-of: ceph-volsync-plugin
+    batch.kubernetes.io/controller-uid: 989e6bfc-ba5c-4165-8957-40a51f045ecb
+    batch.kubernetes.io/job-name: volsync-cephfs-src-src
+    controller-uid: 989e6bfc-ba5c-4165-8957-40a51f045ecb
+    job-name: volsync-cephfs-src-src
+  name: volsync-cephfs-src-src-9j95x
+  namespace: ceph-volsync-plugin-operator-system
+  ownerReferences:
+  - apiVersion: batch/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Job
+    name: volsync-cephfs-src-src
+    uid: 989e6bfc-ba5c-4165-8957-40a51f045ecb
+  resourceVersion: "8271"
+  uid: 2fbdfc54-8593-496e-81a5-7eff7e6e9bdf
+spec:
+  containers:
+  - env:
+    - name: WORKER_TYPE
+      value: source
+    - name: DESTINATION_PORT
+      value: "8000"
+    - name: SERVER_PORT
+      value: "8080"
+    - name: ENABLE_RSYNC_TUNNEL
+      value: "true"
+    - name: RSYNC_PORT
+      value: "8873"
+    - name: RSYNC_DAEMON_PORT
+      value: "873"
+    - name: VOLUME_HANDLE
+      value: pvc-eca415cf-2fa3-4bb7-af81-cb1496ba739d
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.namespace
+    - name: DESTINATION_ADDRESS
+      value: volsync-cephfs-dst-dest
+    - name: VOLUME_HANDLE
+      value: pvc-eca415cf-2fa3-4bb7-af81-cb1496ba739d
+    - name: BASE_SNAPSHOT_HANDLE
+      value: 0001-0009-rook-ceph-0000000000000001-e9936b08-bf4b-4375-a922-f6e88c5fe61b
+    - name: TARGET_SNAPSHOT_HANDLE
+      value: 0001-0009-rook-ceph-0000000000000001-f051a70c-7170-41b8-a6a3-c17d49ae04d8
+    - name: CEPH_CSI_CONFIGMAP_NAME
+      value: ceph-csi-config
+    - name: PRIVILEGED_MOVER
+      value: "1"
+    image: ghcr.io/rakshith-r/ceph-volsync-plugin-mover:pp-v12
+    imagePullPolicy: IfNotPresent
+    name: cephfs-mover
+    resources: {}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        add:
+        - DAC_OVERRIDE
+        - CHOWN
+        - FOWNER
+        - SETGID
+        drop:
+        - ALL
+      privileged: false
+      readOnlyRootFilesystem: true
+      runAsUser: 0
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /data
+      name: data
+    - mountPath: /keys
+      name: keys
+    - mountPath: /tmp
+      name: tempdir
+    - mountPath: /etc/ceph
+      name: ceph-config
+    - mountPath: /etc/ceph-csi-config
+      name: ceph-csi-config
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-5b7gk
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  nodeName: rook-cluster
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Never
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccount: volsync-src-src
+  serviceAccountName: volsync-src-src
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: volsync-src-src-1769442000
+      readOnly: true
+  - name: keys
+    secret:
+      defaultMode: 384
+      secretName: volsync-cephfs-dest
+  - emptyDir:
+      medium: Memory
+    name: tempdir
+  - emptyDir: {}
+    name: ceph-config
+  - emptyDir: {}
+    name: ceph-csi-config
+  - name: kube-api-access-5b7gk
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2026-01-26T15:43:09Z"
+    observedGeneration: 1
+    status: "False"
+    type: PodReadyToStartContainers
+  - lastProbeTime: null
+    lastTransitionTime: "2026-01-26T15:43:00Z"
+    observedGeneration: 1
+    status: "True"
+    type: Initialized
+  - lastProbeTime: null
+    lastTransitionTime: "2026-01-26T15:43:08Z"
+    observedGeneration: 1
+    reason: PodFailed
+    status: "False"
+    type: Ready
+  - lastProbeTime: null
+    lastTransitionTime: "2026-01-26T15:43:08Z"
+    observedGeneration: 1
+    reason: PodFailed
+    status: "False"
+    type: ContainersReady
+  - lastProbeTime: null
+    lastTransitionTime: "2026-01-26T15:43:00Z"
+    observedGeneration: 1
+    status: "True"
+    type: PodScheduled
+  containerStatuses:
+  - containerID: docker://3deea5266ae7680f668a07c4a9dcc180252dd55259b0fe2bcd0ab0fc5050d3d8
+    image: ghcr.io/rakshith-r/ceph-volsync-plugin-mover:pp-v12
+    imageID: docker-pullable://ghcr.io/rakshith-r/ceph-volsync-plugin-mover@sha256:31160777f5fad6ea1c052c90498e0730020c6b8cd4df100fce9743b629ccb60d
+    lastState: {}
+    name: cephfs-mover
+    ready: false
+    resources: {}
+    restartCount: 0
+    started: false
+    state:
+      terminated:
+        containerID: docker://3deea5266ae7680f668a07c4a9dcc180252dd55259b0fe2bcd0ab0fc5050d3d8
+        exitCode: 1
+        finishedAt: "2026-01-26T15:43:07Z"
+        reason: Error
+        startedAt: "2026-01-26T15:43:05Z"
+    volumeMounts:
+    - mountPath: /data
+      name: data
+    - mountPath: /keys
+      name: keys
+    - mountPath: /tmp
+      name: tempdir
+    - mountPath: /etc/ceph
+      name: ceph-config
+    - mountPath: /etc/ceph-csi-config
+      name: ceph-csi-config
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-5b7gk
+      readOnly: true
+      recursiveReadOnly: Disabled
+  hostIP: 192.168.39.168
+  hostIPs:
+  - ip: 192.168.39.168
+  observedGeneration: 1
+  phase: Failed
+  podIP: 10.244.0.65
+  podIPs:
+  - ip: 10.244.0.65
+  qosClass: BestEffort
+  startTime: "2026-01-26T15:43:00Z"

@@ -73,7 +73,17 @@ endif
 # Be aware that the target commands are only tested with Docker which is
 # scaffolded by default. However, you might want to replace it to use other
 # tools. (i.e. podman)
-CONTAINER_TOOL ?= docker
+CONTAINER_TOOL ?= podman
+
+# PUSH_TO_LOCAL defines whether to push images to a local minikube instance
+# instead of a remote registry. When set to true, uses 'minikube image load'
+# to load images directly into minikube's container runtime.
+# Usage: make docker-push PUSH_TO_LOCAL=true
+PUSH_TO_LOCAL ?= true
+
+# MINIKUBE_PROFILE defines the minikube profile to use when loading images.
+# Usage: make docker-push PUSH_TO_LOCAL=true MINIKUBE_PROFILE=my-profile
+MINIKUBE_PROFILE ?= rook-cluster
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -200,7 +210,11 @@ docker-build: ## Build docker image with the manager.
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
+ifeq ($(PUSH_TO_LOCAL), true)
+	$(CONTAINER_TOOL) save ${IMG} |minikube -p $(MINIKUBE_PROFILE) image load -
+else
 	$(CONTAINER_TOOL) push ${IMG}
+endif
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -227,7 +241,11 @@ docker-build-mover: ## Build docker image with the mover.
 
 .PHONY: docker-push-mover
 docker-push-mover: ## Push docker image with the mover.
+ifeq ($(PUSH_TO_LOCAL), true)
+	$(CONTAINER_TOOL) save ${MOVER_IMG} |minikube -p $(MINIKUBE_PROFILE) image load -
+else
 	$(CONTAINER_TOOL) push ${MOVER_IMG}
+endif
 
 .PHONY: docker-buildx-mover
 docker-buildx-mover: ## Build and push docker image for the mover for cross-platform support
@@ -265,6 +283,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g' | $(KUBECTL) apply -f -
+	$(KUBECTL) delete replicasets.apps --all -n ceph-volsync-plugin-operator-system || true
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.

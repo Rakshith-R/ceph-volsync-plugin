@@ -124,10 +124,10 @@ EOF
 ; Rsync tunnel - for rsync daemon communication
 [rsync-tls]
 client = yes
-accept = 127.0.0.1:8873
+accept = 127.0.0.1:873
 connect = $DESTINATION_ADDRESS:$RSYNC_PORT
 EOF
-        echo "  - Rsync tunnel: 127.0.0.1:8873 → $DESTINATION_ADDRESS:$RSYNC_PORT"
+        echo "  - Rsync tunnel: 127.0.0.1:873 → $DESTINATION_ADDRESS:$RSYNC_PORT"
     fi
 fi
 
@@ -141,16 +141,46 @@ stunnel "$STUNNEL_CONF"
 # Wait a moment for stunnel to start and write PID file
 sleep 2
 
+# Function to check if a port is listening using bash's /dev/tcp
+# (nc/netcat is not installed in the container)
+check_port() {
+    local host=$1
+    local port=$2
+    (echo > /dev/tcp/$host/$port) 2>/dev/null
+}
+
 # Wait for stunnel to be ready to accept connections
 if [[ "$WORKER_TYPE" == "source" ]]; then
     echo "Waiting for stunnel client ports to be ready..."
     for i in {1..30}; do
-        if nc -z 127.0.0.1 8001 2>/dev/null && nc -z 127.0.0.1 8873 2>/dev/null; then
+        GRPC_READY=false
+        RSYNC_READY=false
+        
+        # Always check gRPC port
+        if check_port 127.0.0.1 8001; then
+            GRPC_READY=true
+        fi
+        
+        # Only check rsync port if rsync tunnel is enabled
+        if [[ "$ENABLE_RSYNC_TUNNEL" == "true" ]]; then
+            if check_port 127.0.0.1 873; then
+                RSYNC_READY=true
+            fi
+        else
+            RSYNC_READY=true  # Not needed, so consider it ready
+        fi
+        
+        if [[ "$GRPC_READY" == "true" && "$RSYNC_READY" == "true" ]]; then
             echo "Stunnel client ports are ready"
             break
         fi
+        
         if [ $i -eq 30 ]; then
             echo "Error: Stunnel client ports not ready after 30 seconds"
+            echo "gRPC port 8001 ready: $GRPC_READY"
+            if [[ "$ENABLE_RSYNC_TUNNEL" == "true" ]]; then
+                echo "Rsync port 8873 ready: $RSYNC_READY"
+            fi
             cat /tmp/stunnel.log 2>/dev/null || echo "No stunnel log available"
             exit 1
         fi
@@ -189,6 +219,7 @@ use chroot = no
 max connections = 4
 pid file = /tmp/rsyncd.pid
 log file = /tmp/rsyncd.log
+lock file = /tmp/rsyncd.lock
 
 [data]
     path = /data

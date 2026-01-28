@@ -5,13 +5,19 @@
 Build, push, and deploy both operator and mover with a single command:
 
 ```bash
-make build-push-deploy IMG=ghcr.io/rakshith-r/ceph-volsync-plugin-operator:test-v1 MOVER_IMG=ghcr.io/rakshith-r/ceph-volsync-plugin-mover:test-v1
+make build-push-deploy IMG=ghcr.io/rakshith-r/ceph-volsync-plugin-operator:pp-v10 MOVER_IMG=ghcr.io/rakshith-r/ceph-volsync-plugin-mover:pp-v10
 ```
+
+stable:
+
+make deploy IMG=ghcr.io/rakshith-r
+/ceph-volsync-plugin-operator:pp-v18 MOVER_IMG=ghcr.io/rakshith-r/ceph-volsync-plugin-mover:pp-v20
+
 
 This single command performs all of the following steps:
 1. Build operator image
 2. Push operator image
-3. Build mover image
+3. Build mover imagek 
 4. Push mover image
 5. Deploy to cluster
 

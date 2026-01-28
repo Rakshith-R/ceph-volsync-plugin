@@ -33,12 +33,19 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	cephPluginMover "github.com/RamenDR/ceph-volsync-plugin/internal/mover"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/cephfs"
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"github.com/backube/volsync/controllers/mover"
 	sm "github.com/backube/volsync/controllers/statemachine"
 	"github.com/backube/volsync/controllers/utils"
+)
+
+const (
+	// replicationDestinationFinalizerName is the finalizer added to ReplicationDestination instances
+	replicationDestinationFinalizerName = "ceph-volsync-plugin.ramendr.io/replicationdestination-cleanup"
 )
 
 // ReplicationDestinationReconciler reconciles a ReplicationDestination object
@@ -64,9 +71,12 @@ var _ sm.ReplicationMachine = &rdMachine{}
 // +kubebuilder:rbac:groups=volsync.backube,resources=replicationdestinations/finalizers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=volsync.backube,resources=replicationdestinations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete;deletecollection
+//+kubebuilder:rbac:groups=apps,resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;update;patch
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete;deletecollection
+// +kubebuilder:rbac:groups=core,resources=persistentvolumes,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods/log,verbs=get;list
@@ -74,9 +84,11 @@ var _ sm.ReplicationMachine = &rdMachine{}
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete;escalate;bind
 // +kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,resourceNames=volsync-privileged-mover,verbs=use
 // +kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch;create;update;patch;delete;deletecollection
+//+kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotcontents,verbs=get;list;watch;create;update;patch;delete;deletecollection
 
 func (r *ReplicationDestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.Log.WithValues("replicationdestination", req.NamespacedName)
@@ -87,6 +99,32 @@ func (r *ReplicationDestinationReconciler) Reconcile(ctx context.Context, req ct
 			logger.Error(err, "Failed to get Destination")
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// Handle finalizer
+	if instance.GetDeletionTimestamp() != nil {
+		// Instance is being deleted
+		if ctrlutil.ContainsFinalizer(instance, replicationDestinationFinalizerName) {
+			// Clean up ClusterRoleBindings associated with this instance
+			if err := r.cleanupClusterRoleBindings(ctx, logger, instance); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			// Remove the finalizer
+			ctrlutil.RemoveFinalizer(instance, replicationDestinationFinalizerName)
+			if err := r.Update(ctx, instance); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer if not present
+	if !ctrlutil.ContainsFinalizer(instance, replicationDestinationFinalizerName) {
+		ctrlutil.AddFinalizer(instance, replicationDestinationFinalizerName)
+		if err := r.Update(ctx, instance); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	if rdHasMover(instance) {
@@ -162,6 +200,31 @@ func rdHasMover(rd *volsyncv1alpha1.ReplicationDestination) bool {
 		rd.Spec.Restic != nil ||
 		rd.Spec.Rsync != nil ||
 		rd.Spec.RsyncTLS != nil
+}
+
+// cleanupClusterRoleBindings deletes ClusterRoleBindings associated with the given ReplicationDestination
+func (r *ReplicationDestinationReconciler) cleanupClusterRoleBindings(ctx context.Context,
+	logger logr.Logger, instance *volsyncv1alpha1.ReplicationDestination) error {
+	// List ClusterRoleBindings with the owner UID label
+	crbList := &rbacv1.ClusterRoleBindingList{}
+	if err := r.List(ctx, crbList, client.MatchingLabels{
+		cephfs.ClusterRoleBindingLabelKey: string(instance.GetUID()),
+	}); err != nil {
+		logger.Error(err, "Failed to list ClusterRoleBindings for cleanup")
+		return err
+	}
+
+	// Delete each ClusterRoleBinding
+	for i := range crbList.Items {
+		crb := &crbList.Items[i]
+		logger.Info("Deleting ClusterRoleBinding", "name", crb.Name)
+		if err := r.Delete(ctx, crb); err != nil {
+			logger.Error(err, "Failed to delete ClusterRoleBinding", "name", crb.Name)
+			return err
+		}
+	}
+
+	return nil
 }
 
 func newRDMachine(rd *volsyncv1alpha1.ReplicationDestination, c client.Client,

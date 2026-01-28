@@ -1,5 +1,3 @@
-//go:build !disable_cephfs
-
 /*
 Copyright 2024 The VolSync authors.
 
@@ -24,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -33,9 +32,9 @@ import (
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,33 +49,30 @@ import (
 )
 
 const (
-	mountPath         = "/data"
-	devicePath        = "/dev/block"
-	dataVolumeName    = "data"
-	tlsContainerPort  = 8000
-	defaultServerPort = "8080"
-	defaultRsyncPort  = "8873"
+	mountPath                = "/data"
+	devicePath               = "/dev/block"
+	dataVolumeName           = "data"
+	tlsContainerPort         = 8000
+	defaultServerStunnelPort = "8000"
+	defaultServerPort        = "8080"
+	defaultRsyncStunnelPort  = "8873"
+	defaultRsyncPort         = "873"
 
 	volSyncCephFSPrefix = mover.VolSyncPrefix + "cephfs-"
 
-	// cleanupLabelKey matches the private constant in utils package
-	// We need it here to query snapshots with cleanup label
-	cleanupLabelKey          = utils.VolsyncLabelPrefix + "/cleanup"
-	preserveLastSnapLabelKey = utils.VolsyncLabelPrefix + "/preserve-last-snapshot"
+	// MoverClusterRoleNameEnvVar is the environment variable name for the mover ClusterRole
+	MoverClusterRoleNameEnvVar = "MOVER_CLUSTER_ROLE_NAME"
+	// DefaultMoverClusterRoleName is the default name of the ClusterRole for mover jobs
+	DefaultMoverClusterRoleName = "mover-role"
 
-	// Snapshot status labels for lifecycle management
-	snapshotStatusCurrent  = "current"
-	snapshotStatusPrevious = "previous"
+	// ClusterRoleBindingLabelKey is the label key used to identify ClusterRoleBindings created for mover jobs
+	// The value is the owner's UID
+	ClusterRoleBindingLabelKey = utils.VolsyncLabelPrefix + "/mover-clusterrolebinding-owner-uid"
 
 	// Environment variable names for ConfigMap configuration
 	configMapNameEnvVar      = "CEPH_CSI_CONFIGMAP_NAME"
 	configMapNamespaceEnvVar = "CEPH_CSI_CONFIGMAP_NAMESPACE"
 )
-
-// snapshotStatusLabelKey returns the label key for snapshot status, including owner name for easier identification
-func (m *Mover) snapshotStatusLabelKey() string {
-	return utils.VolsyncLabelPrefix + "/snapshot-status-" + m.owner.GetName()
-}
 
 // Mover is the reconciliation logic for the CephFS-based data mover.
 type Mover struct {
@@ -147,6 +143,11 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	// Prepare ServiceAccount, role, rolebinding
 	sa, err := m.saHandler.Reconcile(ctx, m.logger)
 	if sa == nil || err != nil {
+		return mover.InProgress(), err
+	}
+
+	// Ensure mover ClusterRoleBinding for secrets/configmaps access
+	if err := m.ensureMoverClusterRoleBinding(ctx, sa); err != nil {
 		return mover.InProgress(), err
 	}
 
@@ -299,6 +300,52 @@ func (m *Mover) ensureSecrets(ctx context.Context) (*string, error) {
 	return &keySecret.Name, nil
 }
 
+// ensureMoverClusterRoleBinding creates a ClusterRoleBinding that binds the mover's ServiceAccount
+// to the mover-role ClusterRole, allowing access to secrets and configmaps.
+func (m *Mover) ensureMoverClusterRoleBinding(ctx context.Context, sa *corev1.ServiceAccount) error {
+	clusterRoleBinding := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: volSyncCephFSPrefix + m.owner.GetNamespace() + "-" + m.direction() + "-" + m.owner.GetName() + "-mover",
+		},
+	}
+	logger := m.logger.WithValues("ClusterRoleBinding", clusterRoleBinding.Name)
+
+	op, err := ctrlutil.CreateOrUpdate(ctx, m.client, clusterRoleBinding, func() error {
+		// Add owner UID label
+		if clusterRoleBinding.Labels == nil {
+			clusterRoleBinding.Labels = make(map[string]string)
+		}
+		clusterRoleBinding.Labels[ClusterRoleBindingLabelKey] = string(m.owner.GetUID())
+
+		// Get ClusterRole name from environment variable or use default
+		clusterRoleName := os.Getenv(MoverClusterRoleNameEnvVar)
+		if clusterRoleName == "" {
+			clusterRoleName = DefaultMoverClusterRoleName
+		}
+
+		clusterRoleBinding.RoleRef = rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     clusterRoleName,
+		}
+		clusterRoleBinding.Subjects = []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      sa.Name,
+				Namespace: sa.Namespace,
+			},
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Error(err, "ClusterRoleBinding reconcile failed")
+		return err
+	}
+
+	logger.V(1).Info("Mover ClusterRoleBinding reconciled", "operation", op)
+	return nil
+}
+
 func (m *Mover) direction() string {
 	dir := "src"
 	if !m.isSource {
@@ -318,39 +365,9 @@ func (m *Mover) serviceSelector() map[string]string {
 func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 	m.logger.V(1).Info("Starting cleanup", "m.mainPVCName", m.mainPVCName, "m.isSource", m.isSource)
 
-	// Step 1: Mark all snapshots with status=previous for deletion
-	previousSnaps, err := m.listSnapshotsWithStatus(ctx, snapshotStatusPrevious)
-	if err != nil {
-		m.logger.Error(err, "failed to list previous snapshots")
+	// Step 1 & 2: Transition snapshot statuses (mark old previous for cleanup, current -> previous)
+	if err := m.transitionSnapshotStatuses(ctx); err != nil {
 		return mover.InProgress(), err
-	}
-	for i := range previousSnaps {
-		snap := &previousSnaps[i]
-		updated := false
-		updated = utils.MarkForCleanup(m.owner, snap) // Ignore return value, we want to mark all previous snaps
-		updated = updated || utils.RemoveLabel(snap, m.snapshotStatusLabelKey())
-		if updated {
-			if err := m.client.Update(ctx, snap); err != nil {
-				m.logger.Error(err, "failed to mark previous snapshot for cleanup", "snapshot", snap.Name)
-				return mover.InProgress(), err
-			}
-			m.logger.V(1).Info("Marked previous snapshot for cleanup", "snapshot", snap.Name)
-		}
-
-	}
-
-	// Step 2: Transition status=current to status=previous
-	currentSnap, err := m.findSnapshotWithStatus(ctx, snapshotStatusCurrent)
-	if err != nil {
-		m.logger.Error(err, "failed to find current snapshot")
-		return mover.InProgress(), err
-	}
-	if currentSnap != nil {
-		if err = m.setSnapshotStatus(ctx, currentSnap, snapshotStatusPrevious); err != nil {
-			m.logger.Error(err, "failed to transition current snapshot to previous", "snapshot", currentSnap.Name)
-			return mover.InProgress(), err
-		}
-		m.logger.V(1).Info("Transitioned current snapshot to previous", "snapshot", currentSnap.Name)
 	}
 
 	// Step 3: Remove snapshot annotations (destination only)
@@ -363,191 +380,12 @@ func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 	}
 
 	// Step 4: Delete marked objects
-	if err = utils.CleanupObjects(ctx, m.client, m.logger, m.owner, cleanupTypes); err != nil {
+	if err := utils.CleanupObjects(ctx, m.client, m.logger, m.owner, cleanupTypes); err != nil {
 		return mover.InProgress(), err
 	}
 
 	m.logger.V(1).Info("Cleanup complete")
 	return mover.Complete(), nil
-}
-
-// isSnapshotReady checks if a snapshot is ready to use
-func isSnapshotReady(snap *snapv1.VolumeSnapshot) bool {
-	if snap == nil {
-		return false
-	}
-	return snap.Status != nil && snap.Status.ReadyToUse != nil && *snap.Status.ReadyToUse
-}
-
-// findSnapshotWithStatus finds a snapshot with specific status label
-func (m *Mover) findSnapshotWithStatus(ctx context.Context, status string) (*snapv1.VolumeSnapshot, error) {
-	snapshots, err := m.listSnapshotsWithStatus(ctx, status)
-	if err != nil || len(snapshots) == 0 {
-		return nil, err
-	}
-	return &snapshots[0], nil
-}
-
-// listSnapshotsWithStatus lists all snapshots with specific status label
-func (m *Mover) listSnapshotsWithStatus(ctx context.Context, status string) ([]snapv1.VolumeSnapshot, error) {
-	selector, err := labels.Parse(m.snapshotStatusLabelKey() + "=" + status)
-	if err != nil {
-		return nil, err
-	}
-
-	listOptions := []client.ListOption{
-		client.MatchingLabelsSelector{Selector: selector},
-		client.InNamespace(m.owner.GetNamespace()),
-	}
-
-	snapList := &snapv1.VolumeSnapshotList{}
-	if err := m.client.List(ctx, snapList, listOptions...); err != nil {
-		return nil, err
-	}
-
-	return snapList.Items, nil
-}
-
-// setSnapshotStatus updates the snapshot status label
-func (m *Mover) setSnapshotStatus(ctx context.Context, snap *snapv1.VolumeSnapshot, status string) error {
-	if snap == nil {
-		return nil
-	}
-
-	updated := utils.AddLabel(snap, m.snapshotStatusLabelKey(), status)
-	if !updated {
-		return nil // Label already set to desired value
-	}
-
-	return m.client.Update(ctx, snap)
-}
-
-// ensureSnapshotWithStatusLabel creates or gets a snapshot with status=current label
-func (m *Mover) ensureSnapshotWithStatusLabel(ctx context.Context, logger logr.Logger,
-	src *corev1.PersistentVolumeClaim, name string) (*snapv1.VolumeSnapshot, error) {
-	snapshot := &snapv1.VolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: m.owner.GetNamespace(),
-		},
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, m.client, snapshot, func() error {
-		if err := ctrl.SetControllerReference(m.owner, snapshot, m.client.Scheme()); err != nil {
-			return err
-		}
-		utils.SetOwnedByVolSync(snapshot)
-		utils.MarkForCleanup(m.owner, snapshot)
-		utils.AddLabel(snapshot, m.snapshotStatusLabelKey(), snapshotStatusCurrent)
-
-		vsClassName := m.options["volumeSnapshotClassName"]
-		// Set snapshot spec if creating
-		if snapshot.CreationTimestamp.IsZero() {
-			snapshot.Spec.Source.PersistentVolumeClaimName = &src.Name
-			snapshot.Spec.VolumeSnapshotClassName = &vsClassName
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		logger.Error(err, "failed to create/update snapshot with status label", "snapshot", name)
-		return nil, err
-	}
-
-	logger.V(1).Info("Snapshot reconciled with status label", "operation", op, "snapshot", name)
-
-	// Check if snapshot is ready
-	if !isSnapshotReady(snapshot) {
-		return nil, nil // Not ready yet, will retry
-	}
-
-	return snapshot, nil
-}
-
-// createPVCFromSnapshot creates or gets a PVC from a snapshot
-func (m *Mover) createPVCFromSnapshot(ctx context.Context, logger logr.Logger,
-	snap *snapv1.VolumeSnapshot, src *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      snap.Name,
-			Namespace: m.owner.GetNamespace(),
-		},
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, m.client, pvc, func() error {
-		if err := ctrl.SetControllerReference(m.owner, pvc, m.client.Scheme()); err != nil {
-			return err
-		}
-		utils.SetOwnedByVolSync(pvc)
-		utils.MarkForCleanup(m.owner, pvc)
-
-		// Set PVC spec if creating
-		if pvc.CreationTimestamp.IsZero() {
-			pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadOnlyMany}
-			pvc.Spec.Resources = src.Spec.Resources
-			pvc.Spec.StorageClassName = src.Spec.StorageClassName
-			pvc.Spec.VolumeMode = src.Spec.VolumeMode
-
-			// Set DataSource to the snapshot
-			pvc.Spec.DataSource = &corev1.TypedLocalObjectReference{
-				APIGroup: &snapv1.SchemeGroupVersion.Group,
-				Kind:     "VolumeSnapshot",
-				Name:     snap.Name,
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		logger.Error(err, "failed to create/update PVC from snapshot", "pvc", pvc.Name)
-		return nil, err
-	}
-
-	logger.V(1).Info("PVC reconciled from snapshot", "operation", op, "pvc", pvc.Name)
-
-	// Check if PVC is bound
-	if pvc.Status.Phase != corev1.ClaimBound {
-		return nil, nil // Not bound yet, will retry
-	}
-
-	return pvc, nil
-}
-
-// ensurePVCFromSrcWithStatusLabels creates a PVC from source using status-labeled snapshots
-func (m *Mover) ensurePVCFromSrcWithStatusLabels(ctx context.Context, logger logr.Logger,
-	src *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
-	// Look for snapshot with status=current
-	currentSnap, err := m.findSnapshotWithStatus(ctx, snapshotStatusCurrent)
-	if err != nil {
-		return nil, err
-	}
-
-	var snap *snapv1.VolumeSnapshot
-
-	if currentSnap != nil {
-		if isSnapshotReady(currentSnap) {
-			// Reuse existing ready snapshot
-			logger.V(1).Info("Reusing existing current snapshot", "snapshot", currentSnap.Name)
-			snap = currentSnap
-		} else {
-			// Wait for current snapshot to become ready
-			return nil, nil
-		}
-	} else {
-		// Create new snapshot with status=current
-		suffix := strconv.FormatInt(time.Now().Unix(), 10)
-		dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() + "-" + suffix
-
-		logger.V(1).Info("Creating new snapshot with status=current", "name", dataName)
-		snap, err = m.ensureSnapshotWithStatusLabel(ctx, logger, src, dataName)
-		if snap == nil || err != nil {
-			return nil, err
-		}
-	}
-
-	return m.createPVCFromSnapshot(ctx, logger, snap, src)
 }
 
 func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
@@ -646,13 +484,18 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		})
 
 		// Add SERVER_PORT for stunnel.sh configuration
-		serverPort := defaultServerPort
+		serverPort := defaultServerStunnelPort
 		if m.port != nil {
 			serverPort = strconv.Itoa(int(*m.port))
 		}
 		containerEnv = append(containerEnv, corev1.EnvVar{
-			Name:  "SERVER_PORT",
+			Name:  "DESTINATION_PORT",
 			Value: serverPort,
+		})
+
+		containerEnv = append(containerEnv, corev1.EnvVar{
+			Name:  "SERVER_PORT",
+			Value: defaultServerPort,
 		})
 
 		// Enable rsync tunnel by default for CephFS mover
@@ -662,7 +505,7 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		})
 		containerEnv = append(containerEnv, corev1.EnvVar{
 			Name:  "RSYNC_PORT",
-			Value: defaultRsyncPort,
+			Value: defaultRsyncStunnelPort,
 		})
 		containerEnv = append(containerEnv, corev1.EnvVar{
 			Name:  "RSYNC_DAEMON_PORT",
@@ -691,16 +534,13 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 
 			// Set read-only for volume in repl source job spec if the PVC only supports read-only
 			readOnlyVolume = utils.PvcIsReadOnly(dataPVC)
-
-			// targetSnapshotHandle
-			if targetSnapshotHandle, ok := m.options["targetSnapshotHandle"]; ok {
-				containerEnv = append(containerEnv, corev1.EnvVar{Name: "TARGET_SNAPSHOT_HANDLE", Value: targetSnapshotHandle})
-			}
-			// baseSnapshotHandle
-			if baseSnapshotHandle, ok := m.options["baseSnapshotHandle"]; ok {
-				containerEnv = append(containerEnv, corev1.EnvVar{Name: "BASE_SNAPSHOT_HANDLE", Value: baseSnapshotHandle})
-			}
 		}
+
+		volumeEnv, err := m.getVolumeEnvVars(ctx, dataPVC)
+		if err != nil {
+			return fmt.Errorf("failed to get volume env vars: %w", err)
+		}
+		containerEnv = append(containerEnv, volumeEnv...)
 
 		// Inject ConfigMap configuration from environment variables
 		if configMapName := os.Getenv(configMapNameEnvVar); configMapName != "" {
@@ -718,7 +558,7 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 
 		podSpec := &job.Spec.Template.Spec
 		podSpec.Containers = []corev1.Container{{
-			Name:  "rsync-tls",
+			Name:  "cephfs-mover",
 			Env:   containerEnv,
 			Image: m.containerImage,
 			SecurityContext: &corev1.SecurityContext{
@@ -731,13 +571,15 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 				RunAsUser:              ptr.To[int64](0), // Run as root for stunnel
 			},
 		}}
-		// Pre-allocate with capacity for better performance (max 3 items)
-		volumeMounts := make([]corev1.VolumeMount, 0, 3)
+		// Pre-allocate with capacity for better performance (max 5 items)
+		volumeMounts := make([]corev1.VolumeMount, 0, 5)
 		if !blockVolume {
 			volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: dataVolumeName, MountPath: mountPath})
 		}
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "keys", MountPath: "/keys"},
-			corev1.VolumeMount{Name: "tempdir", MountPath: "/tmp"})
+			corev1.VolumeMount{Name: "tempdir", MountPath: "/tmp"},
+			corev1.VolumeMount{Name: "ceph-config", MountPath: "/etc/ceph"},
+			corev1.VolumeMount{Name: "ceph-csi-config", MountPath: "/etc/ceph-csi-config"})
 		job.Spec.Template.Spec.Containers[0].VolumeMounts = volumeMounts
 		if blockVolume {
 			job.Spec.Template.Spec.Containers[0].VolumeDevices = []corev1.VolumeDevice{
@@ -763,6 +605,12 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 				EmptyDir: &corev1.EmptyDirVolumeSource{
 					Medium: corev1.StorageMediumMemory,
 				}},
+			},
+			{Name: "ceph-config", VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			},
+			{Name: "ceph-csi-config", VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{}},
 			},
 		}
 		if m.vh.IsCopyMethodDirect() {
