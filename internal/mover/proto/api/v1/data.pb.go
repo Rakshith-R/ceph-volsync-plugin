@@ -94,6 +94,89 @@ func (x *ChangedBlock) GetIsZero() bool {
 	return false
 }
 
+// SyncRequest wraps a single write or commit operation sent over the stream.
+type SyncRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Operation:
+	//
+	//	*SyncRequest_Write
+	//	*SyncRequest_Commit
+	Operation     isSyncRequest_Operation `protobuf_oneof:"operation"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncRequest) Reset() {
+	*x = SyncRequest{}
+	mi := &file_api_v1_data_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncRequest) ProtoMessage() {}
+
+func (x *SyncRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_data_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
+func (*SyncRequest) Descriptor() ([]byte, []int) {
+	return file_api_v1_data_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SyncRequest) GetOperation() isSyncRequest_Operation {
+	if x != nil {
+		return x.Operation
+	}
+	return nil
+}
+
+func (x *SyncRequest) GetWrite() *WriteRequest {
+	if x != nil {
+		if x, ok := x.Operation.(*SyncRequest_Write); ok {
+			return x.Write
+		}
+	}
+	return nil
+}
+
+func (x *SyncRequest) GetCommit() *CommitRequest {
+	if x != nil {
+		if x, ok := x.Operation.(*SyncRequest_Commit); ok {
+			return x.Commit
+		}
+	}
+	return nil
+}
+
+type isSyncRequest_Operation interface {
+	isSyncRequest_Operation()
+}
+
+type SyncRequest_Write struct {
+	Write *WriteRequest `protobuf:"bytes,1,opt,name=write,proto3,oneof"`
+}
+
+type SyncRequest_Commit struct {
+	Commit *CommitRequest `protobuf:"bytes,3,opt,name=commit,proto3,oneof"`
+}
+
+func (*SyncRequest_Write) isSyncRequest_Operation() {}
+
+func (*SyncRequest_Commit) isSyncRequest_Operation() {}
+
 // WriteRequest represents a batched write operation.
 type WriteRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -107,7 +190,7 @@ type WriteRequest struct {
 
 func (x *WriteRequest) Reset() {
 	*x = WriteRequest{}
-	mi := &file_api_v1_data_proto_msgTypes[1]
+	mi := &file_api_v1_data_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -119,7 +202,7 @@ func (x *WriteRequest) String() string {
 func (*WriteRequest) ProtoMessage() {}
 
 func (x *WriteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_data_proto_msgTypes[1]
+	mi := &file_api_v1_data_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -132,7 +215,7 @@ func (x *WriteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteRequest.ProtoReflect.Descriptor instead.
 func (*WriteRequest) Descriptor() ([]byte, []int) {
-	return file_api_v1_data_proto_rawDescGZIP(), []int{1}
+	return file_api_v1_data_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *WriteRequest) GetPath() string {
@@ -149,29 +232,30 @@ func (x *WriteRequest) GetBlocks() []*ChangedBlock {
 	return nil
 }
 
-// WriteResponse is empty on success.
-// Errors are reported via gRPC status codes.
-type WriteResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+// DeleteRequest represents a batch file or directory deletion operation.
+type DeleteRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Target paths to files or directories to delete (recursive by default).
+	Paths         []string `protobuf:"bytes,1,rep,name=paths,proto3" json:"paths,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *WriteResponse) Reset() {
-	*x = WriteResponse{}
-	mi := &file_api_v1_data_proto_msgTypes[2]
+func (x *DeleteRequest) Reset() {
+	*x = DeleteRequest{}
+	mi := &file_api_v1_data_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *WriteResponse) String() string {
+func (x *DeleteRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*WriteResponse) ProtoMessage() {}
+func (*DeleteRequest) ProtoMessage() {}
 
-func (x *WriteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_data_proto_msgTypes[2]
+func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_data_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -182,9 +266,139 @@ func (x *WriteResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use WriteResponse.ProtoReflect.Descriptor instead.
-func (*WriteResponse) Descriptor() ([]byte, []int) {
-	return file_api_v1_data_proto_rawDescGZIP(), []int{2}
+// Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
+func (*DeleteRequest) Descriptor() ([]byte, []int) {
+	return file_api_v1_data_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *DeleteRequest) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+// CommitRequest signals that all data for the specified file has been sent
+// and the destination should sync and close the file.
+type CommitRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Target path of the file to commit.
+	Path          string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommitRequest) Reset() {
+	*x = CommitRequest{}
+	mi := &file_api_v1_data_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitRequest) ProtoMessage() {}
+
+func (x *CommitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_data_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitRequest.ProtoReflect.Descriptor instead.
+func (*CommitRequest) Descriptor() ([]byte, []int) {
+	return file_api_v1_data_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CommitRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+// SyncResponse is empty on success.
+// Errors are reported via gRPC status codes.
+type SyncResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncResponse) Reset() {
+	*x = SyncResponse{}
+	mi := &file_api_v1_data_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncResponse) ProtoMessage() {}
+
+func (x *SyncResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_data_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
+func (*SyncResponse) Descriptor() ([]byte, []int) {
+	return file_api_v1_data_proto_rawDescGZIP(), []int{5}
+}
+
+// DeleteResponse is empty on success.
+// Errors are reported via gRPC status codes.
+type DeleteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteResponse) Reset() {
+	*x = DeleteResponse{}
+	mi := &file_api_v1_data_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteResponse) ProtoMessage() {}
+
+func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_data_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteResponse.ProtoReflect.Descriptor instead.
+func (*DeleteResponse) Descriptor() ([]byte, []int) {
+	return file_api_v1_data_proto_rawDescGZIP(), []int{6}
 }
 
 var File_api_v1_data_proto protoreflect.FileDescriptor
@@ -196,13 +410,23 @@ const file_api_v1_data_proto_rawDesc = "" +
 	"\x06offset\x18\x01 \x01(\x04R\x06offset\x12\x16\n" +
 	"\x06length\x18\x02 \x01(\x04R\x06length\x12\x12\n" +
 	"\x04data\x18\x03 \x01(\fR\x04data\x12\x17\n" +
-	"\ais_zero\x18\x04 \x01(\bR\x06isZero\"P\n" +
+	"\ais_zero\x18\x04 \x01(\bR\x06isZero\"y\n" +
+	"\vSyncRequest\x12,\n" +
+	"\x05write\x18\x01 \x01(\v2\x14.api.v1.WriteRequestH\x00R\x05write\x12/\n" +
+	"\x06commit\x18\x03 \x01(\v2\x15.api.v1.CommitRequestH\x00R\x06commitB\v\n" +
+	"\toperation\"P\n" +
 	"\fWriteRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12,\n" +
-	"\x06blocks\x18\x02 \x03(\v2\x14.api.v1.ChangedBlockR\x06blocks\"\x0f\n" +
-	"\rWriteResponse2C\n" +
-	"\vDataService\x124\n" +
-	"\x05Write\x12\x14.api.v1.WriteRequest\x1a\x15.api.v1.WriteResponseB\x85\x01\n" +
+	"\x06blocks\x18\x02 \x03(\v2\x14.api.v1.ChangedBlockR\x06blocks\"%\n" +
+	"\rDeleteRequest\x12\x14\n" +
+	"\x05paths\x18\x01 \x03(\tR\x05paths\"#\n" +
+	"\rCommitRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"\x0e\n" +
+	"\fSyncResponse\"\x10\n" +
+	"\x0eDeleteResponse2{\n" +
+	"\vDataService\x123\n" +
+	"\x04Sync\x12\x13.api.v1.SyncRequest\x1a\x14.api.v1.SyncResponse(\x01\x127\n" +
+	"\x06Delete\x12\x15.api.v1.DeleteRequest\x1a\x16.api.v1.DeleteResponseB\x85\x01\n" +
 	"\n" +
 	"com.api.v1B\tDataProtoP\x01Z3github.com/RamenDR/ceph-volsync-plugin/api/v1;apiv1\xa2\x02\x03AXX\xaa\x02\x06Api.V1\xca\x02\x06Api\\V1\xe2\x02\x12Api\\V1\\GPBMetadata\xea\x02\aApi::V1b\x06proto3"
 
@@ -218,21 +442,29 @@ func file_api_v1_data_proto_rawDescGZIP() []byte {
 	return file_api_v1_data_proto_rawDescData
 }
 
-var file_api_v1_data_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_api_v1_data_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_api_v1_data_proto_goTypes = []any{
-	(*ChangedBlock)(nil),  // 0: api.v1.ChangedBlock
-	(*WriteRequest)(nil),  // 1: api.v1.WriteRequest
-	(*WriteResponse)(nil), // 2: api.v1.WriteResponse
+	(*ChangedBlock)(nil),   // 0: api.v1.ChangedBlock
+	(*SyncRequest)(nil),    // 1: api.v1.SyncRequest
+	(*WriteRequest)(nil),   // 2: api.v1.WriteRequest
+	(*DeleteRequest)(nil),  // 3: api.v1.DeleteRequest
+	(*CommitRequest)(nil),  // 4: api.v1.CommitRequest
+	(*SyncResponse)(nil),   // 5: api.v1.SyncResponse
+	(*DeleteResponse)(nil), // 6: api.v1.DeleteResponse
 }
 var file_api_v1_data_proto_depIdxs = []int32{
-	0, // 0: api.v1.WriteRequest.blocks:type_name -> api.v1.ChangedBlock
-	1, // 1: api.v1.DataService.Write:input_type -> api.v1.WriteRequest
-	2, // 2: api.v1.DataService.Write:output_type -> api.v1.WriteResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2, // 0: api.v1.SyncRequest.write:type_name -> api.v1.WriteRequest
+	4, // 1: api.v1.SyncRequest.commit:type_name -> api.v1.CommitRequest
+	0, // 2: api.v1.WriteRequest.blocks:type_name -> api.v1.ChangedBlock
+	1, // 3: api.v1.DataService.Sync:input_type -> api.v1.SyncRequest
+	3, // 4: api.v1.DataService.Delete:input_type -> api.v1.DeleteRequest
+	5, // 5: api.v1.DataService.Sync:output_type -> api.v1.SyncResponse
+	6, // 6: api.v1.DataService.Delete:output_type -> api.v1.DeleteResponse
+	5, // [5:7] is the sub-list for method output_type
+	3, // [3:5] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_api_v1_data_proto_init() }
@@ -240,13 +472,17 @@ func file_api_v1_data_proto_init() {
 	if File_api_v1_data_proto != nil {
 		return
 	}
+	file_api_v1_data_proto_msgTypes[1].OneofWrappers = []any{
+		(*SyncRequest_Write)(nil),
+		(*SyncRequest_Commit)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_v1_data_proto_rawDesc), len(file_api_v1_data_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

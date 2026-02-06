@@ -1,0 +1,17 @@
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationDestination
+metadata:
+  name: v-dest
+  namespace: ceph-volsync-plugin-operator-system
+spec:
+  rsyncTLS:
+    accessModes:
+    - ReadWriteOnce
+    # capacity: 1Gi
+    copyMethod: Snapshot
+    destinationPVC: rsync-dest-pvc
+    serviceType: ClusterIP
+    storageClassName: ocs-storagecluster-cephfs
+    volumeSnapshotClassName: ocs-storagecluster-cephfsplugin-snapclass
+  trigger:
+    # manual: 2026-01-28 12:50:25 +0000 UTC

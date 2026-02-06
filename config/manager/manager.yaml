@@ -69,7 +69,9 @@ spec:
         - name: MOVER_IMAGE
           value: MOVER_IMAGE_PLACEHOLDER
         - name: CEPH_CSI_CONFIGMAP_NAME
-          value: ceph-csi-config
+          value: ceph-csi-config        
+        - name: CEPH_CSI_CONFIGMAP_NAMESPACE
+          value: ceph-volsync-plugin-operator-system
         - name: MOVER_CLUSTER_ROLE_NAME
           value: mover-role
         ports: []

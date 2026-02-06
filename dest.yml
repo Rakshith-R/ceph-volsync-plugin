@@ -1,7 +1,7 @@
 apiVersion: volsync.backube/v1alpha1
 kind: ReplicationDestination
 metadata:
-  name: dest
+  name: cft-dest
 spec:  
   # trigger: 
   #   manual: "hash-1"
@@ -10,13 +10,16 @@ spec:
   external: 
     provider: "openshift-storage.cephfs.csi.ceph.com" # driver name
     parameters:
-      # keySecret: <secretName>
+      # secretKey: volsync-cephfs-dest
       # serviceType: <ClusterIP(default) | LoadBalancer>
       
-      destinationPVC: dest-pvc
+      destinationPVC: cft-dest-pvc
       
+      # storageClassName: ocs-storagecluster-cephfs
+      # volumeSnapshotClassName: ocs-storagecluster-cephfsplugin-snapclass
+
       storageClassName: rook-cephfs
-      volumeSnapshotClassName: csi-cephfsplugin-snapclass 
+      volumeSnapshotClassName: csi-cephfsplugin-snapclass
       
       copyMethod: Snapshot
 
@@ -24,3 +27,18 @@ spec:
       # baseSnapshotName: <base-snapshot-name> # required for Diff sync
       # targetSnapshotName: <target-snapshot-name> # required for Diff sync
       # parentVolumeName: <parent-volume-name> # required for Diff sync 
+---
+# apiVersion: v1
+# data:
+#   psk.txt: dm9sc3luYzo2NzI5MDQ3OTJmZjg3YTA1YzA5MGIwZjc0NDNjYzBkODE0ZTRiNTg0NmIyOTVmZGQzYmRhOWQxYWYxZDUxNWE4YmI5OWMwMDA2NDE0MzM3MDU1OTczYmU1NTVhOTc5NzkxMWZkYTZlMTQyMzYzYmVhOGRlMTk0NzhjM2JmOWM5NQ==
+# kind: Secret
+# metadata:
+#   name: volsync-cephfs-dest
+#   namespace: ceph-volsync-plugin-operator-system
+# type: Opaque
+# ---
+# apiVersion: multicluster.x-k8s.io/v1alpha1
+# kind: ServiceExport
+# metadata:
+#   name: volsync-cephfs-dst-dest
+#   namespace: ceph-volsync-plugin-operator-system
