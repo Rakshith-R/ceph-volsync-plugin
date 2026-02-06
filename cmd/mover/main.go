@@ -25,6 +25,7 @@ import (
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/destination"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/source"
+	"github.com/backube/volsync/controllers/utils"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/spf13/cobra"
@@ -112,6 +113,9 @@ func runMover(config Config) error {
 	}
 
 	ctrl.SetLogger(logger)
+
+	// Set the SCC name in utils package for use in Role creation
+	utils.SCCName = "ceph-volsync-plugin-privileged-mover"
 
 	// Validate worker type
 	if err := validateWorkerType(config.WorkerType); err != nil {
