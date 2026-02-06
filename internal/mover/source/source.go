@@ -213,15 +213,9 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 	defer cc.Destroy()
 
-	mountInfo, err := cc.CreateMountFromRados()
-	if err != nil {
-		return fmt.Errorf("failed to create cephfs from rados: %w", err)
-	}
-	err = mountInfo.Mount()
-	if err != nil {
-		return fmt.Errorf("failed to init mount info: %w", err)
-	}
-
+	// Get FSAdmin and subvolume path BEFORE mounting
+	// This is necessary because a restricted ceph user may only have access
+	// to the specific subvolume path, not the root of the filesystem
 	fsa, err := cc.GetFSAdmin()
 	if err != nil {
 		return fmt.Errorf("failed to get FSAdmin: %w", err)
@@ -235,9 +229,24 @@ func (w *Worker) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get subvolume path: %w", err)
 	}
-	rootPath := path.Dir(subVolumePath)
-	relPath := path.Base(subVolumePath)
-	log.Default().Printf("Subvolume path: %s, rootPath: %s, relPath: %s\n", subVolumePath, rootPath, relPath)
+
+	mountInfo, err := cc.CreateMountFromRados()
+	if err != nil {
+		return fmt.Errorf("failed to create cephfs from rados: %w", err)
+	}
+	// Mount directly at the subvolume path to support restricted ceph users
+	// who only have access to this specific subvolume
+	err = mountInfo.MountWithRoot(subVolumePath)
+	if err != nil {
+		return fmt.Errorf("failed to mount at subvolume path %s: %w", subVolumePath, err)
+	}
+	// Since we mounted with MountWithRoot(subVolumePath), the root of the mount
+	// is now the subvolume itself. Therefore:
+	// - rootPath should be "/" (the root of our mounted filesystem)
+	// - relPath should be "." (we start from the root of the mount)
+	rootPath := "/"
+	relPath := "."
+	log.Default().Printf("Mounted at subvolume path: %s, using rootPath: %s, relPath: %s\n", subVolumePath, rootPath, relPath)
 
 	dataVolumePath := "/data"
 	resultChan := initSnapDiffChan(mountInfo, dataVolumePath, rootPath, relPath, baseSnapName, targetSnapName)
