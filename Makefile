@@ -5,6 +5,11 @@
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
 VERSION ?= 0.0.1
 
+# VOLSYNC_VERSION defines the VolSync version for CRD installation.
+# VolSync CRDs provide ReplicationSource and ReplicationDestination resources.
+# Override with: make install VOLSYNC_VERSION=v0.15.0
+VOLSYNC_VERSION ?= v0.14.0
+
 # Creating the New CatalogSource requires publishing CSVs that replace one operator,
 # but can skip several. This can be accomplished using the skipRange annotation:
 SKIP_RANGE ?=
@@ -232,12 +237,12 @@ ifndef ignore-not-found
 endif
 
 .PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	$(KUSTOMIZE) build config/crd | $(KUBECTL) apply -f -
+install: ## Install VolSync CRDs into K8s cluster.
+	VOLSYNC_VERSION=$(VOLSYNC_VERSION) test/scripts/install_volsync.sh install
 
 .PHONY: uninstall
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+uninstall: ## Uninstall VolSync CRDs from K8s cluster.
+	test/scripts/install_volsync.sh cleanup
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.

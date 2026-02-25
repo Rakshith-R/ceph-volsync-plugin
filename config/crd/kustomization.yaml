@@ -1,0 +1,3 @@
+# This project has no custom CRDs (no API definitions in codebase)
+# VolSync CRDs are installed via test/install_volsync.sh
+resources: []

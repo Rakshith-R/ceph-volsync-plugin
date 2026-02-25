@@ -1,13 +1,17 @@
-name: Tests
+name: E2E Tests
 
 on:
-  push:
   pull_request:
 
+# defaults:
+#   run:
+    # reference: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#using-a-specific-shell
+    # shell: bash --noprofile --norc -eo pipefail -x {0}
+
 jobs:
-  test:
+  test-e2e:
     name: Run on Ubuntu
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
@@ -17,7 +21,55 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Running Tests
+      - name: Install cri-dockerd
+        run: |
+          ARCH=$(go env GOARCH)
+          curl -LO https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.21/cri-dockerd_0.3.21.3-0.ubuntu-focal_${ARCH}.deb
+          sudo dpkg -i cri-dockerd_0.3.21.3-0.ubuntu-focal_${ARCH}.deb
+          rm -f cri-dockerd_0.3.21.3-0.ubuntu-focal_${ARCH}.deb
+
+      - name: Setup Minikube
+        uses: medyagh/setup-minikube@latest
+        with:
+          minikube-version: "1.38.0"
+          kubernetes-version: v1.34.0
+          driver: none
+          container-runtime: docker
+          memory: 6g
+          cpus: 2
+          cni: calico
+
+      - name: Deploy Rook Ceph
+        run: test/scripts/deploy_rook_ceph.sh install
+        
+      - name: Build, load and deploy ceph-volsync-plugin operator
+        run: |
+          IMG=localhost/ceph-volsync-plugin-operator:test
+          MOVER_IMG=localhost/ceph-volsync-plugin-mover:test
+          make docker-build IMG=$IMG
+          make docker-build-mover MOVER_IMG=$MOVER_IMG
+          make install
+          make deploy IMG=$IMG MOVER_IMG=$MOVER_IMG
+
+      - name: Install snapshot controller
+        run: test/scripts/install_snapshot.sh install
+
+      - name: Running Test e2e
         run: |
           go mod tidy
-          make test
+          make manifests generate fmt vet test
+          go test ./test/e2e/ -v -ginkgo.v
+
+      - name: Cleanup ceph-volsync-plugin operator
+        run: |
+          IMG=localhost/ceph-volsync-plugin-operator:test
+          MOVER_IMG=localhost/ceph-volsync-plugin-mover:test
+          make undeploy IMG=$IMG MOVER_IMG=$MOVER_IMG
+          make uninstall
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          kubectl -n rook-ceph get cephclusters.ceph.rook.io -o yaml || true
+          kubectl -n rook-ceph get pods -o wide || true
+          kubectl -n rook-ceph get events --sort-by='.lastTimestamp' || true
