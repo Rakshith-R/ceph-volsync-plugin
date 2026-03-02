@@ -27,7 +27,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/rsynctls"
+	"github.com/backube/volsync/controllers/mover/rsynctls"
 	"github.com/go-logr/logr"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	batchv1 "k8s.io/api/batch/v1"
