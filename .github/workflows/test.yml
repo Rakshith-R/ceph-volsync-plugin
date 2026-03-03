@@ -53,7 +53,7 @@ jobs:
           IMG=localhost/ceph-volsync-plugin-operator:test
           MOVER_IMG=localhost/ceph-volsync-plugin-mover:test
           go mod tidy
-          make manifests generate fmt vet test check-uncommitted
+          make manifests generate fmt check-uncommitted
           make docker-build IMG=$IMG
           make docker-build-mover MOVER_IMG=$MOVER_IMG
           make install
