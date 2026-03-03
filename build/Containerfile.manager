@@ -91,4 +91,6 @@ COPY --from=builder /workspace/manager .
 RUN [ $(ldd /manager | grep -c '=> not found') \
     = '0' ]
 
+USER 65532:65532
+
 ENTRYPOINT ["/manager"]
