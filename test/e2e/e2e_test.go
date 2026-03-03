@@ -31,7 +31,7 @@ import (
 )
 
 // namespace where the project is deployed in
-const namespace = "ceph-volsync-plugin-operator-system"
+const namespace = "rook-ceph"
 
 // serviceAccountName created for the project
 const serviceAccountName = "ceph-volsync-plugin-operator-controller-manager"
