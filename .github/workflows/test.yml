@@ -57,6 +57,10 @@ jobs:
           make docker-build IMG=$IMG
           make docker-build-mover MOVER_IMG=$MOVER_IMG
           make install
+          kubectl create namespace rook-ceph
+          sed -i \
+            's/namespace: .*/namespace: rook-ceph/' \
+            config/default/kustomization.yaml
           make deploy IMG=$IMG MOVER_IMG=$MOVER_IMG
 
       - name: Install snapshot controller
