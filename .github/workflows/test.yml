@@ -19,6 +19,9 @@ jobs:
   test-e2e:
     name: Run on Ubuntu
     runs-on: ubuntu-latest
+    env:
+      IMG: localhost/ceph-volsync-plugin-operator:test
+      MOVER_IMG: localhost/ceph-volsync-plugin-mover:test
     steps:
       - name: Clone the code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -48,26 +51,26 @@ jobs:
           cpus: 2
           cni: calico
 
-      - name: Build, load and deploy ceph-volsync-plugin operator
+      - name: Build and load container images
         run: |
-          IMG=localhost/ceph-volsync-plugin-operator:test
-          MOVER_IMG=localhost/ceph-volsync-plugin-mover:test
           go mod tidy
           make manifests generate fmt check-uncommitted
           make docker-build IMG=$IMG
           make docker-build-mover MOVER_IMG=$MOVER_IMG
           make install
-          kubectl create namespace rook-ceph
-          sed -i \
-            's/namespace: .*/namespace: rook-ceph/' \
-            config/default/kustomization.yaml
-          make deploy IMG=$IMG MOVER_IMG=$MOVER_IMG
 
       - name: Install snapshot controller
         run: test/scripts/install_snapshot.sh install
 
       - name: Deploy Rook Ceph
         run: test/scripts/deploy_rook_ceph.sh install
+
+      - name: Deploy ceph-volsync-plugin operator
+        run: |
+          sed -i \
+            's/namespace: .*/namespace: rook-ceph/' \
+            config/default/kustomization.yaml
+          make deploy IMG=$IMG MOVER_IMG=$MOVER_IMG
 
       - name: Running Test e2e
         run: |
