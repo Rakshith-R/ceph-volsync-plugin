@@ -28,7 +28,6 @@ import (
 	"github.com/backube/volsync/controllers/utils"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
-	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -47,62 +46,30 @@ type Config struct {
 }
 
 func main() {
-	if err := newRootCommand().Execute(); err != nil {
+	config := loadConfig()
+
+	if err := runMover(config); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func newRootCommand() *cobra.Command {
-	var config Config
-
-	cmd := &cobra.Command{
-		Use:   "mover",
-		Short: "Ceph VolSync Plugin Mover",
-		Long: `A data mover component for the Ceph VolSync
-Plugin that can operate as either a source or
-destination worker.
-
-This component handles data synchronization tasks
-between storage systems as part of the Ceph VolSync
-Plugin architecture.`,
-		RunE: func(
-			cmd *cobra.Command, args []string,
-		) error {
-			return runMover(config)
-		},
+func envOrDefault(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
+	return defaultVal
+}
 
-	// Add flags
-	cmd.Flags().StringVar(
-		&config.WorkerType, "worker-type", "",
-		fmt.Sprintf(
-			"Worker type (required): %s or %s",
-			WorkerTypeSource, WorkerTypeDestination,
+func loadConfig() Config {
+	return Config{
+		WorkerType: os.Getenv("WORKER_TYPE"),
+		DestinationAddress: os.Getenv(
+			"DESTINATION_ADDRESS",
 		),
-	)
-	cmd.Flags().StringVar(
-		&config.DestinationAddress,
-		"destination-address", "",
-		"Destination address (optional, host:port)",
-	)
-	cmd.Flags().StringVar(
-		&config.LogLevel, "log-level", "info",
-		"Log level: debug, info, warn, error",
-	)
-	cmd.Flags().StringVar(
-		&config.ServerPort, "server-port", "8080",
-		"Port for gRPC server (default: 8080)",
-	)
-
-	// Mark required flags
-	if err := cmd.MarkFlagRequired("worker-type"); err != nil {
-		panic(fmt.Sprintf(
-			"Failed to mark worker-type flag: %v", err,
-		))
+		LogLevel:   envOrDefault("LOG_LEVEL", "info"),
+		ServerPort: envOrDefault("SERVER_PORT", "8080"),
 	}
-
-	return cmd
 }
 
 func runMover(config Config) error {
@@ -120,19 +87,21 @@ func runMover(config Config) error {
 	utils.SCCName = "ceph-volsync-plugin-privileged-mover"
 
 	// Validate worker type
-	if err := validateWorkerType(
-		config.WorkerType,
-	); err != nil {
-		return err
+	if config.WorkerType == "" {
+		return fmt.Errorf(
+			"WORKER_TYPE env var is required",
+		)
 	}
 
-	// Validate destination address if provided
-	if config.DestinationAddress != "" {
-		if err := validateDestinationAddress(
-			config.DestinationAddress,
-		); err != nil {
-			return err
-		}
+	if config.WorkerType != WorkerTypeSource &&
+		config.WorkerType != WorkerTypeDestination {
+		return fmt.Errorf(
+			"invalid WORKER_TYPE '%s':"+
+				" must be '%s' or '%s'",
+			config.WorkerType,
+			WorkerTypeSource,
+			WorkerTypeDestination,
+		)
 	}
 
 	logger.Info("Starting mover",
@@ -170,28 +139,6 @@ func runMover(config Config) error {
 			config.WorkerType,
 		)
 	}
-}
-
-func validateWorkerType(workerType string) error {
-	if workerType != WorkerTypeSource &&
-		workerType != WorkerTypeDestination {
-		return fmt.Errorf(
-			"invalid worker-type '%s': must be '%s' or '%s'",
-			workerType,
-			WorkerTypeSource,
-			WorkerTypeDestination,
-		)
-	}
-	return nil
-}
-
-func validateDestinationAddress(address string) error {
-	if address == "" {
-		return fmt.Errorf(
-			"destination-address cannot be empty",
-		)
-	}
-	return nil
 }
 
 func setupLogger(level string) (logr.Logger, error) {

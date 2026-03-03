@@ -85,14 +85,20 @@ This document summarizes the integration of `stunnel.sh` into the Ceph VolSync P
 
 ### 5. cmd/mover/main.go
 
-**Changes**: None required
+**Changes**: Removed cobra CLI flags in favour of
+environment variables.
 
-**Rationale**: The existing implementation already supports all required command-line flags:
-- `--worker-type`: Used by stunnel.sh to determine mode
-- `--destination-address`: Passed by stunnel.sh (modified to 127.0.0.1:8001 for source gRPC tunnel)
-- `--server-port`: Used by mover to start gRPC server
+The mover binary now reads its configuration directly
+from environment variables set by the Kubernetes Job:
+- `WORKER_TYPE`: Required, "source" or "destination"
+- `DESTINATION_ADDRESS`: Optional, host:port
+- `LOG_LEVEL`: Optional, default "info"
+- `SERVER_PORT`: Optional, default "8080"
 
-The stunnel.sh script correctly constructs these arguments.
+**Rationale**: The Job already sets these as env vars
+and stunnel.sh was redundantly converting them to CLI
+flags. Reading env vars directly removes the cobra
+dependency and the intermediary conversion step.
 
 ## Architecture
 
@@ -121,11 +127,19 @@ rsync client → 127.0.0.1:8873 → stunnel [rsync-tls] → DESTINATION_ADDRESS:
 The Kubernetes Job spec sets these environment variables:
 - `WORKER_TYPE`: "source" or "destination" (required)
 - `SERVER_PORT`: "8080" (or custom) - gRPC server port
+- `LOG_LEVEL`: "info" (default) - mover log level
 - `DESTINATION_ADDRESS`: Target address (source only)
-- `DESTINATION_PORT`: Target port for gRPC (source only, default 8000)
-- `ENABLE_RSYNC_TUNNEL`: "true" or "false" (default: false for generic, true for CephFS)
+- `DESTINATION_PORT`: Target port for gRPC
+  (source only, default 8000)
+- `ENABLE_RSYNC_TUNNEL`: "true" or "false"
+  (default: false for generic, true for CephFS)
 - `RSYNC_PORT`: External rsync port (default: 8873)
-- `RSYNC_DAEMON_PORT`: Internal rsync daemon port (default: 8873)
+- `RSYNC_DAEMON_PORT`: Internal rsync daemon port
+  (default: 8873)
+
+The mover binary reads `WORKER_TYPE`,
+`DESTINATION_ADDRESS`, `LOG_LEVEL`, and `SERVER_PORT`
+directly from the environment (no CLI flags).
 
 The stunnel.sh script:
 1. Validates environment variables
@@ -135,12 +149,16 @@ The stunnel.sh script:
    - `[grpc-tls]` service (always created)
    - `[rsync-tls]` service (created only if ENABLE_RSYNC_TUNNEL=true)
 5. Starts stunnel daemon
-6. Starts rsync daemon on destination if ENABLE_RSYNC_TUNNEL=true
+6. Starts rsync daemon on destination if
+   ENABLE_RSYNC_TUNNEL=true
    - Configured at `/tmp/rsyncd.conf`
    - Listens on RSYNC_DAEMON_PORT (default: 8873)
    - Serves `/data` directory
    - Uses PSK file for authentication
-7. Executes `/mover` with appropriate arguments
+7. For source workers, overrides
+   `DESTINATION_ADDRESS` to `127.0.0.1:8001`
+   (the local stunnel endpoint)
+8. Executes `/mover` (reads config from env vars)
 
 ### Security Model
 

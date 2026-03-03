@@ -242,15 +242,14 @@ EOF
     echo "rsync daemon started successfully with PID $RSYNC_PID_VAL"
 fi
 
-# Prepare mover arguments
-MOVER_ARGS="--worker-type=$WORKER_TYPE --server-port=$SERVER_PORT"
-
-if [[ "$WORKER_TYPE" == "source" && -n "$DESTINATION_ADDRESS" ]]; then
-    # For source, we connect to local stunnel client port instead of direct destination
-    MOVER_ARGS="$MOVER_ARGS --destination-address=127.0.0.1:8001"
+# For source, override DESTINATION_ADDRESS to point
+# to the local stunnel client endpoint.
+if [[ "$WORKER_TYPE" == "source" \
+    && -n "$DESTINATION_ADDRESS" ]]; then
+    export DESTINATION_ADDRESS="127.0.0.1:8001"
 fi
 
-echo "Starting mover with arguments: $MOVER_ARGS"
+echo "Starting mover"
 
 # Function to cleanup on exit
 cleanup() {
@@ -275,4 +274,4 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Start the mover and wait for it
-exec /mover $MOVER_ARGS
+exec /mover

@@ -665,6 +665,11 @@ func (m *Mover) ensureJob(
 			Value: defaultServerPort,
 		})
 
+		containerEnv = append(containerEnv, corev1.EnvVar{
+			Name:  "LOG_LEVEL",
+			Value: "info",
+		})
+
 		// Enable rsync tunnel by default for CephFS mover
 		containerEnv = append(containerEnv, corev1.EnvVar{
 			Name:  "ENABLE_RSYNC_TUNNEL",
