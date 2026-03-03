@@ -20,6 +20,7 @@ jobs:
     name: Run on Ubuntu
     runs-on: ubuntu-latest
     env:
+      CONTAINER_TOOL: docker
       IMG: localhost/ceph-volsync-plugin-operator:test
       MOVER_IMG: localhost/ceph-volsync-plugin-mover:test
     steps:
