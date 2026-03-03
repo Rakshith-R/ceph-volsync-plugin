@@ -40,6 +40,7 @@ import (
 
 const (
 	cephfsProviderName = "cephfs.csi.ceph.com"
+	nfsProviderName    = "nfs.csi.ceph.io"
 	cephfsMoverName    = "cephfs"
 	// defaultCephFSContainerImage is the default container image for the
 	// cephfs data mover
@@ -202,7 +203,11 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 	eventRecorder events.EventRecorder,
 	destination *volsyncv1alpha1.ReplicationDestination, privileged bool) (mover.Mover, error) {
 	// Only build if the CR belongs to us
-	if destination.Spec.External == nil || strings.HasPrefix(destination.Spec.External.Provider, cephfsProviderName) {
+	if destination.Spec.External == nil {
+		return nil, nil
+	}
+	provider := destination.Spec.External.Provider
+	if !strings.HasPrefix(provider, cephfsProviderName) || strings.HasPrefix(provider, nfsProviderName) {
 		return nil, nil
 	}
 
