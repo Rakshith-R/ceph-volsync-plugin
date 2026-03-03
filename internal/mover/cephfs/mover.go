@@ -21,18 +21,19 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
 	"github.com/backube/volsync/controllers/mover/rsynctls"
 	"github.com/go-logr/logr"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/events"
@@ -60,18 +61,14 @@ const (
 
 	volSyncCephFSPrefix = mover.VolSyncPrefix + "cephfs-"
 
-	// MoverClusterRoleNameEnvVar is the environment variable name for the mover ClusterRole
-	MoverClusterRoleNameEnvVar = "MOVER_CLUSTER_ROLE_NAME"
-	// DefaultMoverClusterRoleName is the default name of the ClusterRole for mover jobs
-	DefaultMoverClusterRoleName = "mover-role"
+	// Paths for ceph-csi config mounted in the operator
+	csiConfigMountPath = "/etc/ceph-csi-config"
 
-	// ClusterRoleBindingLabelKey is the label key used to identify ClusterRoleBindings created for mover jobs
-	// The value is the owner's UID
-	ClusterRoleBindingLabelKey = utils.VolsyncLabelPrefix + "/mover-clusterrolebinding-owner-uid"
-
-	// Environment variable names for ConfigMap configuration
-	configMapNameEnvVar      = "CEPH_CSI_CONFIGMAP_NAME"
-	configMapNamespaceEnvVar = "CEPH_CSI_CONFIGMAP_NAMESPACE"
+	// Volume name, mount path, and JSON key for
+	// ceph-csi secret
+	csiSecretVolumeName = "ceph-csi-secret"
+	CsiSecretMountPath  = "/etc/ceph-csi-secret"
+	CsiSecretJSONKey    = "credentials.json"
 )
 
 // Mover is the reconciliation logic for the CephFS-based data mover.
@@ -146,13 +143,23 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 		return mover.InProgress(), err
 	}
 
-	// Ensure mover ClusterRoleBinding for secrets/configmaps access
-	if err := m.ensureMoverClusterRoleBinding(ctx, sa); err != nil {
+	// Ensure ceph-csi ConfigMap in owner namespace
+	csiConfigMapName, err := m.ensureCephCSIConfigMap(ctx)
+	if csiConfigMapName == nil || err != nil {
+		return mover.InProgress(), err
+	}
+
+	// Ensure ceph-csi Secret in owner namespace
+	csiSecretName, err := m.ensureCephCSISecret(ctx)
+	if csiSecretName == nil || err != nil {
 		return mover.InProgress(), err
 	}
 
 	// Ensure mover Job
-	job, err := m.ensureJob(ctx, dataPVC, sa, *rsyncPSKSecretName)
+	job, err := m.ensureJob(
+		ctx, dataPVC, sa, *rsyncPSKSecretName,
+		*csiConfigMapName, *csiSecretName,
+	)
 	if job == nil || err != nil {
 		return mover.InProgress(), err
 	}
@@ -300,50 +307,205 @@ func (m *Mover) ensureSecrets(ctx context.Context) (*string, error) {
 	return &keySecret.Name, nil
 }
 
-// ensureMoverClusterRoleBinding creates a ClusterRoleBinding that binds the mover's ServiceAccount
-// to the mover-role ClusterRole, allowing access to secrets and configmaps.
-func (m *Mover) ensureMoverClusterRoleBinding(ctx context.Context, sa *corev1.ServiceAccount) error {
-	clusterRoleBinding := &rbacv1.ClusterRoleBinding{
+// ensureCephCSIConfigMap reads the ceph-csi config files
+// from the operator's mounted ConfigMap and creates a
+// per-RS/RD ConfigMap in the owner's namespace.
+func (m *Mover) ensureCephCSIConfigMap(
+	ctx context.Context,
+) (*string, error) {
+	cmName := volSyncCephFSPrefix +
+		"csi-config-" + m.direction() + "-" +
+		m.owner.GetName()
+	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: volSyncCephFSPrefix + m.owner.GetNamespace() + "-" + m.direction() + "-" + m.owner.GetName() + "-mover",
+			Name:      cmName,
+			Namespace: m.owner.GetNamespace(),
 		},
 	}
-	logger := m.logger.WithValues("ClusterRoleBinding", clusterRoleBinding.Name)
+	logger := m.logger.WithValues("ConfigMap", cmName)
 
-	op, err := ctrlutil.CreateOrUpdate(ctx, m.client, clusterRoleBinding, func() error {
-		// Add owner UID label
-		if clusterRoleBinding.Labels == nil {
-			clusterRoleBinding.Labels = make(map[string]string)
-		}
-		clusterRoleBinding.Labels[ClusterRoleBindingLabelKey] = string(m.owner.GetUID())
+	data := make(map[string]string)
 
-		// Get ClusterRole name from environment variable or use default
-		clusterRoleName := os.Getenv(MoverClusterRoleNameEnvVar)
-		if clusterRoleName == "" {
-			clusterRoleName = DefaultMoverClusterRoleName
-		}
-
-		clusterRoleBinding.RoleRef = rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     clusterRoleName,
-		}
-		clusterRoleBinding.Subjects = []rbacv1.Subject{
-			{
-				Kind:      "ServiceAccount",
-				Name:      sa.Name,
-				Namespace: sa.Namespace,
-			},
-		}
-		return nil
-	})
+	// config.json is required
+	configPath := csiConfigMountPath + "/config.json"
+	configContent, err := os.ReadFile(configPath)
 	if err != nil {
-		logger.Error(err, "ClusterRoleBinding reconcile failed")
-		return err
+		return nil, fmt.Errorf(
+			"failed to read %s: %w",
+			configPath, err,
+		)
+	}
+	data["config.json"] = string(configContent)
+
+	// cluster-mapping.json is optional
+	mappingPath := csiConfigMountPath +
+		"/cluster-mapping.json"
+	mappingContent, err := os.ReadFile(mappingPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf(
+				"failed to read %s: %w",
+				mappingPath, err,
+			)
+		}
+		logger.Info(
+			"cluster-mapping.json not found, skipping",
+			"path", mappingPath,
+		)
+	} else {
+		data["cluster-mapping.json"] =
+			string(mappingContent)
 	}
 
-	logger.V(1).Info("Mover ClusterRoleBinding reconciled", "operation", op)
-	return nil
+	op, err := ctrlutil.CreateOrUpdate(
+		ctx, m.client, cm, func() error {
+			if err := ctrl.SetControllerReference(
+				m.owner, cm, m.client.Scheme(),
+			); err != nil {
+				logger.Error(
+					err,
+					utils.ErrUnableToSetControllerRef,
+				)
+				return err
+			}
+			utils.SetOwnedByVolSync(cm)
+			cm.Data = data
+			return nil
+		},
+	)
+	if err != nil {
+		logger.Error(err, "ConfigMap reconcile failed")
+		return nil, err
+	}
+
+	logger.V(1).Info(
+		"CSI ConfigMap reconciled", "operation", op,
+	)
+	return &cmName, nil
+}
+
+// ensureCephCSISecret extracts clusterID from the PVC,
+// looks up the ceph admin secret ref from csi config,
+// fetches it, and creates a copy in the owner's namespace.
+func (m *Mover) ensureCephCSISecret(
+	ctx context.Context,
+) (*string, error) {
+	if m.mainPVCName == nil {
+		return nil, fmt.Errorf("mainPVCName is not set")
+	}
+
+	// Get the source PVC to find its PV
+	srcPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      *m.mainPVCName,
+			Namespace: m.owner.GetNamespace(),
+		},
+	}
+	if err := m.client.Get(
+		ctx, client.ObjectKeyFromObject(srcPVC), srcPVC,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"failed to get PVC: %w", err,
+		)
+	}
+
+	// Get the CSI volume handle from the PV
+	volumeHandle, err := m.getVolumeHandle(
+		ctx, srcPVC.Spec.VolumeName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to get volume handle: %w", err,
+		)
+	}
+
+	// Extract clusterID from volume handle
+	volID := &ceph.CSIIdentifier{}
+	if err := volID.DecomposeCSIID(volumeHandle); err != nil {
+		return nil, fmt.Errorf(
+			"failed to decompose CSI ID: %w", err,
+		)
+	}
+
+	// Look up the secret ref from csi config
+	secretName, secretNS, err :=
+		ceph.GetCephFSControllerPublishSecretRef(
+			ceph.CsiConfigFile, volID.ClusterID,
+		)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to get secret ref: %w", err,
+		)
+	}
+
+	// Fetch the original secret
+	origSecret := &corev1.Secret{}
+	if err := m.client.Get(ctx, client.ObjectKey{
+		Name:      secretName,
+		Namespace: secretNS,
+	}, origSecret); err != nil {
+		return nil, fmt.Errorf(
+			"failed to fetch ceph secret %s/%s: %w",
+			secretNS, secretName, err,
+		)
+	}
+
+	// Create/update a copy in the owner's namespace
+	newName := volSyncCephFSPrefix +
+		"csi-secret-" + m.direction() + "-" +
+		m.owner.GetName()
+	newSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      newName,
+			Namespace: m.owner.GetNamespace(),
+		},
+	}
+	logger := m.logger.WithValues("Secret", newName)
+
+	op, err := ctrlutil.CreateOrUpdate(
+		ctx, m.client, newSecret, func() error {
+			if err := ctrl.SetControllerReference(
+				m.owner, newSecret, m.client.Scheme(),
+			); err != nil {
+				logger.Error(
+					err,
+					utils.ErrUnableToSetControllerRef,
+				)
+				return err
+			}
+			utils.SetOwnedByVolSync(newSecret)
+			// Store secret entries as a single JSON
+			// file so the mover reads one file instead
+			// of iterating over directory entries.
+			secretMap := make(
+				map[string]string,
+				len(origSecret.Data),
+			)
+			for k, v := range origSecret.Data {
+				secretMap[k] = string(v)
+			}
+			jsonBytes, err := json.Marshal(secretMap)
+			if err != nil {
+				return fmt.Errorf(
+					"failed to marshal secret: %w",
+					err,
+				)
+			}
+			newSecret.Data = map[string][]byte{
+				CsiSecretJSONKey: jsonBytes,
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		logger.Error(err, "CSI Secret reconcile failed")
+		return nil, err
+	}
+
+	logger.V(1).Info(
+		"CSI Secret reconciled", "operation", op,
+	)
+	return &newName, nil
 }
 
 func (m *Mover) direction() string {
@@ -437,8 +599,13 @@ func (m *Mover) getDestinationPVCName() (bool, string) {
 }
 
 //nolint:funlen
-func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeClaim,
-	sa *corev1.ServiceAccount, rsyncSecretName string) (*batchv1.Job, error) {
+func (m *Mover) ensureJob(
+	ctx context.Context,
+	dataPVC *corev1.PersistentVolumeClaim,
+	sa *corev1.ServiceAccount,
+	rsyncSecretName, csiConfigMapName,
+	csiSecretName string,
+) (*batchv1.Job, error) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      volSyncCephFSPrefix + m.direction() + "-" + m.owner.GetName(),
@@ -542,20 +709,6 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		}
 		containerEnv = append(containerEnv, volumeEnv...)
 
-		// Inject ConfigMap configuration from environment variables
-		if configMapName := os.Getenv(configMapNameEnvVar); configMapName != "" {
-			containerEnv = append(containerEnv, corev1.EnvVar{
-				Name:  configMapNameEnvVar,
-				Value: configMapName,
-			})
-		}
-		if configMapNamespace := os.Getenv(configMapNamespaceEnvVar); configMapNamespace != "" {
-			containerEnv = append(containerEnv, corev1.EnvVar{
-				Name:  configMapNamespaceEnvVar,
-				Value: configMapNamespace,
-			})
-		}
-
 		podSpec := &job.Spec.Template.Spec
 		podSpec.Containers = []corev1.Container{{
 			Name:  "cephfs-mover",
@@ -571,15 +724,38 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 				RunAsUser:              ptr.To[int64](0), // Run as root for stunnel
 			},
 		}}
-		// Pre-allocate with capacity for better performance (max 5 items)
-		volumeMounts := make([]corev1.VolumeMount, 0, 5)
+		volumeMounts := make([]corev1.VolumeMount, 0, 6)
 		if !blockVolume {
-			volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: dataVolumeName, MountPath: mountPath})
+			volumeMounts = append(volumeMounts,
+				corev1.VolumeMount{
+					Name:      dataVolumeName,
+					MountPath: mountPath,
+				})
 		}
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "keys", MountPath: "/keys"},
-			corev1.VolumeMount{Name: "tempdir", MountPath: "/tmp"},
-			corev1.VolumeMount{Name: "ceph-config", MountPath: "/etc/ceph"},
-			corev1.VolumeMount{Name: "ceph-csi-config", MountPath: "/etc/ceph-csi-config"})
+		volumeMounts = append(volumeMounts,
+			corev1.VolumeMount{
+				Name:      "keys",
+				MountPath: "/keys",
+			},
+			corev1.VolumeMount{
+				Name:      "tempdir",
+				MountPath: "/tmp",
+			},
+			corev1.VolumeMount{
+				Name:      "ceph-config",
+				MountPath: "/etc/ceph",
+			},
+			corev1.VolumeMount{
+				Name:      "ceph-csi-config",
+				MountPath: csiConfigMountPath,
+				ReadOnly:  true,
+			},
+			corev1.VolumeMount{
+				Name:      csiSecretVolumeName,
+				MountPath: CsiSecretMountPath,
+				ReadOnly:  true,
+			},
+		)
 		job.Spec.Template.Spec.Containers[0].VolumeMounts = volumeMounts
 		if blockVolume {
 			job.Spec.Template.Spec.Containers[0].VolumeDevices = []corev1.VolumeDevice{
@@ -589,29 +765,45 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		podSpec.RestartPolicy = corev1.RestartPolicyNever
 		podSpec.ServiceAccountName = sa.Name
 		podSpec.Volumes = []corev1.Volume{
-			{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: dataPVC.Name,
-					ReadOnly:  readOnlyVolume,
+			{Name: dataVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: dataPVC.Name,
+						ReadOnly:  readOnlyVolume,
+					},
 				}},
-			},
-			{Name: "keys", VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName:  rsyncSecretName,
-					DefaultMode: ptr.To[int32](0600),
+			{Name: "keys",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName:  rsyncSecretName,
+						DefaultMode: ptr.To[int32](0600),
+					},
 				}},
-			},
-			{Name: "tempdir", VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{
-					Medium: corev1.StorageMediumMemory,
+			{Name: "tempdir",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium: corev1.StorageMediumMemory,
+					},
 				}},
-			},
-			{Name: "ceph-config", VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{}},
-			},
-			{Name: "ceph-csi-config", VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{}},
-			},
+			{Name: "ceph-config",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				}},
+			{Name: "ceph-csi-config",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: csiConfigMapName,
+						},
+					},
+				}},
+			{Name: csiSecretVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName:  csiSecretName,
+						DefaultMode: ptr.To[int32](0600),
+					},
+				}},
 		}
 		if m.vh.IsCopyMethodDirect() {
 			affinity, err := utils.AffinityFromVolume(ctx, m.client, logger, dataPVC)

@@ -17,10 +17,6 @@ ENABLE_RSYNC_TUNNEL="${ENABLE_RSYNC_TUNNEL:-false}"
 RSYNC_PORT="${RSYNC_PORT:-8873}"
 RSYNC_DAEMON_PORT="${RSYNC_DAEMON_PORT:-8874}"
 
-# ConfigMap configuration (optional)
-CEPH_CSI_CONFIGMAP_NAME="${CEPH_CSI_CONFIGMAP_NAME:-}"
-CEPH_CSI_CONFIGMAP_NAMESPACE="${CEPH_CSI_CONFIGMAP_NAMESPACE:-}"
-
 # Validate required parameters
 if [[ -z "$WORKER_TYPE" ]]; then
     echo "Error: WORKER_TYPE environment variable is required (source|destination)"
@@ -252,15 +248,6 @@ MOVER_ARGS="--worker-type=$WORKER_TYPE --server-port=$SERVER_PORT"
 if [[ "$WORKER_TYPE" == "source" && -n "$DESTINATION_ADDRESS" ]]; then
     # For source, we connect to local stunnel client port instead of direct destination
     MOVER_ARGS="$MOVER_ARGS --destination-address=127.0.0.1:8001"
-fi
-
-# Add ConfigMap arguments if provided
-if [[ -n "$CEPH_CSI_CONFIGMAP_NAME" ]]; then
-    MOVER_ARGS="$MOVER_ARGS --configmap-name=$CEPH_CSI_CONFIGMAP_NAME"
-fi
-
-if [[ -n "$CEPH_CSI_CONFIGMAP_NAMESPACE" ]]; then
-    MOVER_ARGS="$MOVER_ARGS --configmap-namespace=$CEPH_CSI_CONFIGMAP_NAMESPACE"
 fi
 
 echo "Starting mover with arguments: $MOVER_ARGS"

@@ -56,19 +56,6 @@ resources:
 
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER' prefix.
 # Uncomment the following replacements to add the cert-manager CA injection annotations
-replacements:
-  - source:
-      kind: ClusterRole
-      group: rbac.authorization.k8s.io
-      version: v1
-      name: mover-role
-      fieldPath: metadata.name
-    targets:
-      - select:
-          kind: Deployment
-          name: controller-manager
-        fieldPaths:
-          - spec.template.spec.containers.[name=manager].env.[name=MOVER_CLUSTER_ROLE_NAME].value
 # - source: # Uncomment the following block to enable certificates for metrics
 #     kind: Service
 #     version: v1

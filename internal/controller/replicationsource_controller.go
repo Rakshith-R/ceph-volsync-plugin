@@ -36,14 +36,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	cephPluginMover "github.com/RamenDR/ceph-volsync-plugin/internal/mover"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/cephfs"
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"github.com/backube/volsync/controllers/mover"
 	"github.com/backube/volsync/controllers/utils"
@@ -51,9 +49,6 @@ import (
 
 const (
 	ReplicationSourceToSourcePVCIndex string = "replicationsource.spec.sourcePVC"
-
-	// replicationSourceFinalizerName is the finalizer added to ReplicationSource instances
-	replicationSourceFinalizerName = "ceph-volsync-plugin.ramendr.io/replicationsource-cleanup"
 )
 
 // ReplicationSourceReconciler reconciles a ReplicationSource object
@@ -113,32 +108,6 @@ func (r *ReplicationSourceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Handle finalizer
-	if instance.GetDeletionTimestamp() != nil {
-		// Instance is being deleted
-		if ctrlutil.ContainsFinalizer(instance, replicationSourceFinalizerName) {
-			// Clean up ClusterRoleBindings associated with this instance
-			if err := r.cleanupClusterRoleBindings(ctx, logger, instance); err != nil {
-				return ctrl.Result{}, err
-			}
-
-			// Remove the finalizer
-			ctrlutil.RemoveFinalizer(instance, replicationSourceFinalizerName)
-			if err := r.Update(ctx, instance); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
-	}
-
-	// Add finalizer if not present
-	if !ctrlutil.ContainsFinalizer(instance, replicationSourceFinalizerName) {
-		ctrlutil.AddFinalizer(instance, replicationSourceFinalizerName)
-		if err := r.Update(ctx, instance); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
 	var result ctrl.Result
 	var err error
 
@@ -189,6 +158,7 @@ func (r *ReplicationSourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.Job{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&corev1.Secret{}).
+		Owns(&corev1.ConfigMap{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&rbacv1.Role{}).
@@ -285,31 +255,6 @@ func rsHasMover(rs *volsyncv1alpha1.ReplicationSource) bool {
 		rs.Spec.Restic != nil ||
 		rs.Spec.Rsync != nil ||
 		rs.Spec.RsyncTLS != nil
-}
-
-// cleanupClusterRoleBindings deletes ClusterRoleBindings associated with the given ReplicationSource
-func (r *ReplicationSourceReconciler) cleanupClusterRoleBindings(ctx context.Context,
-	logger logr.Logger, instance *volsyncv1alpha1.ReplicationSource) error {
-	// List ClusterRoleBindings with the owner UID label
-	crbList := &rbacv1.ClusterRoleBindingList{}
-	if err := r.List(ctx, crbList, client.MatchingLabels{
-		cephfs.ClusterRoleBindingLabelKey: string(instance.GetUID()),
-	}); err != nil {
-		logger.Error(err, "Failed to list ClusterRoleBindings for cleanup")
-		return err
-	}
-
-	// Delete each ClusterRoleBinding
-	for i := range crbList.Items {
-		crb := &crbList.Items[i]
-		logger.Info("Deleting ClusterRoleBinding", "name", crb.Name)
-		if err := r.Delete(ctx, crb); err != nil {
-			logger.Error(err, "Failed to delete ClusterRoleBinding", "name", crb.Name)
-			return err
-		}
-	}
-
-	return nil
 }
 
 func newRSMachine(rs *volsyncv1alpha1.ReplicationSource, c client.Client,

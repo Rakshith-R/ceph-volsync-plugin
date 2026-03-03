@@ -68,12 +68,6 @@ spec:
         env:
         - name: MOVER_IMAGE
           value: MOVER_IMAGE_PLACEHOLDER
-        - name: CEPH_CSI_CONFIGMAP_NAME
-          value: ceph-csi-config        
-        - name: CEPH_CSI_CONFIGMAP_NAMESPACE
-          value: ceph-volsync-plugin-operator-system
-        - name: MOVER_CLUSTER_ROLE_NAME
-          value: mover-role
         ports: []
         securityContext:
           allowPrivilegeEscalation: false
@@ -101,7 +95,13 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
-        volumeMounts: []
-      volumes: []
+        volumeMounts:
+        - name: ceph-csi-config
+          mountPath: /etc/ceph-csi-config
+          readOnly: true
+      volumes:
+      - name: ceph-csi-config
+        configMap:
+          name: ceph-csi-config
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

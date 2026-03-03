@@ -18,6 +18,7 @@ package source
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -31,12 +32,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/ceph/go-ceph/cephfs"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
+	cephfsmover "github.com/RamenDR/ceph-volsync-plugin/internal/mover/cephfs"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
 	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/version/v1"
 )
@@ -148,7 +148,6 @@ type syncState struct {
 // Config holds configuration for the source worker
 type Config struct {
 	DestinationAddress string
-	Clientset          *kubernetes.Clientset
 }
 
 // Worker represents a source worker instance
@@ -261,31 +260,19 @@ func (w *Worker) Run(ctx context.Context) error {
 	baseSnapName := "csi-snap-" + baseSnapID.ObjectUUID
 	targetSnapName := "csi-snap-" + targetSnapID.ObjectUUID
 
-	secretName, secretNamespace, err := ceph.GetCephFSControllerPublishSecretRef(ceph.CsiConfigFile, baseSnapID.ClusterID)
+	// Read ceph admin credentials from mounted secret
+	creds, err := readMountedCephCredentials()
 	if err != nil {
-		w.logger.Error(err, "Failed to get secret ref for BASE_SNAPSHOT_HANDLE")
-		return fmt.Errorf("failed to get secret ref for BASE_SNAPSHOT_HANDLE: %w", err)
+		return fmt.Errorf(
+			"failed to get ceph credentials: %w", err,
+		)
 	}
 
-	// get k8s secret
-	secret, err := w.config.Clientset.CoreV1().Secrets(secretNamespace).Get(ctx, secretName, metav1.GetOptions{})
+	mons, err := ceph.Mons(
+		ceph.CsiConfigFile, volumeID.ClusterID,
+	)
 	if err != nil {
-		w.logger.Error(err, "Failed to get secret for BASE_SNAPSHOT_HANDLE")
-
-		return fmt.Errorf("failed to get secret for BASE_SNAPSHOT_HANDLE: %w", err)
-	}
-	data := map[string]string{}
-	for k, v := range secret.Data {
-		data[k] = string(v)
-	}
-	creds, err := ceph.NewAdminCredentials(data)
-	if err != nil {
-		return fmt.Errorf("failed to get creds %v:%w", data, err)
-	}
-
-	mons, err := ceph.Mons(ceph.CsiConfigFile, volumeID.ClusterID)
-	if err != nil {
-		return fmt.Errorf("failed to mons: %w", data)
+		return fmt.Errorf("failed to get mons: %w", err)
 	}
 
 	// Create gRPC data client
@@ -1049,4 +1036,31 @@ func (w *Worker) rsyncFromList(listPath, target string, includeContent bool) err
 	}
 
 	return nil
+}
+
+// readMountedCephCredentials reads ceph admin credentials
+// from a JSON file mounted at
+// /etc/ceph-csi-secret/credentials.json.
+func readMountedCephCredentials() (
+	*ceph.Credentials, error,
+) {
+	path := filepath.Join(
+		cephfsmover.CsiSecretMountPath,
+		cephfsmover.CsiSecretJSONKey,
+	)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to read %s: %w", path, err,
+		)
+	}
+
+	data := map[string]string{}
+	if err := json.Unmarshal(content, &data); err != nil {
+		return nil, fmt.Errorf(
+			"failed to parse %s: %w", path, err,
+		)
+	}
+
+	return ceph.NewAdminCredentials(data)
 }
