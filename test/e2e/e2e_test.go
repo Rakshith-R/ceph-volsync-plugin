@@ -17,6 +17,7 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,8 +25,17 @@ import (
 	"path/filepath"
 	"time"
 
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
+	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/kubernetes/test/e2e/framework"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/RamenDR/ceph-volsync-plugin/test/utils"
 )
@@ -232,15 +242,285 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
+	})
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput := getMetricsOutput()
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+	Context("CephFS Replication", Ordered, func() {
+		const (
+			cephfsProvider = "rook-ceph." +
+				"cephfs.csi.ceph.com"
+			scName   = "rook-cephfs"
+			vsClass  = "csi-cephfsplugin-snapclass"
+			srcPVC   = "cephfs-e2e-src-pvc"
+			destPVC  = "cephfs-e2e-dest-pvc"
+			rdName   = "cephfs-e2e-dest"
+			rsName   = "cephfs-e2e-src"
+			manualID = "e2e-1"
+		)
+
+		var (
+			rdAddress   string
+			rdKeySecret string
+		)
+
+		f := framework.NewDefaultFramework("cephfs")
+		f.SkipNamespaceCreation = true
+
+		ctx := context.TODO()
+
+		AfterAll(func() {
+			By("cleaning up replication resources")
+			rs := &volsyncv1alpha1.ReplicationSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      rsName,
+					Namespace: namespace,
+				},
+			}
+			_ = client.IgnoreNotFound(
+				k8sClient.Delete(ctx, rs),
+			)
+
+			rd := &volsyncv1alpha1.ReplicationDestination{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      rdName,
+					Namespace: namespace,
+				},
+			}
+			_ = client.IgnoreNotFound(
+				k8sClient.Delete(ctx, rd),
+			)
+
+			for _, name := range []string{
+				srcPVC, destPVC,
+			} {
+				_ = f.ClientSet.CoreV1().
+					PersistentVolumeClaims(namespace).
+					Delete(
+						ctx, name,
+						metav1.DeleteOptions{},
+					)
+			}
+		})
+
+		It("should create source PVC", func() {
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      srcPVC,
+					Namespace: namespace,
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteMany,
+					},
+					StorageClassName: ptr.To(scName),
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse("1Gi"),
+						},
+					},
+				},
+			}
+			_, err := f.ClientSet.CoreV1().
+				PersistentVolumeClaims(namespace).
+				Create(
+					ctx, pvc, metav1.CreateOptions{},
+				)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func(g Gomega) {
+				got, err := f.ClientSet.CoreV1().
+					PersistentVolumeClaims(namespace).
+					Get(
+						ctx, srcPVC,
+						metav1.GetOptions{},
+					)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(got.Status.Phase).To(
+					Equal(corev1.ClaimBound),
+				)
+			}).WithTimeout(
+				2 * time.Minute,
+			).Should(Succeed())
+		})
+
+		It("should create destination PVC", func() {
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      destPVC,
+					Namespace: namespace,
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteMany,
+					},
+					StorageClassName: ptr.To(scName),
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse("1Gi"),
+						},
+					},
+				},
+			}
+			_, err := f.ClientSet.CoreV1().
+				PersistentVolumeClaims(namespace).
+				Create(
+					ctx, pvc, metav1.CreateOptions{},
+				)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func(g Gomega) {
+				got, err := f.ClientSet.CoreV1().
+					PersistentVolumeClaims(namespace).
+					Get(
+						ctx, destPVC,
+						metav1.GetOptions{},
+					)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(got.Status.Phase).To(
+					Equal(corev1.ClaimBound),
+				)
+			}).WithTimeout(
+				2 * time.Minute,
+			).Should(Succeed())
+		})
+
+		It("should create RD and publish address",
+			func() {
+				rd := &volsyncv1alpha1.ReplicationDestination{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      rdName,
+						Namespace: namespace,
+					},
+					Spec: volsyncv1alpha1.ReplicationDestinationSpec{
+						Trigger: &volsyncv1alpha1.ReplicationDestinationTriggerSpec{
+							Manual: manualID,
+						},
+						External: &volsyncv1alpha1.ReplicationDestinationExternalSpec{
+							Provider: cephfsProvider,
+							Parameters: map[string]string{
+								"destinationPVC":          destPVC,
+								"storageClassName":        scName,
+								"volumeSnapshotClassName": vsClass,
+								"copyMethod":              "Snapshot",
+							},
+						},
+					},
+				}
+				Expect(
+					k8sClient.Create(ctx, rd),
+				).To(Succeed())
+
+				Eventually(func(g Gomega) {
+					got := &volsyncv1alpha1.ReplicationDestination{}
+					g.Expect(k8sClient.Get(
+						ctx,
+						types.NamespacedName{
+							Name:      rdName,
+							Namespace: namespace,
+						},
+						got,
+					)).To(Succeed())
+					g.Expect(got.Status).NotTo(BeNil())
+					g.Expect(
+						got.Status.RsyncTLS,
+					).NotTo(BeNil())
+					g.Expect(
+						got.Status.RsyncTLS.Address,
+					).NotTo(BeNil())
+					g.Expect(
+						*got.Status.RsyncTLS.Address,
+					).NotTo(BeEmpty())
+					g.Expect(
+						got.Status.RsyncTLS.KeySecret,
+					).NotTo(BeNil())
+					g.Expect(
+						*got.Status.RsyncTLS.KeySecret,
+					).NotTo(BeEmpty())
+
+					rdAddress =
+						*got.Status.RsyncTLS.Address
+					rdKeySecret =
+						*got.Status.RsyncTLS.KeySecret
+				}).WithTimeout(
+					5 * time.Minute,
+				).Should(Succeed())
+			},
+		)
+
+		It("should create ReplicationSource", func() {
+			rs := &volsyncv1alpha1.ReplicationSource{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      rsName,
+					Namespace: namespace,
+				},
+				Spec: volsyncv1alpha1.ReplicationSourceSpec{
+					SourcePVC: srcPVC,
+					Trigger: &volsyncv1alpha1.ReplicationSourceTriggerSpec{
+						Manual: manualID,
+					},
+					External: &volsyncv1alpha1.ReplicationSourceExternalSpec{
+						Provider: cephfsProvider,
+						Parameters: map[string]string{
+							"secretKey":               rdKeySecret,
+							"address":                 rdAddress,
+							"storageClassName":        scName,
+							"volumeSnapshotClassName": vsClass,
+							"copyMethod":              "Snapshot",
+						},
+					},
+				},
+			}
+			Expect(
+				k8sClient.Create(ctx, rs),
+			).To(Succeed())
+		})
+
+		It("should create a VolumeSnapshot", func() {
+			labelKey := "volsync.backube/" +
+				"snapshot-status-" + rsName
+			Eventually(func(g Gomega) {
+				snapList := &snapv1.VolumeSnapshotList{}
+				g.Expect(k8sClient.List(
+					ctx, snapList,
+					client.InNamespace(namespace),
+					client.MatchingLabels{
+						labelKey: "current",
+					},
+				)).To(Succeed())
+				g.Expect(
+					len(snapList.Items),
+				).To(BeNumerically(">=", 1))
+				snap := &snapList.Items[0]
+				g.Expect(snap.Status).NotTo(BeNil())
+				g.Expect(
+					snap.Status.ReadyToUse,
+				).NotTo(BeNil())
+				g.Expect(
+					*snap.Status.ReadyToUse,
+				).To(BeTrue())
+			}).WithTimeout(
+				5 * time.Minute,
+			).Should(Succeed())
+		})
+
+		It("should complete sync", func() {
+			Eventually(func(g Gomega) {
+				rs := &volsyncv1alpha1.ReplicationSource{}
+				g.Expect(k8sClient.Get(
+					ctx,
+					types.NamespacedName{
+						Name:      rsName,
+						Namespace: namespace,
+					},
+					rs,
+				)).To(Succeed())
+				g.Expect(rs.Status).NotTo(BeNil())
+				g.Expect(
+					rs.Status.LastManualSync,
+				).To(Equal(manualID))
+			}).WithTimeout(
+				5 * time.Minute,
+			).Should(Succeed())
+		})
 	})
 })
 
