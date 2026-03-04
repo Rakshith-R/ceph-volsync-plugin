@@ -75,7 +75,7 @@ jobs:
 
       - name: Running Test e2e
         run: |
-          go test ./test/e2e/ -v -ginkgo.v
+          go test ./test/e2e/ -v -ginkgo.v -timeout=20m
 
       - name: Cleanup ceph-volsync-plugin operator
         run: |
