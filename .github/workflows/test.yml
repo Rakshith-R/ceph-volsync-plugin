@@ -79,7 +79,6 @@ jobs:
 
       - name: Cleanup ceph-volsync-plugin operator
         run: |
-          
           make undeploy
           make uninstall
 

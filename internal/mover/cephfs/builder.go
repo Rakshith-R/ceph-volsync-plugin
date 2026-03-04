@@ -102,7 +102,11 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 	eventRecorder events.EventRecorder,
 	source *volsyncv1alpha1.ReplicationSource, privileged bool) (mover.Mover, error) {
 	// Only build if the CR belongs to us
-	if source.Spec.External == nil || strings.HasPrefix(source.Spec.External.Provider, cephfsProviderName) {
+	if source.Spec.External == nil {
+		return nil, nil
+	}
+	provider := source.Spec.External.Provider
+	if !strings.HasSuffix(provider, cephfsProviderName) || strings.HasSuffix(provider, nfsProviderName) {
 		return nil, nil
 	}
 
@@ -207,7 +211,7 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 		return nil, nil
 	}
 	provider := destination.Spec.External.Provider
-	if !strings.HasPrefix(provider, cephfsProviderName) || strings.HasPrefix(provider, nfsProviderName) {
+	if !strings.HasSuffix(provider, cephfsProviderName) || strings.HasSuffix(provider, nfsProviderName) {
 		return nil, nil
 	}
 
