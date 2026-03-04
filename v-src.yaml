@@ -1,0 +1,16 @@
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: rsync-src
+  namespace: ceph-volsync-plugin-operator-system
+spec:
+  rsyncTLS:
+    address: 172.30.104.50
+    keySecret: volsync-rsync-tls-v-dest
+    copyMethod: Snapshot
+    accessModes: ["ReadOnlyMany"]
+    storageClassName: ocs-storagecluster-cephfs
+    volumeSnapshotClassName: ocs-storagecluster-cephfsplugin-snapclass
+  sourcePVC: src-pvc
+  trigger:
+    schedule: "*/3 * * * *"

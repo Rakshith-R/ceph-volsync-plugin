@@ -28,7 +28,7 @@ github.com/cenkalti/backoff/v4
 # github.com/ceph/ceph-csi/api v0.0.0-20260116234140-982f0934732f
 ## explicit; go 1.25.0
 github.com/ceph/ceph-csi/api/deploy/kubernetes
-# github.com/ceph/go-ceph v0.37.0
+# github.com/ceph/go-ceph v0.37.1-0.20260203213935-18caddfb147d
 ## explicit; go 1.24.0
 github.com/ceph/go-ceph/cephfs
 github.com/ceph/go-ceph/cephfs/admin
@@ -403,7 +403,7 @@ golang.org/x/oauth2/internal
 ## explicit; go 1.24.0
 golang.org/x/sync/errgroup
 golang.org/x/sync/singleflight
-# golang.org/x/sys v0.38.0
+# golang.org/x/sys v0.40.0
 ## explicit; go 1.24.0
 golang.org/x/sys/plan9
 golang.org/x/sys/unix

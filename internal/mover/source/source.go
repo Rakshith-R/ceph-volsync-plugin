@@ -19,21 +19,22 @@ package source
 import (
 	"context"
 	"fmt"
-	"log"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/ceph/go-ceph/cephfs"
-	ca "github.com/ceph/go-ceph/cephfs/admin"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
@@ -54,14 +55,94 @@ const (
 	backoffFactor = 2
 	sourceDir     = "/data"
 	fileListPath  = "/tmp/filelist.txt"
+
+	// Sync optimization thresholds
+	smallFileMaxSize = 64 * 1024 // 64KB - files this size or smaller use rsync
+
+	// deleteBatchSize is the number of paths per batched delete request.
+	// At ~500 bytes/path avg, 2000 paths ≈ 1MB per gRPC message (within 4MB limit).
+	// Destination processes paths sequentially via os.RemoveAll; memory stays bounded.
+	deleteBatchSize = 2000
+
+	// rsyncBatchSize is the number of file paths per batched rsync invocation.
+	// Amortizes rsync's per-invocation overhead (~200ms for fork + connection + handshake).
+	// At 2000, overhead drops to ~6% vs ~76% at 100.
+	// Client memory: ~1MB batch slice + ~1MB temp file.
+	// Destination: rsync daemon file list ≈ 200KB; transfers file-by-file, not buffered.
+	rsyncBatchSize = 2000
+
+	// writePayloadMinSize is the minimum accumulated data payload size
+	// before sending a WriteRequest over the gRPC stream.
+	writePayloadMinSize = 2 * 1024 * 1024 // 2MB
+
+	// writePayloadMaxSize is the maximum accumulated data payload size.
+	// Prevents exceeding the 4MB gRPC default server max receive message size.
+	writePayloadMaxSize = 3 * 1024 * 1024 // 3MB
+
+	// maxEntryWorkers is the maximum number of concurrent goroutines
+	// processing snapdiff entries within a single directory.
+	maxEntryWorkers = 8
 )
 
-// snapDiffResult combines a snap diff entry and error for simplified channel communication.
-// When Err is non-nil, Entry should be ignored. When Err is nil and Entry is nil,
-// processing is complete.
-type snapDiffResult struct {
-	Entry *cephfs.SnapDiffEntry
-	Err   error
+// streamPool is a fixed-size pool of reusable gRPC sync streams.
+// Streams are pre-created and shared across file transfers.
+// Each stream handles one file at a time: acquire, send writes + commit, release.
+type streamPool struct {
+	streams chan grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse]
+}
+
+// newStreamPool pre-creates size sync streams and returns a pool.
+func newStreamPool(ctx context.Context, dataClient apiv1.DataServiceClient, size int) (*streamPool, error) {
+	pool := &streamPool{
+		streams: make(chan grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse], size),
+	}
+	for i := 0; i < size; i++ {
+		stream, err := dataClient.Sync(ctx)
+		if err != nil {
+			pool.closeAll()
+			return nil, fmt.Errorf("failed to create sync stream %d/%d: %w", i+1, size, err)
+		}
+		pool.streams <- stream
+	}
+	return pool, nil
+}
+
+// acquire blocks until a stream is available.
+func (p *streamPool) acquire() grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse] {
+	return <-p.streams
+}
+
+// release returns a stream to the pool for reuse.
+func (p *streamPool) release(s grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse]) {
+	p.streams <- s
+}
+
+// closeAll drains and closes all streams in the pool.
+func (p *streamPool) closeAll() error {
+	close(p.streams)
+	var firstErr error
+	for s := range p.streams {
+		if _, err := s.CloseAndRecv(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// syncState holds the context for the sync operation
+type syncState struct {
+	differ     *ceph.SnapshotDiffer
+	dataClient apiv1.DataServiceClient
+	pool       *streamPool
+	logger     logr.Logger
+
+	// Channels for parallel processing
+	deleteChan chan string // Paths to delete (batched by deleteWorker)
+	smallChan  chan string // Files ≤ smallFileMaxSize (rsync content+metadata)
+	metaChan   chan string // Files > smallFileMaxSize (rsync metadata only)
+
+	// Rsync target for background workers
+	rsyncTarget string
 }
 
 // Config holds configuration for the source worker
@@ -207,60 +288,31 @@ func (w *Worker) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to mons: %w", data)
 	}
 
-	cc := &ceph.ClusterConnection{}
-	if err := cc.Connect(mons, creds); err != nil {
-		return fmt.Errorf("failed to connect to cluster: %w", err)
-	}
-	defer cc.Destroy()
+	// Create gRPC data client
+	dataClient := apiv1.NewDataServiceClient(conn)
 
-	// Get FSAdmin and subvolume path BEFORE mounting
-	// This is necessary because a restricted ceph user may only have access
-	// to the specific subvolume path, not the root of the filesystem
-	fsa, err := cc.GetFSAdmin()
+	// Initialize SnapshotDiffer
+	differ, err := ceph.New(
+		mons,
+		creds,
+		volumeID.LocationID,
+		subVolumeGroup,
+		subVolumeName,
+		baseSnapName,
+		targetSnapName,
+	)
 	if err != nil {
-		return fmt.Errorf("failed to get FSAdmin: %w", err)
+		return fmt.Errorf("failed to create snapshot differ: %w", err)
+	}
+	defer differ.Destroy()
+
+	// Run stateless sync
+	if err := w.runStatelessSync(ctx, differ, dataClient); err != nil {
+		return fmt.Errorf("stateless sync failed: %w", err)
 	}
 
-	volume, err := getFSName(fsa, volumeID.LocationID)
-	if err != nil {
-		return err
-	}
-	subVolumePath, err := fsa.SubVolumePath(volume, subVolumeGroup, subVolumeName)
-	if err != nil {
-		return fmt.Errorf("failed to get subvolume path: %w", err)
-	}
-
-	mountInfo, err := cc.CreateMountFromRados()
-	if err != nil {
-		return fmt.Errorf("failed to create cephfs from rados: %w", err)
-	}
-	// Mount directly at the subvolume path to support restricted ceph users
-	// who only have access to this specific subvolume
-	err = mountInfo.MountWithRoot(subVolumePath)
-	if err != nil {
-		return fmt.Errorf("failed to mount at subvolume path %s: %w", subVolumePath, err)
-	}
-	// Since we mounted with MountWithRoot(subVolumePath), the root of the mount
-	// is now the subvolume itself. Therefore:
-	// - rootPath should be "/" (the root of our mounted filesystem)
-	// - relPath should be "." (we start from the root of the mount)
-	rootPath := "/"
-	relPath := "."
-	log.Default().Printf("Mounted at subvolume path: %s, using rootPath: %s, relPath: %s\n", subVolumePath, rootPath, relPath)
-
-	dataVolumePath := "/data"
-	resultChan := initSnapDiffChan(mountInfo, dataVolumePath, rootPath, relPath, baseSnapName, targetSnapName)
-
-	// Process snap diff results from the unified channel
-	if err := processSnapDiffResults(ctx, resultChan, relPath, dataVolumePath); err != nil {
-		return err
-	}
-
-	// Create done service client
+	// Signal completion
 	doneClient := apiv1.NewDoneServiceClient(conn)
-
-	// Call Done to signal completion and request graceful shutdown
-	// Connection is already established, so use shorter timeout
 	doneCtx, doneCancel := context.WithTimeout(ctx, rpcTimeout)
 	defer doneCancel()
 
@@ -272,7 +324,6 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.logger.Info("Successfully sent Done signal to destination")
 
 	return nil
-
 }
 
 // rsync performs the rsync synchronization with retry logic
@@ -433,194 +484,569 @@ func (w *Worker) syncForDeletion(rsyncTarget string) int {
 	return 0
 }
 
-func getFSName(fsa *ca.FSAdmin, locationID int64) (string, error) {
-	volumes, err := fsa.EnumerateVolumes()
+// runStatelessSync implements the stateless sync algorithm with directory pre-scan.
+// It launches background goroutines for delete batching and rsync, processing
+// them in parallel with the main directory snapdiff walk.
+func (w *Worker) runStatelessSync(
+	ctx context.Context,
+	differ *ceph.SnapshotDiffer,
+	dataClient apiv1.DataServiceClient,
+) error {
+	w.logger.Info("Starting stateless snapshot sync")
+
+	// Pre-create a fixed pool of reusable sync streams
+	pool, err := newStreamPool(ctx, dataClient, maxEntryWorkers)
 	if err != nil {
-		return "", err
+		return fmt.Errorf("failed to create stream pool: %w", err)
 	}
-	for _, val := range volumes {
-		if val.ID == locationID {
-			return val.Name, nil
+
+	// Initialize sync state with dataClient and pool
+	state := w.initSyncState(differ, dataClient, pool)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	// Background worker: batch delete paths and send via unary Delete RPC
+	g.Go(func() error { return w.deleteWorker(gctx, state) })
+
+	// Background worker: batch small files and rsync content+metadata
+	g.Go(func() error { return w.smallRsyncWorker(gctx, state) })
+
+	// Background worker: batch large file paths and rsync metadata only
+	g.Go(func() error { return w.metaRsyncWorker(gctx, state) })
+
+	// Main processing: walk directories and process snapdiff, feeding channels
+	g.Go(func() error {
+		defer close(state.deleteChan)
+		defer close(state.smallChan)
+		defer close(state.metaChan)
+
+		dirChan, errChan := w.walkAndStreamDirectories()
+
+		for dirPath := range dirChan {
+			select {
+			case <-gctx.Done():
+				return gctx.Err()
+			default:
+			}
+			if err := w.processDirectorySnapdiff(gctx, state, dirPath); err != nil {
+				return fmt.Errorf("failed to process directory %s: %w", dirPath, err)
+			}
 		}
+
+		if err := <-errChan; err != nil {
+			return fmt.Errorf("error walking directories: %w", err)
+		}
+
+		return nil
+	})
+
+	// Wait for all goroutines (main processing + workers) to finish
+	if err := g.Wait(); err != nil {
+		return err
 	}
-	return "", ceph.ErrKeyNotFound
+
+	// Close all pooled streams
+	if err := pool.closeAll(); err != nil {
+		return fmt.Errorf("failed to close stream pool: %w", err)
+	}
+
+	// Post-traversal convergence: rsync directory metadata only
+	// (small files and file metadata are already handled by background workers)
+	if err := w.rsyncConvergence(state); err != nil {
+		return fmt.Errorf("post-traversal convergence failed: %w", err)
+	}
+
+	w.logger.Info("Stateless sync completed successfully")
+	return nil
 }
 
-// processSnapDiffResults reads from the result channel and processes entries until
-// the channel is closed or an error occurs.
-func processSnapDiffResults(ctx context.Context, resultChan chan snapDiffResult, relPath, dataVolumePath string) error {
-	for {
-		select {
-		case result, ok := <-resultChan:
-			if !ok {
-				// Channel closed, processing complete
-				return nil
-			}
-			if result.Err != nil {
-				return result.Err
-			}
-			if err := processEntry(result.Entry, relPath, dataVolumePath); err != nil {
-				return err
+// walkAndStreamDirectories walks the /data directory tree and sends each
+// directory path through a channel for immediate processing.
+func (w *Worker) walkAndStreamDirectories() (<-chan string, <-chan error) {
+	dirChan := make(chan string)
+	errChan := make(chan error, 1)
+
+	go func() {
+		defer close(dirChan)
+
+		w.logger.Info("Starting directory walk", "sourceDir", sourceDir)
+
+		count := 0
+		err := filepath.WalkDir(sourceDir, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				w.logger.Error(walkErr, "Error accessing path during directory walk", "path", path)
+				return walkErr
 			}
 
+			if !d.IsDir() {
+				return nil
+			}
+
+			relPath, err := filepath.Rel(sourceDir, path)
+			if err != nil {
+				return fmt.Errorf("failed to get relative path for %s: %w", path, err)
+			}
+
+			// Root becomes "/", subdirs get leading "/"
+			if relPath == "." {
+				relPath = "/"
+			} else {
+				relPath = "/" + relPath
+			}
+
+			dirChan <- relPath
+			count++
+			return nil
+		})
+
+		if err != nil {
+			errChan <- fmt.Errorf("failed to walk directory tree: %w", err)
+			return
+		}
+
+		w.logger.Info("Directory walk completed", "count", count)
+		errChan <- nil
+	}()
+
+	return dirChan, errChan
+}
+
+// initSyncState initializes the sync state with channels for parallel processing
+func (w *Worker) initSyncState(
+	differ *ceph.SnapshotDiffer,
+	dataClient apiv1.DataServiceClient,
+	pool *streamPool,
+) *syncState {
+	rsyncDaemonPort := os.Getenv("RSYNC_DAEMON_PORT")
+	rsyncTarget := fmt.Sprintf("rsync://127.0.0.1:%s/data", rsyncDaemonPort)
+
+	return &syncState{
+		differ:      differ,
+		dataClient:  dataClient,
+		pool:        pool,
+		logger:      w.logger,
+		deleteChan:  make(chan string, 1000),
+		smallChan:   make(chan string, 1000),
+		metaChan:    make(chan string, 1000),
+		rsyncTarget: rsyncTarget,
+	}
+}
+
+// processDirectorySnapdiff processes snapdiff results for a single directory.
+// NOT recursive - iteration over directories is driven by the pre-scanned file.
+// Entries are processed in parallel using an errgroup limited to maxEntryWorkers.
+func (w *Worker) processDirectorySnapdiff(ctx context.Context, state *syncState, dirPath string) error {
+	w.logger.V(1).Info("Processing directory snapdiff", "path", dirPath)
+
+	iterator, err := state.differ.NewSnapDiffIterator(dirPath)
+	if err != nil {
+		return fmt.Errorf("failed to create snap diff iterator for %s: %w", dirPath, err)
+	}
+	defer iterator.Close()
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(maxEntryWorkers)
+
+	for {
+		entry, err := iterator.Read()
+		if err != nil {
+			return fmt.Errorf("failed to read entry: %w", err)
+		}
+		if entry == nil {
+			break
+		}
+
+		g.Go(func() error {
+			return w.processEntry(gctx, state, dirPath, entry)
+		})
+	}
+
+	return g.Wait()
+}
+
+// processEntry handles a single snapdiff entry (directory or file).
+func (w *Worker) processEntry(ctx context.Context, state *syncState, dirPath string, entry *cephfs.SnapDiffEntry) error {
+	// DirEntry.Name() returns just the filename; combine with dirPath for full relative path
+	entryName := entry.DirEntry.Name()
+	entryPath := filepath.Join(dirPath, entryName)
+
+	if entry.DirEntry.DType() == cephfs.DTypeReg {
+		// File entry
+		err := w.processFile(ctx, state, entryPath)
+		if err != nil {
+			return fmt.Errorf("failed to process file %s: %w", entryPath, err)
+		}
+	}
+
+	// check if it exists on disk
+	fullPath := filepath.Join(sourceDir, entryPath)
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		// Directory does not exist - send to delete channel
+		select {
+		case state.deleteChan <- entryPath:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
-}
 
-// processEntry replaces relPath with dataVolumePath in the entry path and rsyncs the entry.
-// If the entry does not exist on source, it will be deleted from the destination.
-func processEntry(entry *cephfs.SnapDiffEntry, relPath, dataVolumePath string) error {
-	// Get the entry path
-	entryPath := entry.DirEntry.Name()
-
-	// Replace relPath with dataVolumePath to get the transformed path
-	// The entry path starts with relPath, so we replace it with dataVolumePath
-	var transformedPath string
-	if strings.HasPrefix(entryPath, relPath) {
-		transformedPath = strings.Replace(entryPath, relPath, dataVolumePath, 1)
-	} else {
-		transformedPath = path.Join(dataVolumePath, entryPath)
+	if entry.DirEntry.DType() == cephfs.DTypeDir {
+		// If directory exists, nothing to do.
+		return nil
 	}
 
-	// Source path is the transformed path (file on the local filesystem)
-	sourcePath := transformedPath
-
-	// Check if the source path exists
-	if _, err := os.Stat(sourcePath); err != nil {
-		if os.IsNotExist(err) {
-			// File or directory does not exist on source, delete from destination
-			return deleteFromDestination(transformedPath)
-		}
-		// Some other error occurred (permission denied, etc.)
-		return fmt.Errorf("failed to stat entry %s: %w", sourcePath, err)
-	}
-
-	// Build rsync target with the transformed path
-	// The destination path should also have relPath replaced with dataVolumePath
-	rsyncDaemonPort := os.Getenv("RSYNC_DAEMON_PORT")
-	rsyncTarget := fmt.Sprintf("rsync://127.0.0.1:%s%s", rsyncDaemonPort, transformedPath)
-
-	// Rsync the specific entry
-	rsyncArgs := []string{
-		"-aAhHSxz",
-		"--itemize-changes",
-		"--info=stats2,misc2",
-		sourcePath,
-		rsyncTarget,
-	}
-
-	cmd := exec.Command("rsync", rsyncArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to rsync entry %s: %w", sourcePath, err)
+	// Send special files to rsync directly; they cannot
+	// be handled by the normal file processing logic.
+	select {
+	case state.smallChan <- entryPath:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	return nil
 }
 
-// deleteFromDestination deletes a file or directory from the destination using rsync.
-// It uses rsync's --delete flag with include/exclude patterns to target the specific entry.
-func deleteFromDestination(transformedPath string) error {
-	rsyncDaemonPort := os.Getenv("RSYNC_DAEMON_PORT")
-	parentDir := path.Dir(transformedPath)
-	fileName := path.Base(transformedPath)
+// processFile handles file processing
+func (w *Worker) processFile(ctx context.Context, state *syncState, entryPath string) error {
+	fullPath := filepath.Join(sourceDir, entryPath)
 
-	rsyncTarget := fmt.Sprintf("rsync://127.0.0.1:%s%s/", rsyncDaemonPort, parentDir)
-
-	// Use rsync to delete the specific file/directory from destination
-	// --include specifies the file to delete, --exclude=* ignores everything else
-	// --delete will remove the file from destination since it doesn't exist in source
-	rsyncArgs := []string{
-		"-rx",
-		"--delete",
-		fmt.Sprintf("--include=%s", fileName),
-		"--exclude=*",
-		"--itemize-changes",
-		"--info=stats2,misc2",
-		parentDir + "/",
-		rsyncTarget,
+	// Check if file was deleted (doesn't exist on disk)
+	fileInfo, err := os.Stat(fullPath)
+	if os.IsNotExist(err) {
+		w.logger.Info("File deleted, queuing for batch delete", "path", entryPath)
+		select {
+		case state.deleteChan <- entryPath:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to stat file %s: %w", fullPath, err)
 	}
 
-	log.Printf("Deleting entry %s from destination", transformedPath)
+	fileSize := fileInfo.Size()
 
-	cmd := exec.Command("rsync", rsyncArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to delete entry %s from destination: %w", transformedPath, err)
+	if fileSize <= smallFileMaxSize {
+		// Small file: send to channel for background rsync
+		select {
+		case state.smallChan <- entryPath:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		w.logger.V(1).Info("Queued small file for rsync", "path", entryPath, "size", fileSize)
+		return nil
 	}
 
-	return nil
+	// Large file: send to channel for background metadata rsync
+	select {
+	case state.metaChan <- entryPath:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Always use block diff for files larger than smallFileMaxSize
+	return w.streamBlockDiff(ctx, state, entryPath)
 }
 
-func initSnapDiffChan(mountInfo *cephfs.MountInfo, dataVolumePath, rootPath, relPath, baseSnapName, targetSnapName string) chan snapDiffResult {
-	resultChan := make(chan snapDiffResult, 100)
+// streamBlockDiff uses CephFS block diff to send only changed blocks.
+// It acquires a reusable stream from the pool, sends all write requests
+// for the file, sends a commit, then releases the stream back to the pool.
+func (w *Worker) streamBlockDiff(ctx context.Context, state *syncState, relPath string) error {
+	blockIterator, err := state.differ.NewBlockDiffIterator(relPath)
+	if err != nil {
+		return fmt.Errorf("failed to create block diff iterator: %w", err)
+	}
+	defer blockIterator.Close()
 
-	go func() {
-		defer close(resultChan)
+	// Open source file to read block data
+	fullPath := filepath.Join(sourceDir, relPath)
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return fmt.Errorf("failed to open source file %s: %w", fullPath, err)
+	}
+	defer file.Close()
 
-		dirEntryList := []*cephfs.SnapDiffEntry{
-			{},
+	// Acquire a reusable stream from the pool
+	stream := state.pool.acquire()
+	defer state.pool.release(stream)
+
+	// Accumulator for batching blocks across iterator reads
+	var accumulatedBlocks []*apiv1.ChangedBlock
+	accumulatedPayloadSize := 0
+
+	for blockIterator.More() {
+		changedBlocks, err := blockIterator.Read()
+		if err != nil {
+			return fmt.Errorf("failed to read block diff: %w", err)
 		}
-		newDirEntryList := []*cephfs.SnapDiffEntry{}
-		for len(dirEntryList) > 0 {
-			for i := range len(dirEntryList) {
-				currentEntry := dirEntryList[i]
-				currentRelPath := ""
-				if currentEntry.DirEntry != nil {
-					currentRelPath = currentEntry.DirEntry.Name()
-				} else {
-					currentRelPath = relPath
-				}
-				diffConfig := cephfs.SnapDiffConfig{
-					CMount:   mountInfo,
-					RootPath: rootPath,
-					RelPath:  currentRelPath,
-					Snap1:    baseSnapName,
-					Snap2:    targetSnapName,
-				}
-				log.Default().Printf("Opening snap diff for rootPath=%s, relPath=%s, snap1=%s, snap2=%s\n",
-					diffConfig.RootPath, diffConfig.RelPath, diffConfig.Snap1, diffConfig.Snap2)
 
-				diffInfo, err := cephfs.OpenSnapDiff(diffConfig)
-				if err != nil {
-					resultChan <- snapDiffResult{Err: fmt.Errorf("failed to open snap diff: %w", err)}
-					return
-				}
-				defer diffInfo.Close()
-
-				for {
-					entry, err := diffInfo.Readdir()
-					if err != nil {
-						resultChan <- snapDiffResult{Err: fmt.Errorf("failed to read snap diff entry: %w", err)}
-						return
-					}
-					if entry == nil {
-						break
-					}
-					if entry.DirEntry.DType() == cephfs.DTypeDir {
-						name := entry.DirEntry.Name()
-						if !(name == "." || name == "..") {
-							// append only if it is not current or previous directory.
-							newDirEntryList = append(newDirEntryList, entry)
-						}
-						continue
-					}
-					resultChan <- snapDiffResult{Entry: entry}
-				}
-				if currentRelPath != relPath {
-					resultChan <- snapDiffResult{Entry: currentEntry}
-				}
+		// Convert CephFS blocks to proto blocks and read data
+		for _, block := range changedBlocks.ChangedBlocks {
+			// Read block data from file at offset
+			data := make([]byte, block.Len)
+			n, err := file.ReadAt(data, int64(block.Offset))
+			if err != nil && err != io.EOF {
+				return fmt.Errorf("failed to read block at offset %d: %w", block.Offset, err)
 			}
-			dirEntryList = newDirEntryList
-			newDirEntryList = []*cephfs.SnapDiffEntry{}
-		}
-	}()
+			data = data[:n]
 
-	return resultChan
+			// Check if block is all zeros (optimization)
+			isZero := isAllZero(data)
+
+			protoBlock := &apiv1.ChangedBlock{
+				Offset: block.Offset,
+				Length: block.Len,
+				IsZero: isZero,
+			}
+
+			if !isZero {
+				protoBlock.Data = data
+				accumulatedPayloadSize += len(data)
+			} else {
+				// Account for proto serialization overhead of zero blocks
+				// (~20 bytes for offset/length/is_zero varint fields)
+				accumulatedPayloadSize += 20
+			}
+
+			accumulatedBlocks = append(accumulatedBlocks, protoBlock)
+
+			// Flush if we hit the max payload size (safety cap for gRPC limit)
+			if accumulatedPayloadSize >= writePayloadMaxSize {
+				if err := sendWrite(stream, relPath, accumulatedBlocks); err != nil {
+					return err
+				}
+				accumulatedBlocks = nil
+				accumulatedPayloadSize = 0
+			}
+		}
+
+		// Flush if we have reached the minimum payload threshold
+		if accumulatedPayloadSize >= writePayloadMinSize {
+			if err := sendWrite(stream, relPath, accumulatedBlocks); err != nil {
+				return err
+			}
+			accumulatedBlocks = nil
+			accumulatedPayloadSize = 0
+		}
+	}
+
+	// Flush any remaining accumulated blocks
+	if len(accumulatedBlocks) > 0 {
+		if err := sendWrite(stream, relPath, accumulatedBlocks); err != nil {
+			return err
+		}
+	}
+
+	// Send CommitRequest to signal file is done (stream can be reused for next file)
+	if err := stream.Send(&apiv1.SyncRequest{
+		Operation: &apiv1.SyncRequest_Commit{
+			Commit: &apiv1.CommitRequest{Path: relPath},
+		},
+	}); err != nil {
+		return fmt.Errorf("failed to send commit for %s: %w", relPath, err)
+	}
+
+	w.logger.V(1).Info("Streamed block diff", "path", relPath)
+	return nil
+}
+
+// sendWrite sends a batch of accumulated blocks as a single WriteRequest on the given stream.
+func sendWrite(
+	stream grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse],
+	relPath string,
+	blocks []*apiv1.ChangedBlock,
+) error {
+	if err := stream.Send(&apiv1.SyncRequest{
+		Operation: &apiv1.SyncRequest_Write{
+			Write: &apiv1.WriteRequest{
+				Path:   relPath,
+				Blocks: blocks,
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("failed to send write blocks for %s: %w", relPath, err)
+	}
+	return nil
+}
+
+// isAllZero checks if a byte slice contains only zeros
+func isAllZero(data []byte) bool {
+	for _, b := range data {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// deleteWorker reads paths from deleteChan, batches them, and sends
+// delete requests via the unary Delete RPC in parallel with main processing.
+func (w *Worker) deleteWorker(ctx context.Context, state *syncState) error {
+	var batch []string
+
+	for path := range state.deleteChan {
+		batch = append(batch, path)
+
+		if len(batch) >= deleteBatchSize {
+			if err := w.sendDeleteBatch(ctx, state, batch); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+	}
+
+	// Send remaining paths
+	if len(batch) > 0 {
+		if err := w.sendDeleteBatch(ctx, state, batch); err != nil {
+			return err
+		}
+	}
+
+	w.logger.Info("Delete worker finished")
+	return nil
+}
+
+// sendDeleteBatch sends a single batched delete request via the unary Delete RPC.
+func (w *Worker) sendDeleteBatch(ctx context.Context, state *syncState, paths []string) error {
+	_, err := state.dataClient.Delete(ctx, &apiv1.DeleteRequest{Paths: paths})
+	if err != nil {
+		return fmt.Errorf("failed to send batched delete (%d paths): %w", len(paths), err)
+	}
+	return nil
+}
+
+// smallRsyncWorker reads paths from smallChan, batches them, and runs
+// rsync for content+metadata in parallel with main processing.
+func (w *Worker) smallRsyncWorker(_ context.Context, state *syncState) error {
+	var batch []string
+
+	for path := range state.smallChan {
+		batch = append(batch, path)
+
+		if len(batch) >= rsyncBatchSize {
+			if err := w.rsyncBatch(batch, state.rsyncTarget, true); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+	}
+
+	// Rsync remaining paths
+	if len(batch) > 0 {
+		if err := w.rsyncBatch(batch, state.rsyncTarget, true); err != nil {
+			return err
+		}
+	}
+
+	w.logger.Info("Small file rsync worker finished")
+	return nil
+}
+
+// metaRsyncWorker reads paths from metaChan, batches them, and runs
+// rsync for metadata only in parallel with main processing.
+func (w *Worker) metaRsyncWorker(_ context.Context, state *syncState) error {
+	var batch []string
+
+	for path := range state.metaChan {
+		batch = append(batch, path)
+
+		if len(batch) >= rsyncBatchSize {
+			if err := w.rsyncBatch(batch, state.rsyncTarget, false); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+	}
+
+	// Rsync remaining paths
+	if len(batch) > 0 {
+		if err := w.rsyncBatch(batch, state.rsyncTarget, false); err != nil {
+			return err
+		}
+	}
+
+	w.logger.Info("Metadata rsync worker finished")
+	return nil
+}
+
+// rsyncBatch writes paths to a temp file and runs rsync against it.
+func (w *Worker) rsyncBatch(paths []string, target string, includeContent bool) error {
+	tmpFile, err := os.CreateTemp("", "rsync-batch-*.txt")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file for rsync batch: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	for _, p := range paths {
+		fmt.Fprintln(tmpFile, p)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close rsync batch temp file: %w", err)
+	}
+
+	return w.rsyncFromList(tmpPath, target, includeContent)
+}
+
+// rsyncConvergence performs the final rsync pass for directory metadata.
+// Small files and file metadata are already handled by background workers.
+func (w *Worker) rsyncConvergence(state *syncState) error {
+	w.logger.Info("Rsync convergence: syncing directory metadata")
+	rsyncDirArgs := []string{
+		"-aAhHSxz",
+		"-d",
+		"--inplace",
+		sourceDir + "/",
+		state.rsyncTarget,
+	}
+	cmd := exec.Command("rsync", rsyncDirArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to rsync directory metadata: %w", err)
+	}
+
+	return nil
+}
+
+// rsyncFromList runs rsync with file list
+func (w *Worker) rsyncFromList(listPath, target string, includeContent bool) error {
+	// Check if list file exists and is non-empty
+	info, err := os.Stat(listPath)
+	if err != nil || info.Size() == 0 {
+		w.logger.Info("Skipping rsync, empty list", "list", listPath)
+		return nil
+	}
+
+	var rsyncArgs []string
+
+	if includeContent {
+		// Content + metadata
+		rsyncArgs = []string{
+			"-aAhHSxz",
+			"-r",
+			"--files-from=" + listPath,
+			sourceDir + "/",
+			target,
+		}
+	} else {
+		// Metadata + size fix (content already transferred via block diff)
+		// Uses --inplace to avoid creating temp files for large files
+		rsyncArgs = []string{
+			"-aAhHSxz",
+			"--inplace",
+			"--files-from=" + listPath,
+			sourceDir + "/",
+			target,
+		}
+	}
+
+	cmd := exec.Command("rsync", rsyncArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("rsync failed for %s: %w", listPath, err)
+	}
+
+	return nil
 }
