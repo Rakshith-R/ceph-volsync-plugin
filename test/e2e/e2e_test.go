@@ -62,72 +62,7 @@ var _ = Describe("Manager", Ordered, func() {
 		// _, _ = utils.Run(cmd)
 	})
 
-	AfterEach(func() {
-		specReport := CurrentSpecReport()
-		if specReport.Failed() {
-			By("Fetching controller manager pod logs")
-			cmd := exec.Command(
-				"kubectl", "logs",
-				controllerPodName,
-				"-n", namespace,
-			)
-			controllerLogs, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(
-					GinkgoWriter,
-					"Controller logs:\n %s",
-					controllerLogs,
-				)
-			} else {
-				_, _ = fmt.Fprintf(
-					GinkgoWriter,
-					"Failed to get Controller"+
-						" logs: %s", err,
-				)
-			}
-
-			By("Fetching Kubernetes events")
-			cmd = exec.Command(
-				"kubectl", "get", "events",
-				"-n", namespace,
-				"--sort-by=.lastTimestamp",
-			)
-			eventsOutput, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(
-					GinkgoWriter,
-					"Kubernetes events:\n%s",
-					eventsOutput,
-				)
-			} else {
-				_, _ = fmt.Fprintf(
-					GinkgoWriter,
-					"Failed to get Kubernetes"+
-						" events: %s", err,
-				)
-			}
-
-			By("Fetching controller manager " +
-				"pod description")
-			cmd = exec.Command(
-				"kubectl", "describe", "pod",
-				controllerPodName,
-				"-n", namespace,
-			)
-			podDescription, err := utils.Run(cmd)
-			if err == nil {
-				fmt.Println(
-					"Pod description:\n",
-					podDescription,
-				)
-			} else {
-				fmt.Println(
-					"Failed to describe " +
-						"controller pod",
-				)
-			}
-		}
-	})
+	AfterEach(debugAfterEach)
 
 	SetDefaultEventuallyTimeout(2 * time.Minute)
 	SetDefaultEventuallyPollingInterval(time.Second)

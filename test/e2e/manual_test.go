@@ -73,6 +73,8 @@ func manualDirectTest(drv driverConfig) {
 				)
 			})
 
+			AfterEach(debugAfterEach)
+
 			It("should create PVCs", func() {
 				createAndWaitForPVC(
 					ctx, srcPVC, drv.sc,
@@ -221,6 +223,8 @@ func manualSnapshotTest(drv driverConfig) {
 					},
 				)
 			})
+
+			AfterEach(debugAfterEach)
 
 			It("should create PVCs", func() {
 				createAndWaitForPVC(

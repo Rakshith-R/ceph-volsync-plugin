@@ -51,18 +51,17 @@ type driverConfig struct {
 // drivers is the list of storage drivers to test.
 var drivers = []driverConfig{
 	{
-		name: "cephfs",
-		provider: "rook-ceph." +
-			"cephfs.csi.ceph.com",
-		sc:      "rook-cephfs",
-		vsClass: "csi-cephfsplugin-snapclass",
-	},
-	{
 		name: "nfs",
 		provider: "rook-ceph." +
 			"nfs.csi.ceph.com",
 		sc:      "rook-nfs",
 		vsClass: "csi-nfsplugin-snapclass",
+	}, {
+		name: "cephfs",
+		provider: "rook-ceph." +
+			"cephfs.csi.ceph.com",
+		sc:      "rook-cephfs",
+		vsClass: "csi-cephfsplugin-snapclass",
 	},
 }
 
@@ -608,6 +607,97 @@ func getMetricsOutput() string {
 	)
 
 	return metricsOutput
+}
+
+// debugAfterEach collects controller pod logs,
+// Kubernetes events, and pod description when a
+// spec fails.
+func debugAfterEach() {
+	specReport := CurrentSpecReport()
+	if !specReport.Failed() {
+		return
+	}
+
+	By("Fetching controller pod name")
+	cmd := exec.Command(
+		"kubectl", "get", "pods",
+		"-l", "control-plane="+
+			"controller-manager",
+		"-n", namespace,
+		"-o", "jsonpath="+
+			"{.items[0].metadata.name}",
+	)
+	podName, err := utils.Run(cmd)
+	if err != nil || podName == "" {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"Failed to get controller"+
+				" pod name: %v\n", err,
+		)
+		return
+	}
+
+	By("Fetching controller manager pod logs")
+	cmd = exec.Command(
+		"kubectl", "logs",
+		podName,
+		"-n", namespace,
+	)
+	controllerLogs, err := utils.Run(cmd)
+	if err == nil {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"Controller logs:\n %s",
+			controllerLogs,
+		)
+	} else {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"Failed to get Controller"+
+				" logs: %s", err,
+		)
+	}
+
+	By("Fetching Kubernetes events")
+	cmd = exec.Command(
+		"kubectl", "get", "events",
+		"-n", namespace,
+		"--sort-by=.lastTimestamp",
+	)
+	eventsOutput, err := utils.Run(cmd)
+	if err == nil {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"Kubernetes events:\n%s",
+			eventsOutput,
+		)
+	} else {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"Failed to get Kubernetes"+
+				" events: %s", err,
+		)
+	}
+
+	By("Fetching controller manager " +
+		"pod description")
+	cmd = exec.Command(
+		"kubectl", "describe", "pod",
+		podName,
+		"-n", namespace,
+	)
+	podDescription, err := utils.Run(cmd)
+	if err == nil {
+		fmt.Println(
+			"Pod description:\n",
+			podDescription,
+		)
+	} else {
+		fmt.Println(
+			"Failed to describe " +
+				"controller pod",
+		)
+	}
 }
 
 // tokenRequest is a simplified representation of
