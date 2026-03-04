@@ -63,7 +63,7 @@ ${CONTAINER_CMD} logs mover-destination 2>&1 | head -30
 echo "   ---"
 
 # Check if stunnel started successfully
-if ${CONTAINER_CMD} logs mover-destination 2>&1 | grep -q "Configuration successful"; then
+if ${CONTAINER_CMD} logs mover-destination 2>&1 | grep -q "stunnel started successfully"; then
     echo "   ✓ Destination: stunnel configured successfully"
 else
     echo "   ✗ Destination: stunnel configuration failed"
@@ -71,10 +71,10 @@ else
     exit 1
 fi
 
-if ${CONTAINER_CMD} logs mover-destination 2>&1 | grep -q "Accepting new connections"; then
-    echo "   ✓ Destination: stunnel accepting connections"
+if ${CONTAINER_CMD} logs mover-destination 2>&1 | grep -q "gRPC server listening"; then
+    echo "   ✓ Destination: gRPC server is listening"
 else
-    echo "   ✗ Destination: stunnel not accepting connections"
+    echo "   ✗ Destination: gRPC server not listening"
 fi
 
 # Use container name for DNS resolution within the network

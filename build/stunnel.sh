@@ -15,7 +15,11 @@ SERVER_PORT="${SERVER_PORT:-8080}"
 # Optional rsync tunnel configuration
 ENABLE_RSYNC_TUNNEL="${ENABLE_RSYNC_TUNNEL:-false}"
 RSYNC_PORT="${RSYNC_PORT:-8873}"
-RSYNC_DAEMON_PORT="${RSYNC_DAEMON_PORT:-8873}"
+RSYNC_DAEMON_PORT="${RSYNC_DAEMON_PORT:-873}"
+
+# ConfigMap configuration (optional)
+CEPH_CSI_CONFIGMAP_NAME="${CEPH_CSI_CONFIGMAP_NAME:-}"
+CEPH_CSI_CONFIGMAP_NAMESPACE="${CEPH_CSI_CONFIGMAP_NAMESPACE:-}"
 
 # Validate required parameters
 if [[ -z "$WORKER_TYPE" ]]; then
@@ -191,8 +195,7 @@ log file = /tmp/rsyncd.log
     comment = Data volume
     read only = false
     list = yes
-    auth users = *
-    secrets file = /keys/psk.txt
+    # No authentication - stunnel already provides PSK authentication
 EOF
 
     # Start rsync daemon
@@ -218,6 +221,15 @@ MOVER_ARGS="--worker-type=$WORKER_TYPE --server-port=$SERVER_PORT"
 if [[ "$WORKER_TYPE" == "source" && -n "$DESTINATION_ADDRESS" ]]; then
     # For source, we connect to local stunnel client port instead of direct destination
     MOVER_ARGS="$MOVER_ARGS --destination-address=127.0.0.1:8001"
+fi
+
+# Add ConfigMap arguments if provided
+if [[ -n "$CEPH_CSI_CONFIGMAP_NAME" ]]; then
+    MOVER_ARGS="$MOVER_ARGS --configmap-name=$CEPH_CSI_CONFIGMAP_NAME"
+fi
+
+if [[ -n "$CEPH_CSI_CONFIGMAP_NAMESPACE" ]]; then
+    MOVER_ARGS="$MOVER_ARGS --configmap-namespace=$CEPH_CSI_CONFIGMAP_NAMESPACE"
 fi
 
 echo "Starting mover with arguments: $MOVER_ARGS"

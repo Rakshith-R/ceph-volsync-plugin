@@ -1,5 +1,5 @@
 # Build the mover binary
-FROM golang:1.24 AS builder
+FROM golang:1.25 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 # Allow specifying rsync version (e.g., "3.2.7-r0" or leave empty for latest)

@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"os"
 	"strconv"
 	"time"
 
@@ -62,7 +63,20 @@ const (
 	// We need it here to query snapshots with cleanup label
 	cleanupLabelKey          = utils.VolsyncLabelPrefix + "/cleanup"
 	preserveLastSnapLabelKey = utils.VolsyncLabelPrefix + "/preserve-last-snapshot"
+
+	// Snapshot status labels for lifecycle management
+	snapshotStatusCurrent  = "current"
+	snapshotStatusPrevious = "previous"
+
+	// Environment variable names for ConfigMap configuration
+	configMapNameEnvVar      = "CEPH_CSI_CONFIGMAP_NAME"
+	configMapNamespaceEnvVar = "CEPH_CSI_CONFIGMAP_NAMESPACE"
 )
+
+// snapshotStatusLabelKey returns the label key for snapshot status, including owner name for easier identification
+func (m *Mover) snapshotStatusLabelKey() string {
+	return utils.VolsyncLabelPrefix + "/snapshot-status-" + m.owner.GetName()
+}
 
 // Mover is the reconciliation logic for the CephFS-based data mover.
 type Mover struct {
@@ -303,170 +317,236 @@ func (m *Mover) serviceSelector() map[string]string {
 
 func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 	m.logger.V(1).Info("Starting cleanup", "m.mainPVCName", m.mainPVCName, "m.isSource", m.isSource)
+
+	// Step 1: Mark all snapshots with status=previous for deletion
+	previousSnaps, err := m.listSnapshotsWithStatus(ctx, snapshotStatusPrevious)
+	if err != nil {
+		m.logger.Error(err, "failed to list previous snapshots")
+		return mover.InProgress(), err
+	}
+	for i := range previousSnaps {
+		snap := &previousSnaps[i]
+		updated := false
+		updated = utils.MarkForCleanup(m.owner, snap) // Ignore return value, we want to mark all previous snaps
+		updated = updated || utils.RemoveLabel(snap, m.snapshotStatusLabelKey())
+		if updated {
+			if err := m.client.Update(ctx, snap); err != nil {
+				m.logger.Error(err, "failed to mark previous snapshot for cleanup", "snapshot", snap.Name)
+				return mover.InProgress(), err
+			}
+			m.logger.V(1).Info("Marked previous snapshot for cleanup", "snapshot", snap.Name)
+		}
+
+	}
+
+	// Step 2: Transition status=current to status=previous
+	currentSnap, err := m.findSnapshotWithStatus(ctx, snapshotStatusCurrent)
+	if err != nil {
+		m.logger.Error(err, "failed to find current snapshot")
+		return mover.InProgress(), err
+	}
+	if currentSnap != nil {
+		if err = m.setSnapshotStatus(ctx, currentSnap, snapshotStatusPrevious); err != nil {
+			m.logger.Error(err, "failed to transition current snapshot to previous", "snapshot", currentSnap.Name)
+			return mover.InProgress(), err
+		}
+		m.logger.V(1).Info("Transitioned current snapshot to previous", "snapshot", currentSnap.Name)
+	}
+
+	// Step 3: Remove snapshot annotations (destination only)
 	if !m.isSource {
 		m.logger.V(1).Info("removing snapshot annotations from pvc")
-		// Cleanup the snapshot annotation on pvc for replicationDestination scenario so that
-		// on the next sync (if snapshot CopyMethod is being used) a new snapshot will be created rather than re-using
 		_, destPVCName := m.getDestinationPVCName()
-		err := m.vh.RemoveSnapshotAnnotationFromPVC(ctx, m.logger, destPVCName)
-		if err != nil {
+		if err := m.vh.RemoveSnapshotAnnotationFromPVC(ctx, m.logger, destPVCName); err != nil {
 			return mover.InProgress(), err
 		}
 	}
 
-	// Preserve the newest snapshot before cleanup
-	err := m.preserveNewestSnapshot(ctx)
-	if err != nil {
+	// Step 4: Delete marked objects
+	if err = utils.CleanupObjects(ctx, m.client, m.logger, m.owner, cleanupTypes); err != nil {
 		return mover.InProgress(), err
 	}
 
-	err = utils.CleanupObjects(ctx, m.client, m.logger, m.owner, cleanupTypes)
-	if err != nil {
-		return mover.InProgress(), err
-	}
 	m.logger.V(1).Info("Cleanup complete")
 	return mover.Complete(), nil
 }
 
-// getDataName returns name to be used for source PVC.
-// It returns the name of the
-// - latest VolumeSnapshot with cleanup label owned by this mover if such snapshot exists
-// - Otherwise, it generates a new unique name using owner name, direction, and timestamp
-func (m *Mover) getDataName(ctx context.Context) (string, error) {
-	// Find the latest snapshot with a cleanup label owned by this mover (using owner UID).
-	cleanupUID := string(m.owner.GetUID())
-	selector, err := labels.Parse(cleanupLabelKey + "=" + cleanupUID)
-	if err != nil {
-		return "", err
+// isSnapshotReady checks if a snapshot is ready to use
+func isSnapshotReady(snap *snapv1.VolumeSnapshot) bool {
+	if snap == nil {
+		return false
 	}
+	return snap.Status != nil && snap.Status.ReadyToUse != nil && *snap.Status.ReadyToUse
+}
+
+// findSnapshotWithStatus finds a snapshot with specific status label
+func (m *Mover) findSnapshotWithStatus(ctx context.Context, status string) (*snapv1.VolumeSnapshot, error) {
+	snapshots, err := m.listSnapshotsWithStatus(ctx, status)
+	if err != nil || len(snapshots) == 0 {
+		return nil, err
+	}
+	return &snapshots[0], nil
+}
+
+// listSnapshotsWithStatus lists all snapshots with specific status label
+func (m *Mover) listSnapshotsWithStatus(ctx context.Context, status string) ([]snapv1.VolumeSnapshot, error) {
+	selector, err := labels.Parse(m.snapshotStatusLabelKey() + "=" + status)
+	if err != nil {
+		return nil, err
+	}
+
 	listOptions := []client.ListOption{
 		client.MatchingLabelsSelector{Selector: selector},
 		client.InNamespace(m.owner.GetNamespace()),
 	}
+
 	snapList := &snapv1.VolumeSnapshotList{}
 	if err := m.client.List(ctx, snapList, listOptions...); err != nil {
-		return "", err
+		return nil, err
 	}
 
-	var latestSnapshot *snapv1.VolumeSnapshot
-	for i := range snapList.Items {
-		snap := &snapList.Items[i]
-		if latestSnapshot == nil || snap.CreationTimestamp.After(latestSnapshot.CreationTimestamp.Time) {
-			latestSnapshot = snap
-		}
-	}
-
-	if latestSnapshot != nil {
-		return latestSnapshot.Name, nil
-	}
-
-	// Fallback to generating a unique name if no such snapshot exists.
-	suffix := strconv.FormatInt(time.Now().Unix(), 10)
-
-	dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() + "-" + suffix
-
-	return dataName, nil
+	return snapList.Items, nil
 }
 
-// preserveNewestSnapshot ensures only the latest (newest) snapshot is preserved by:
-// 1. Finding the newest snapshot with cleanup label (if exists)
-// 2. If no cleanup snapshots exist, preserve the newest from already preserved snapshots
-// 3. Mark all other preserved snapshots for cleanup
-//
-// This guarantees at least one snapshot is always preserved.
-func (m *Mover) preserveNewestSnapshot(ctx context.Context) error {
-	// We need to find snapshots with EITHER cleanup label OR preserve label.
-	// Since Kubernetes label selectors use AND logic for comma-separated keys,
-	// we need two separate queries and merge the results.
+// setSnapshotStatus updates the snapshot status label
+func (m *Mover) setSnapshotStatus(ctx context.Context, snap *snapv1.VolumeSnapshot, status string) error {
+	if snap == nil {
+		return nil
+	}
 
-	// First, get snapshots with cleanup label owned by this mover
-	cleanupSelector, err := labels.Parse(cleanupLabelKey + "=" + string(m.owner.GetUID()))
+	updated := utils.AddLabel(snap, m.snapshotStatusLabelKey(), status)
+	if !updated {
+		return nil // Label already set to desired value
+	}
+
+	return m.client.Update(ctx, snap)
+}
+
+// ensureSnapshotWithStatusLabel creates or gets a snapshot with status=current label
+func (m *Mover) ensureSnapshotWithStatusLabel(ctx context.Context, logger logr.Logger,
+	src *corev1.PersistentVolumeClaim, name string) (*snapv1.VolumeSnapshot, error) {
+	snapshot := &snapv1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: m.owner.GetNamespace(),
+		},
+	}
+
+	op, err := ctrlutil.CreateOrUpdate(ctx, m.client, snapshot, func() error {
+		if err := ctrl.SetControllerReference(m.owner, snapshot, m.client.Scheme()); err != nil {
+			return err
+		}
+		utils.SetOwnedByVolSync(snapshot)
+		utils.MarkForCleanup(m.owner, snapshot)
+		utils.AddLabel(snapshot, m.snapshotStatusLabelKey(), snapshotStatusCurrent)
+
+		// Set snapshot spec if creating
+		if snapshot.CreationTimestamp.IsZero() {
+			snapshot.Spec.Source.PersistentVolumeClaimName = &src.Name
+			snapshot.Spec.VolumeSnapshotClassName = src.Spec.StorageClassName
+		}
+
+		return nil
+	})
+
 	if err != nil {
-		return err
-	}
-	cleanupListOptions := []client.ListOption{
-		client.MatchingLabelsSelector{Selector: cleanupSelector},
-		client.InNamespace(m.owner.GetNamespace()),
-	}
-	cleanupSnapList := &snapv1.VolumeSnapshotList{}
-	if err := m.client.List(ctx, cleanupSnapList, cleanupListOptions...); err != nil {
-		return err
+		logger.Error(err, "failed to create/update snapshot with status label", "snapshot", name)
+		return nil, err
 	}
 
-	// Then, get snapshots with preserve label
-	preserveSelector, err := labels.Parse(preserveLastSnapLabelKey)
+	logger.V(1).Info("Snapshot reconciled with status label", "operation", op, "snapshot", name)
+
+	// Check if snapshot is ready
+	if !isSnapshotReady(snapshot) {
+		return nil, nil // Not ready yet, will retry
+	}
+
+	return snapshot, nil
+}
+
+// createPVCFromSnapshot creates or gets a PVC from a snapshot
+func (m *Mover) createPVCFromSnapshot(ctx context.Context, logger logr.Logger,
+	snap *snapv1.VolumeSnapshot, src *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      snap.Name,
+			Namespace: m.owner.GetNamespace(),
+		},
+	}
+
+	op, err := ctrlutil.CreateOrUpdate(ctx, m.client, pvc, func() error {
+		if err := ctrl.SetControllerReference(m.owner, pvc, m.client.Scheme()); err != nil {
+			return err
+		}
+		utils.SetOwnedByVolSync(pvc)
+		utils.MarkForCleanup(m.owner, pvc)
+
+		// Set PVC spec if creating
+		if pvc.CreationTimestamp.IsZero() {
+			pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadOnlyMany}
+			pvc.Spec.Resources = src.Spec.Resources
+			pvc.Spec.StorageClassName = src.Spec.StorageClassName
+			pvc.Spec.VolumeMode = src.Spec.VolumeMode
+
+			// Set DataSource to the snapshot
+			pvc.Spec.DataSource = &corev1.TypedLocalObjectReference{
+				APIGroup: &snapv1.SchemeGroupVersion.Group,
+				Kind:     "VolumeSnapshot",
+				Name:     snap.Name,
+			}
+		}
+
+		return nil
+	})
+
 	if err != nil {
-		return err
-	}
-	preserveListOptions := []client.ListOption{
-		client.MatchingLabelsSelector{Selector: preserveSelector},
-		client.InNamespace(m.owner.GetNamespace()),
-	}
-	preserveSnapList := &snapv1.VolumeSnapshotList{}
-	if err := m.client.List(ctx, preserveSnapList, preserveListOptions...); err != nil {
-		return err
+		logger.Error(err, "failed to create/update PVC from snapshot", "pvc", pvc.Name)
+		return nil, err
 	}
 
-	// Merge the lists, avoiding duplicates using a map
-	snapMap := make(map[string]*snapv1.VolumeSnapshot)
-	for i := range cleanupSnapList.Items {
-		snap := &cleanupSnapList.Items[i]
-		snapMap[snap.Name] = snap
-	}
-	for i := range preserveSnapList.Items {
-		snap := &preserveSnapList.Items[i]
-		snapMap[snap.Name] = snap
+	logger.V(1).Info("PVC reconciled from snapshot", "operation", op, "pvc", pvc.Name)
+
+	// Check if PVC is bound
+	if pvc.Status.Phase != corev1.ClaimBound {
+		return nil, nil // Not bound yet, will retry
 	}
 
-	// Find the newest snapshot from the merged map
-	var newestSnapshot *snapv1.VolumeSnapshot
-	for _, snap := range snapMap {
-		if newestSnapshot == nil || snap.CreationTimestamp.After(newestSnapshot.CreationTimestamp.Time) {
-			newestSnapshot = snap
+	return pvc, nil
+}
+
+// ensurePVCFromSrcWithStatusLabels creates a PVC from source using status-labeled snapshots
+func (m *Mover) ensurePVCFromSrcWithStatusLabels(ctx context.Context, logger logr.Logger,
+	src *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+	// Look for snapshot with status=current
+	currentSnap, err := m.findSnapshotWithStatus(ctx, snapshotStatusCurrent)
+	if err != nil {
+		return nil, err
+	}
+
+	var snap *snapv1.VolumeSnapshot
+
+	if currentSnap != nil {
+		if isSnapshotReady(currentSnap) {
+			// Reuse existing ready snapshot
+			logger.V(1).Info("Reusing existing current snapshot", "snapshot", currentSnap.Name)
+			snap = currentSnap
+		} else {
+			// Wait for current snapshot to become ready
+			return nil, nil
+		}
+	} else {
+		// Create new snapshot with status=current
+		suffix := strconv.FormatInt(time.Now().Unix(), 10)
+		dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() + "-" + suffix
+
+		logger.V(1).Info("Creating new snapshot with status=current", "name", dataName)
+		snap, err = m.ensureSnapshotWithStatusLabel(ctx, logger, src, dataName)
+		if snap == nil || err != nil {
+			return nil, err
 		}
 	}
 
-	// If we found a snapshot to preserve, ensure it has the preserve label
-	if newestSnapshot != nil {
-		updated := false
-		updated = utils.AddLabel(newestSnapshot, preserveLastSnapLabelKey, "true") || updated
-		updated = utils.UnmarkForCleanup(newestSnapshot) || updated
-
-		if updated {
-			err = m.client.Update(ctx, newestSnapshot)
-			if err != nil {
-				m.logger.Error(err, "failed to update latest snapshot with preserve label",
-					"snapshot", newestSnapshot.Name)
-				return err
-			}
-			m.logger.V(1).Info("Preserved latest snapshot", "snapshot", newestSnapshot.Name)
-		}
-
-		// Mark all other snapshots for cleanup
-		for _, snap := range snapMap {
-			// Skip the snapshot we're preserving
-			if snap.Name == newestSnapshot.Name {
-				continue
-			}
-
-			// Remove preserve label and mark for cleanup
-			updated := false
-			updated = utils.RemoveLabel(snap, preserveLastSnapLabelKey) || updated
-			updated = utils.MarkForCleanup(m.owner, snap) || updated
-
-			if updated {
-				err = m.client.Update(ctx, snap)
-				if err != nil {
-					m.logger.Error(err, "failed to mark previously preserved snapshot for cleanup",
-						"snapshot", snap.Name)
-					return err
-				}
-				m.logger.V(1).Info("Marked previously preserved snapshot for cleanup", "snapshot", snap.Name)
-			}
-		}
-	}
-
-	return nil
+	return m.createPVCFromSnapshot(ctx, logger, snap, src)
 }
 
 func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
@@ -484,12 +564,7 @@ func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeCl
 		return srcPVC, nil
 	}
 
-	dataName, err := m.getDataName(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	pvc, err := m.vh.EnsurePVCFromSrc(ctx, m.logger, srcPVC, dataName, true)
+	pvc, err := m.ensurePVCFromSrcWithStatusLabels(ctx, m.logger, srcPVC)
 	if err != nil {
 		// If the error was a copy TriggerTimeoutError, update the latestMoverStatus to indicate error
 		var copyTriggerTimeoutError *vserrors.CopyTriggerTimeoutError
@@ -556,7 +631,8 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 		readOnlyVolume := false
 		blockVolume := utils.PvcIsBlockMode(dataPVC)
 
-		containerEnv := []corev1.EnvVar{}
+		// Pre-allocate with capacity for better performance (base 7 + conditionals)
+		containerEnv := make([]corev1.EnvVar, 0, 12)
 
 		// Add WORKER_TYPE environment variable for stunnel.sh
 		workerType := "destination"
@@ -616,6 +692,21 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 				containerEnv = append(containerEnv, corev1.EnvVar{Name: "BASE_SNAPSHOT_HANDLE", Value: baseSnapshotHandle})
 			}
 		}
+
+		// Inject ConfigMap configuration from environment variables
+		if configMapName := os.Getenv(configMapNameEnvVar); configMapName != "" {
+			containerEnv = append(containerEnv, corev1.EnvVar{
+				Name:  configMapNameEnvVar,
+				Value: configMapName,
+			})
+		}
+		if configMapNamespace := os.Getenv(configMapNamespaceEnvVar); configMapNamespace != "" {
+			containerEnv = append(containerEnv, corev1.EnvVar{
+				Name:  configMapNamespaceEnvVar,
+				Value: configMapNamespace,
+			})
+		}
+
 		podSpec := &job.Spec.Template.Spec
 		podSpec.Containers = []corev1.Container{{
 			Name:  "rsync-tls",
@@ -631,7 +722,8 @@ func (m *Mover) ensureJob(ctx context.Context, dataPVC *corev1.PersistentVolumeC
 				RunAsUser:              ptr.To[int64](0), // Run as root for stunnel
 			},
 		}}
-		volumeMounts := []corev1.VolumeMount{}
+		// Pre-allocate with capacity for better performance (max 3 items)
+		volumeMounts := make([]corev1.VolumeMount, 0, 3)
 		if !blockVolume {
 			volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: dataVolumeName, MountPath: mountPath})
 		}
