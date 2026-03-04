@@ -33,7 +33,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/kubernetes/test/e2e/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -262,9 +261,6 @@ var _ = Describe("Manager", Ordered, func() {
 			rdKeySecret string
 		)
 
-		f := framework.NewDefaultFramework("cephfs")
-		f.SkipNamespaceCreation = true
-
 		ctx := context.TODO()
 
 		AfterAll(func() {
@@ -292,7 +288,7 @@ var _ = Describe("Manager", Ordered, func() {
 			for _, name := range []string{
 				srcPVC, destPVC,
 			} {
-				_ = f.ClientSet.CoreV1().
+				_ = k8sClientSet.CoreV1().
 					PersistentVolumeClaims(namespace).
 					Delete(
 						ctx, name,
@@ -319,7 +315,7 @@ var _ = Describe("Manager", Ordered, func() {
 					},
 				},
 			}
-			_, err := f.ClientSet.CoreV1().
+			_, err := k8sClientSet.CoreV1().
 				PersistentVolumeClaims(namespace).
 				Create(
 					ctx, pvc, metav1.CreateOptions{},
@@ -327,7 +323,7 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				got, err := f.ClientSet.CoreV1().
+				got, err := k8sClientSet.CoreV1().
 					PersistentVolumeClaims(namespace).
 					Get(
 						ctx, srcPVC,
@@ -360,7 +356,7 @@ var _ = Describe("Manager", Ordered, func() {
 					},
 				},
 			}
-			_, err := f.ClientSet.CoreV1().
+			_, err := k8sClientSet.CoreV1().
 				PersistentVolumeClaims(namespace).
 				Create(
 					ctx, pvc, metav1.CreateOptions{},
@@ -368,7 +364,7 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				got, err := f.ClientSet.CoreV1().
+				got, err := k8sClientSet.CoreV1().
 					PersistentVolumeClaims(namespace).
 					Get(
 						ctx, destPVC,

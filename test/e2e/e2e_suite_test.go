@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,6 +50,10 @@ var (
 	// k8sClient is a controller-runtime client for typed
 	// access to VolSync CRDs and VolumeSnapshots.
 	k8sClient client.Client
+
+	// k8sClientSet is a client-go Clientset for typed
+	// access to core Kubernetes resources like PVCs.
+	k8sClientSet *kubernetes.Clientset
 )
 
 // TestE2E runs the end-to-end (e2e) test suite for the project. These tests execute in an isolated,
@@ -81,6 +86,10 @@ var _ = BeforeSuite(func() {
 	)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	k8sClientSet, err =
+		kubernetes.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
 
 	if !skipCertManagerInstall {
 		By("checking if cert manager is installed already")
