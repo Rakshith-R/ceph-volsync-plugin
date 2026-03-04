@@ -25,7 +25,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-const schedule = "*/3 * * * *"
+const schedule = "*/2 * * * *"
 
 var _ = Describe(
 	"Schedule Replication",
