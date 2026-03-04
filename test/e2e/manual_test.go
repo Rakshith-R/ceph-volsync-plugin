@@ -207,6 +207,8 @@ func manualSnapshotTest(drv driverConfig) {
 			rsName := drv.name + "-ms-rs"
 			manualID1 := drv.name + "-ms-1"
 			manualID2 := drv.name + "-ms-2"
+			baseSnap := drv.name + "-md-base"
+			targetSnap := drv.name + "-md-target"
 
 			var (
 				rdAddr string
@@ -273,16 +275,29 @@ func manualSnapshotTest(drv driverConfig) {
 				},
 			)
 
-			It("should have current snapshot",
+			It("should take base snapshot",
 				func() {
-					waitForSnapshot(
-						ctx, rsName,
-						5*time.Minute,
+					createVolumeSnapshot(
+						ctx,
+						baseSnap,
+						srcPVC,
+						drv.vsClass,
 					)
 				},
 			)
 
 			// TODO: write data to source PVC
+
+			It("should take target snapshot",
+				func() {
+					createVolumeSnapshot(
+						ctx,
+						targetSnap,
+						srcPVC,
+						drv.vsClass,
+					)
+				},
+			)
 
 			It("should second sync "+
 				"(base+target snap)",

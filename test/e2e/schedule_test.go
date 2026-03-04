@@ -200,7 +200,7 @@ func scheduleDirectTest(drv driverConfig) {
 					rdAddr, rdKey,
 					drv,
 					map[string]string{
-						"copyMethod": "Direct",
+						"copyMethod": "Snapshot",
 					},
 				)
 			})
