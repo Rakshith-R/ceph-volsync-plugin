@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 )
 
 // clusterMappingConfigFile is the location of the cluster mapping config file.
@@ -157,7 +159,7 @@ func fetchMappedClusterIDAndMons(ctx context.Context,
 				// 	mappedClusterID,
 				// 	clusterID)
 
-				mons, err = Mons(csiConfigFile, mappedClusterID)
+				mons, err = config.Mons(csiConfigFile, mappedClusterID)
 				if err != nil {
 					// log.DebugLog(ctx, "failed getting mons with mapped cluster id %q: %v",
 					// 	mappedClusterID, err)
@@ -171,7 +173,7 @@ func fetchMappedClusterIDAndMons(ctx context.Context,
 	}
 
 	// check original clusterID for backward compatibility when cluster ids were expected to be same.
-	mons, err = Mons(csiConfigFile, clusterID)
+	mons, err = config.Mons(csiConfigFile, clusterID)
 	if err != nil {
 		// log.ErrorLog(ctx, "failed getting mons with cluster id %q: %v", clusterID, err)
 
@@ -183,5 +185,35 @@ func fetchMappedClusterIDAndMons(ctx context.Context,
 
 // FetchMappedClusterIDAndMons returns monitors and clusterID info after checking cluster mapping.
 func FetchMappedClusterIDAndMons(ctx context.Context, clusterID string) (string, string, error) {
-	return fetchMappedClusterIDAndMons(ctx, clusterID, clusterMappingConfigFile, CsiConfigFile)
+	return fetchMappedClusterIDAndMons(ctx, clusterID, clusterMappingConfigFile, config.CsiConfigFile)
+}
+
+// GetMonsAndClusterID returns monitors and clusterID information
+// read from configfile.
+func GetMonsAndClusterID(
+	ctx context.Context,
+	clusterID string,
+	checkClusterIDMapping bool,
+) (string, string, error) {
+	if checkClusterIDMapping {
+		monitors, mappedClusterID, err :=
+			FetchMappedClusterIDAndMons(ctx, clusterID)
+		if err != nil {
+			return "", "", err
+		}
+
+		return monitors, mappedClusterID, nil
+	}
+
+	monitors, err := config.Mons(
+		config.CsiConfigFile, clusterID,
+	)
+	if err != nil {
+		return "", "", fmt.Errorf(
+			"failed to fetch monitor list using "+
+				"clusterID (%s): %w", clusterID, err,
+		)
+	}
+
+	return monitors, clusterID, nil
 }

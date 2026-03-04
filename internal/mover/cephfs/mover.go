@@ -28,12 +28,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 	"github.com/backube/volsync/controllers/mover/rsynctls"
 	"github.com/go-logr/logr"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/events"
@@ -143,14 +144,22 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 		return mover.InProgress(), err
 	}
 
+	// clusterID is extracted from storageclass
+	clusterID, err := m.clusterIDFromStorageClass(
+		ctx, dataPVC.Spec.StorageClassName,
+	)
+	if err != nil {
+		return mover.InProgress(), err
+	}
+
 	// Ensure ceph-csi ConfigMap in owner namespace
-	csiConfigMapName, err := m.ensureCephCSIConfigMap(ctx)
+	csiConfigMapName, err := m.ensureCephCSIConfigMap(ctx, clusterID)
 	if csiConfigMapName == nil || err != nil {
 		return mover.InProgress(), err
 	}
 
 	// Ensure ceph-csi Secret in owner namespace
-	csiSecretName, err := m.ensureCephCSISecret(ctx)
+	csiSecretName, err := m.ensureCephCSISecret(ctx, clusterID)
 	if csiSecretName == nil || err != nil {
 		return mover.InProgress(), err
 	}
@@ -310,8 +319,11 @@ func (m *Mover) ensureSecrets(ctx context.Context) (*string, error) {
 // ensureCephCSIConfigMap reads the ceph-csi config files
 // from the operator's mounted ConfigMap and creates a
 // per-RS/RD ConfigMap in the owner's namespace.
+// TODO: filter the config for only the relevant(+mapped)
+// clusterID instead of copying everything.
 func (m *Mover) ensureCephCSIConfigMap(
 	ctx context.Context,
+	_ string,
 ) (*string, error) {
 	cmName := volSyncCephFSPrefix +
 		"csi-config-" + m.direction() + "-" +
@@ -389,6 +401,7 @@ func (m *Mover) ensureCephCSIConfigMap(
 // fetches it, and creates a copy in the owner's namespace.
 func (m *Mover) ensureCephCSISecret(
 	ctx context.Context,
+	clusterID string,
 ) (*string, error) {
 	if m.mainPVCName == nil {
 		return nil, fmt.Errorf("mainPVCName is not set")
@@ -409,28 +422,10 @@ func (m *Mover) ensureCephCSISecret(
 		)
 	}
 
-	// Get the CSI volume handle from the PV
-	volumeHandle, err := m.getVolumeHandle(
-		ctx, srcPVC.Spec.VolumeName,
-	)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to get volume handle: %w", err,
-		)
-	}
-
-	// Extract clusterID from volume handle
-	volID := &ceph.CSIIdentifier{}
-	if err := volID.DecomposeCSIID(volumeHandle); err != nil {
-		return nil, fmt.Errorf(
-			"failed to decompose CSI ID: %w", err,
-		)
-	}
-
 	// Look up the secret ref from csi config
 	secretName, secretNS, err :=
-		ceph.GetCephFSControllerPublishSecretRef(
-			ceph.CsiConfigFile, volID.ClusterID,
+		config.GetCephFSControllerPublishSecretRef(
+			config.CsiConfigFile, clusterID,
 		)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -522,6 +517,34 @@ func (m *Mover) serviceSelector() map[string]string {
 		"app.kubernetes.io/component": "cephfs-mover",
 		"app.kubernetes.io/part-of":   "ceph-volsync-plugin",
 	}
+}
+
+// clusterIDFromStorageClass fetches the named StorageClass and
+// returns the value of its "clusterID" parameter.
+func (m *Mover) clusterIDFromStorageClass(
+	ctx context.Context,
+	scName *string,
+) (string, error) {
+	if scName == nil {
+		return "", fmt.Errorf("storageClassName is not set")
+	}
+	sc := &storagev1.StorageClass{}
+	if err := m.client.Get(
+		ctx, client.ObjectKey{Name: *scName}, sc,
+	); err != nil {
+		return "", fmt.Errorf(
+			"failed to get StorageClass %s: %w",
+			*scName, err,
+		)
+	}
+	clusterID, ok := sc.Parameters["clusterID"]
+	if !ok {
+		return "", fmt.Errorf(
+			"clusterID not found in StorageClass %s",
+			*scName,
+		)
+	}
+	return clusterID, nil
 }
 
 func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {

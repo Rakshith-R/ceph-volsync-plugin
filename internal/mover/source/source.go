@@ -36,6 +36,7 @@ import (
 	"github.com/ceph/go-ceph/cephfs"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 	cephfsmover "github.com/RamenDR/ceph-volsync-plugin/internal/mover/cephfs"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
 	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/version/v1"
@@ -251,7 +252,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		w.logger.Error(err, "Failed to decompose VOLUME_HANDLE")
 		return fmt.Errorf("failed to decompose VOLUME_HANDLE: %w", err)
 	}
-	subVolumeGroup, err := ceph.CephFSSubvolumeGroup(ceph.CsiConfigFile, volumeID.ClusterID)
+	subVolumeGroup, err := config.CephFSSubvolumeGroup(config.CsiConfigFile, volumeID.ClusterID)
 	if err != nil {
 		w.logger.Error(err, "Failed to get subvolume group")
 		return fmt.Errorf("failed to get subvolume group: %w", err)
@@ -268,8 +269,8 @@ func (w *Worker) Run(ctx context.Context) error {
 		)
 	}
 
-	mons, err := ceph.Mons(
-		ceph.CsiConfigFile, volumeID.ClusterID,
+	mons, err := config.Mons(
+		config.CsiConfigFile, volumeID.ClusterID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to get mons: %w", err)

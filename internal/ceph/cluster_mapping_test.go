@@ -26,6 +26,8 @@ import (
 	"testing"
 
 	cephcsi "github.com/ceph/ceph-csi/api/deploy/kubernetes"
+
+	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 )
 
 func TestGetClusterMappingInfo(t *testing.T) {
@@ -319,7 +321,7 @@ func TestFetchMappedClusterIDAndMons(t *testing.T) {
 	}
 	err = os.WriteFile(csiConfigFile, csiConfigFileContent, 0o600)
 	if err != nil {
-		t.Errorf("failed to write %s file content: %v", CsiConfigFile, err)
+		t.Errorf("failed to write %s file content: %v", config.CsiConfigFile, err)
 	}
 
 	t.Run("cluster-mapping.json does not exist", func(t *testing.T) {
