@@ -437,7 +437,7 @@ var _ = Describe("Manager", Ordered, func() {
 					rdKeySecret =
 						*got.Status.RsyncTLS.KeySecret
 				}).WithTimeout(
-					5 * time.Minute,
+					2 * time.Minute,
 				).Should(Succeed())
 			},
 		)
