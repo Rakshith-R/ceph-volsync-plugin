@@ -40,7 +40,7 @@ import (
 
 const (
 	cephfsProviderName = "cephfs.csi.ceph.com"
-	nfsProviderName    = "nfs.csi.ceph.io"
+	nfsProviderName    = "nfs.csi.ceph.com"
 	cephfsMoverName    = "cephfs"
 	// defaultCephFSContainerImage is the default container image for the
 	// cephfs data mover
@@ -106,7 +106,8 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 		return nil, nil
 	}
 	provider := source.Spec.External.Provider
-	if !strings.HasSuffix(provider, cephfsProviderName) || strings.HasSuffix(provider, nfsProviderName) {
+	if !(strings.HasSuffix(provider, cephfsProviderName) ||
+		strings.HasSuffix(provider, nfsProviderName)) {
 		return nil, nil
 	}
 
@@ -211,7 +212,9 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 		return nil, nil
 	}
 	provider := destination.Spec.External.Provider
-	if !strings.HasSuffix(provider, cephfsProviderName) || strings.HasSuffix(provider, nfsProviderName) {
+
+	if !(strings.HasSuffix(provider, cephfsProviderName) ||
+		strings.HasSuffix(provider, nfsProviderName)) {
 		return nil, nil
 	}
 
