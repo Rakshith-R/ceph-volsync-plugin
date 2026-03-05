@@ -45,6 +45,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	"github.com/RamenDR/ceph-volsync-plugin/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -299,8 +301,30 @@ func main() {
 
 	initPodLogsClient(cfg)
 
-	// TODO: Add controllers.
-
+	if err = (&controller.ReplicationSourceReconciler{
+		Client: mgr.GetClient(),
+		Log: ctrl.Log.WithName("controllers").
+			WithName("ReplicationSource"),
+		Scheme: mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor(
+			"replicationsource-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller",
+			"controller", "ReplicationSource")
+		os.Exit(1)
+	}
+	if err = (&controller.ReplicationDestinationReconciler{
+		Client: mgr.GetClient(),
+		Log: ctrl.Log.WithName("controllers").
+			WithName("ReplicationDestination"),
+		Scheme: mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor(
+			"replicationdestination-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller",
+			"controller", "ReplicationDestination")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
