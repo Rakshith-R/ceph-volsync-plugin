@@ -17,37 +17,89 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
 	"path/filepath"
 
+	_ "embed"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
+	"github.com/backube/volsync/controllers/platform"
+	"github.com/backube/volsync/controllers/utils"
+	v1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	ocpsecurityv1 "github.com/openshift/api/security/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	"github.com/RamenDR/ceph-volsync-plugin/internal/controller"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/cephfs"
 	// +kubebuilder:scaffold:imports
 )
 
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+
+	//sdgo:embed ../openshift/mover_scc.yaml
+	CephVolsyncPluginMoverSCCYamlRaw []byte
+
+	// See each mover_<movertype>_register.go where they add themselves to
+	// enabledMovers
+	enabledMovers = []func() error{}
 )
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
+	utilruntime.Must(volsyncv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(ocpsecurityv1.AddToScheme(scheme))
+	utilruntime.Must(v1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+
+	enabledMovers = append(enabledMovers, cephfs.Register)
+	utils.SCCName = "ceph-volsync-plugin-privileged-mover"
+}
+
+func initPodLogsClient(cfg *rest.Config) {
+	_, err := utils.InitPodLogsClient(cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to create client-go clientset for pod logs")
+		os.Exit(1)
+	}
+	setupLog.Info("Mover Status Log", "log max bytes", utils.GetMoverLogMaxBytes(),
+		"tail lines", utils.GetMoverLogTailLines(), "debug", utils.IsMoverLogDebug())
+}
+
+// Prereq CRs we want to always be present in certain environments but do not want to reconcile often (just at startup)
+func ensureCRs(cfg *rest.Config) {
+	setupClient, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "error creating client")
+		os.Exit(1)
+	}
+
+	// Privileged mover SCC required in OpenShift envs
+	setupLog.Info("Privileged Mover SCC", "scc-name", utils.SCCName)
+	err = platform.EnsureVolSyncMoverSCCIfOpenShift(context.Background(), setupClient, setupLog,
+		utils.SCCName, CephVolsyncPluginMoverSCCYamlRaw)
+	if err != nil {
+		setupLog.Error(err, "unable to reconcile volsync mover scc", "scc-name", utils.SCCName)
+		os.Exit(1)
+	}
 }
 
 // nolint:gocyclo
@@ -174,7 +226,16 @@ func main() {
 		})
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// Register enabled movers
+	for _, moverRegisterFunc := range enabledMovers {
+		if err := moverRegisterFunc(); err != nil {
+			setupLog.Error(err, "unable to register mover")
+			os.Exit(1)
+		}
+	}
+
+	cfg := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -198,6 +259,29 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Before starting controllers - create or patch volsync mover SCC and VolumePopulator CR if necessary
+	ensureCRs(cfg)
+
+	initPodLogsClient(cfg)
+
+	if err = (&controller.ReplicationSourceReconciler{
+		Client:        mgr.GetClient(),
+		Log:           ctrl.Log.WithName("controllers").WithName("ReplicationSource"),
+		Scheme:        mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor("replicationsource-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ReplicationSource")
+		os.Exit(1)
+	}
+	if err = (&controller.ReplicationDestinationReconciler{
+		Client:        mgr.GetClient(),
+		Log:           ctrl.Log.WithName("controllers").WithName("ReplicationDestination"),
+		Scheme:        mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor("replicationdestination-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ReplicationDestination")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {

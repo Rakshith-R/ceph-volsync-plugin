@@ -1,0 +1,234 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package e2e
+
+import (
+	"context"
+	"time"
+
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
+	. "github.com/onsi/ginkgo/v2"
+	"k8s.io/utils/ptr"
+)
+
+const schedule = "*/2 * * * *"
+
+var _ = Describe(
+	"Schedule Replication",
+	func() {
+		for _, drv := range drivers {
+			drv := drv
+
+			scheduleSnapshotTest(drv)
+			scheduleDirectTest(drv)
+		}
+	},
+)
+
+func scheduleSnapshotTest(drv driverConfig) {
+	Context(drv.name+" Snapshot", Ordered,
+		func() {
+			srcPVC := drv.name + "-ss-src"
+			destPVC := drv.name + "-ss-dest"
+			rdName := drv.name + "-ss-rd"
+			rsName := drv.name + "-ss-rs"
+
+			var (
+				rdAddr string
+				rdKey  string
+			)
+
+			ctx := context.TODO()
+
+			AfterAll(func() {
+				cleanupReplication(
+					ctx, rsName, rdName,
+					[]string{
+						srcPVC, destPVC,
+					},
+				)
+			})
+
+			AfterEach(debugAfterEach)
+
+			It("should create PVCs", func() {
+				createAndWaitForPVC(
+					ctx, srcPVC, drv.sc,
+				)
+				createAndWaitForPVC(
+					ctx, destPVC, drv.sc,
+				)
+			})
+
+			It("should create RD", func() {
+				rdAddr, rdKey =
+					createRDAndWaitForAddress(
+						ctx, rdName, destPVC,
+						&volsyncv1alpha1.ReplicationDestinationTriggerSpec{
+							Schedule: ptr.To(
+								schedule,
+							),
+						},
+						drv,
+						map[string]string{
+							"copyMethod": "Snapshot",
+						},
+					)
+			})
+
+			// TODO: write data to source PVC
+
+			It("should create RS", func() {
+				createRS(
+					ctx, rsName, srcPVC,
+					&volsyncv1alpha1.ReplicationSourceTriggerSpec{
+						Schedule: ptr.To(
+							schedule,
+						),
+					},
+					rdAddr, rdKey,
+					drv,
+					map[string]string{
+						"copyMethod": "Snapshot",
+					},
+				)
+			})
+
+			It("should complete first sync",
+				func() {
+					waitForSyncTime(
+						ctx, rsName,
+						5*time.Minute,
+					)
+				},
+			)
+
+			// TODO: write data to source PVC
+
+			It("should complete second sync",
+				func() {
+					firstSync := waitForSyncTime(
+						ctx, rsName,
+						5*time.Minute,
+					)
+					waitForNextSync(
+						ctx, rsName,
+						firstSync,
+						10*time.Minute,
+					)
+				},
+			)
+		},
+	)
+}
+
+func scheduleDirectTest(drv driverConfig) {
+	Context(drv.name+" Direct", Ordered,
+		func() {
+			srcPVC := drv.name + "-sd-src"
+			destPVC := drv.name + "-sd-dest"
+			rdName := drv.name + "-sd-rd"
+			rsName := drv.name + "-sd-rs"
+
+			var (
+				rdAddr string
+				rdKey  string
+			)
+
+			ctx := context.TODO()
+
+			AfterAll(func() {
+				cleanupReplication(
+					ctx, rsName, rdName,
+					[]string{
+						srcPVC, destPVC,
+					},
+				)
+			})
+
+			AfterEach(debugAfterEach)
+
+			It("should create PVCs", func() {
+				createAndWaitForPVC(
+					ctx, srcPVC, drv.sc,
+				)
+				createAndWaitForPVC(
+					ctx, destPVC, drv.sc,
+				)
+			})
+
+			It("should create RD", func() {
+				rdAddr, rdKey =
+					createRDAndWaitForAddress(
+						ctx, rdName, destPVC,
+						&volsyncv1alpha1.ReplicationDestinationTriggerSpec{
+							Schedule: ptr.To(
+								schedule,
+							),
+						},
+						drv,
+						map[string]string{
+							"copyMethod": "Direct",
+						},
+					)
+			})
+
+			// TODO: write data to source PVC
+
+			It("should create RS", func() {
+				createRS(
+					ctx, rsName, srcPVC,
+					&volsyncv1alpha1.ReplicationSourceTriggerSpec{
+						Schedule: ptr.To(
+							schedule,
+						),
+					},
+					rdAddr, rdKey,
+					drv,
+					map[string]string{
+						"copyMethod": "Snapshot",
+					},
+				)
+			})
+
+			It("should complete first sync",
+				func() {
+					waitForSyncTime(
+						ctx, rsName,
+						5*time.Minute,
+					)
+				},
+			)
+
+			// TODO: write data to source PVC
+
+			It("should complete second sync",
+				func() {
+					firstSync := waitForSyncTime(
+						ctx, rsName,
+						5*time.Minute,
+					)
+					waitForNextSync(
+						ctx, rsName,
+						firstSync,
+						10*time.Minute,
+					)
+				},
+			)
+		},
+	)
+}

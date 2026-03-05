@@ -1,0 +1,45 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rsync-dest-pvc
+  labels:
+    group: snapshot-test
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  # storageClassName: ocs-storagecluster-cephfs
+  storageClassName: rook-cephfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cft-dest-pvc
+  labels:
+    group: snapshot-test
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  # storageClassName: ocs-storagecluster-cephfs
+  storageClassName: rook-cephfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: src-pvc
+  labels:
+    group: snapshot-test
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  # storageClassName: ocs-storagecluster-cephfs
+  storageClassName: rook-cephfs

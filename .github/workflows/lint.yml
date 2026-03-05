@@ -1,19 +1,40 @@
+---
 name: Lint
 
 on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+# cancel the in-progress workflow when PR is refreshed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: true
+
 jobs:
-  lint:
-    name: Run on Ubuntu
+  codespell:
+    name: codespell
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+
+      - name: Run codespell
+        uses: codespell-project/actions-codespell@v2
+        with:
+          ignore_words_list: BeforeAll,AfterAll
+
+  golangci-lint:
+    name: golangci-lint
     runs-on: ubuntu-latest
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -21,3 +42,15 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.1.0
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
