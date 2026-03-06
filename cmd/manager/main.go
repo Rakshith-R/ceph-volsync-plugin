@@ -17,37 +17,94 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
 	"path/filepath"
 
+	_ "embed"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
+	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
+	"github.com/backube/volsync/controllers/platform"
+	"github.com/backube/volsync/controllers/utils"
+	v1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	ocpsecurityv1 "github.com/openshift/api/security/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	"github.com/RamenDR/ceph-volsync-plugin/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+
+	//go:embed openshift/mover_scc.yaml
+	CephVolsyncPluginMoverSCCYamlRaw []byte
+
+	// See each mover_<movertype>_register.go where they add themselves to
+	// enabledMovers
+	enabledMovers = []func() error{}
 )
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
+	utilruntime.Must(volsyncv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(ocpsecurityv1.AddToScheme(scheme))
+	utilruntime.Must(v1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+
+	// TODO: append register functions here.
+	// enabledMovers = append(enabledMovers, mover<Movertype>Register)
+	utils.SCCName = "ceph-volsync-plugin-privileged-mover"
+}
+
+func initPodLogsClient(cfg *rest.Config) {
+	_, err := utils.InitPodLogsClient(cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to create client-go clientset for pod logs")
+		os.Exit(1)
+	}
+	setupLog.Info("Mover Status Log", "log max bytes",
+		utils.GetMoverLogMaxBytes(),
+		"tail lines", utils.GetMoverLogTailLines(), "debug",
+		utils.IsMoverLogDebug())
+}
+
+// Prereq CRs we want to always be present in certain environments but do
+// not want to reconcile often (just at startup)
+func ensureCRs(cfg *rest.Config) {
+	setupClient, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "error creating client")
+		os.Exit(1)
+	}
+
+	// Privileged mover SCC required in OpenShift envs
+	setupLog.Info("Privileged Mover SCC", "scc-name", utils.SCCName)
+	err = platform.EnsureVolSyncMoverSCCIfOpenShift(
+		context.Background(), setupClient, setupLog,
+		utils.SCCName, CephVolsyncPluginMoverSCCYamlRaw)
+	if err != nil {
+		setupLog.Error(err, "unable to reconcile volsync mover scc",
+			"scc-name", utils.SCCName)
+		os.Exit(1)
+	}
 }
 
 // nolint:gocyclo
@@ -60,23 +117,34 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
-		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.StringVar(&metricsAddr, "metrics-bind-address", "0",
+		"The address the metrics endpoint binds to. "+
+			"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to "+
+			"disable the metrics service.")
+	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081",
+		"The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
+			"Enabling this will ensure there is only one active "+
+			"controller manager.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true,
-		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
-	flag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")
-	flag.StringVar(&webhookCertName, "webhook-cert-name", "tls.crt", "The name of the webhook certificate file.")
-	flag.StringVar(&webhookCertKey, "webhook-cert-key", "tls.key", "The name of the webhook key file.")
+		"If set, the metrics endpoint is served securely via HTTPS. "+
+			"Use --metrics-secure=false to use HTTP instead.")
+	flag.StringVar(&webhookCertPath, "webhook-cert-path", "",
+		"The directory that contains the webhook certificate.")
+	flag.StringVar(&webhookCertName, "webhook-cert-name", "tls.crt",
+		"The name of the webhook certificate file.")
+	flag.StringVar(&webhookCertKey, "webhook-cert-key", "tls.key",
+		"The name of the webhook key file.")
 	flag.StringVar(&metricsCertPath, "metrics-cert-path", "",
 		"The directory that contains the metrics server certificate.")
-	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
-	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
+	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt",
+		"The name of the metrics server certificate file.")
+	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key",
+		"The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
-		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+		"If set, HTTP/2 will be enabled for the metrics and webhook "+
+			"servers")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -85,10 +153,10 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// if the enable-http2 flag is false (the default), http/2 should be disabled
-	// due to its vulnerabilities. More specifically, disabling http/2 will
-	// prevent from being vulnerable to the HTTP/2 Stream Cancellation and
-	// Rapid Reset CVEs. For more information see:
+	// if the enable-http2 flag is false (the default), http/2 should be
+	// disabled due to its vulnerabilities. More specifically, disabling
+	// http/2 will prevent from being vulnerable to the HTTP/2 Stream
+	// Cancellation and Rapid Reset CVEs. For more information see:
 	// - https://github.com/advisories/GHSA-qppj-fm5r-hxr3
 	// - https://github.com/advisories/GHSA-4374-p667-p6c8
 	disableHTTP2 := func(c *tls.Config) {
@@ -107,8 +175,12 @@ func main() {
 	webhookTLSOpts := tlsOpts
 
 	if len(webhookCertPath) > 0 {
-		setupLog.Info("Initializing webhook certificate watcher using provided certificates",
-			"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
+		setupLog.Info(
+			"Initializing webhook certificate watcher using provided "+
+				"certificates",
+			"webhook-cert-path", webhookCertPath,
+			"webhook-cert-name", webhookCertName,
+			"webhook-cert-key", webhookCertKey)
 
 		var err error
 		webhookCertWatcher, err = certwatcher.New(
@@ -116,7 +188,8 @@ func main() {
 			filepath.Join(webhookCertPath, webhookCertKey),
 		)
 		if err != nil {
-			setupLog.Error(err, "Failed to initialize webhook certificate watcher")
+			setupLog.Error(err,
+				"Failed to initialize webhook certificate watcher")
 			os.Exit(1)
 		}
 
@@ -129,7 +202,8 @@ func main() {
 		TLSOpts: webhookTLSOpts,
 	})
 
-	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
+	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'.
+	// The Metrics options configure the server.
 	// More info:
 	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/metrics/server
 	// - https://book.kubebuilder.io/reference/metrics.html
@@ -140,24 +214,34 @@ func main() {
 	}
 
 	if secureMetrics {
-		// FilterProvider is used to protect the metrics endpoint with authn/authz.
-		// These configurations ensure that only authorized users and service accounts
-		// can access the metrics endpoint. The RBAC are configured in 'config/rbac/kustomization.yaml'. More info:
+		// FilterProvider is used to protect the metrics endpoint with
+		// authn/authz. These configurations ensure that only authorized
+		// users and service accounts can access the metrics endpoint. The
+		// RBAC are configured in 'config/rbac/kustomization.yaml'. More
+		// info:
 		// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/metrics/filters#WithAuthenticationAndAuthorization
-		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
+		metricsServerOptions.FilterProvider =
+			filters.WithAuthenticationAndAuthorization
 	}
 
-	// If the certificate is not specified, controller-runtime will automatically
-	// generate self-signed certificates for the metrics server. While convenient for development and testing,
-	// this setup is not recommended for production.
+	// If the certificate is not specified, controller-runtime will
+	// automatically generate self-signed certificates for the metrics
+	// server. While convenient for development and testing, this setup is
+	// not recommended for production.
 	//
 	// TODO(user): If you enable certManager, uncomment the following lines:
-	// - [METRICS-WITH-CERTS] at config/default/kustomization.yaml to generate and use certificates
-	// managed by cert-manager for the metrics server.
-	// - [PROMETHEUS-WITH-CERTS] at config/prometheus/kustomization.yaml for TLS certification.
+	// - [METRICS-WITH-CERTS] at config/default/kustomization.yaml to
+	//   generate and use certificates managed by cert-manager for the
+	//   metrics server.
+	// - [PROMETHEUS-WITH-CERTS] at config/prometheus/kustomization.yaml
+	//   for TLS certification.
 	if len(metricsCertPath) > 0 {
-		setupLog.Info("Initializing metrics certificate watcher using provided certificates",
-			"metrics-cert-path", metricsCertPath, "metrics-cert-name", metricsCertName, "metrics-cert-key", metricsCertKey)
+		setupLog.Info(
+			"Initializing metrics certificate watcher using provided "+
+				"certificates",
+			"metrics-cert-path", metricsCertPath,
+			"metrics-cert-name", metricsCertName,
+			"metrics-cert-key", metricsCertKey)
 
 		var err error
 		metricsCertWatcher, err = certwatcher.New(
@@ -165,32 +249,46 @@ func main() {
 			filepath.Join(metricsCertPath, metricsCertKey),
 		)
 		if err != nil {
-			setupLog.Error(err, "to initialize metrics certificate watcher", "error", err)
+			setupLog.Error(err,
+				"to initialize metrics certificate watcher",
+				"error", err)
 			os.Exit(1)
 		}
 
-		metricsServerOptions.TLSOpts = append(metricsServerOptions.TLSOpts, func(config *tls.Config) {
-			config.GetCertificate = metricsCertWatcher.GetCertificate
-		})
+		metricsServerOptions.TLSOpts = append(
+			metricsServerOptions.TLSOpts, func(config *tls.Config) {
+				config.GetCertificate = metricsCertWatcher.GetCertificate
+			})
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// Register enabled movers
+	for _, moverRegisterFunc := range enabledMovers {
+		if err := moverRegisterFunc(); err != nil {
+			setupLog.Error(err, "unable to register mover")
+			os.Exit(1)
+		}
+	}
+
+	cfg := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "672a89a9.openshift.io",
-		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
-		// when the Manager ends. This requires the binary to immediately end when the
-		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
-		// speeds up voluntary leader transitions as the new leader don't have to wait
+		// LeaderElectionReleaseOnCancel defines if the leader should step
+		// down voluntarily when the Manager ends. This requires the
+		// binary to immediately end when the Manager is stopped, otherwise,
+		// this setting is unsafe. Setting this significantly speeds up
+		// voluntary leader transitions as the new leader don't have to wait
 		// LeaseDuration time first.
 		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
+		// In the default scaffold provided, the program ends immediately
+		// after the manager stops, so would be fine to enable this option.
+		// However, if you are doing or is intended to do any operation
+		// such as perform cleanups after the manager stops then its usage
+		// might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
@@ -198,12 +296,42 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Before starting controllers - create or patch volsync mover SCC.
+	ensureCRs(cfg)
+
+	initPodLogsClient(cfg)
+
+	if err = (&controller.ReplicationSourceReconciler{
+		Client: mgr.GetClient(),
+		Log: ctrl.Log.WithName("controllers").
+			WithName("ReplicationSource"),
+		Scheme: mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor(
+			"replicationsource-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller",
+			"controller", "ReplicationSource")
+		os.Exit(1)
+	}
+	if err = (&controller.ReplicationDestinationReconciler{
+		Client: mgr.GetClient(),
+		Log: ctrl.Log.WithName("controllers").
+			WithName("ReplicationDestination"),
+		Scheme: mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor(
+			"replicationdestination-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller",
+			"controller", "ReplicationDestination")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")
 		if err := mgr.Add(metricsCertWatcher); err != nil {
-			setupLog.Error(err, "unable to add metrics certificate watcher to manager")
+			setupLog.Error(err,
+				"unable to add metrics certificate watcher to manager")
 			os.Exit(1)
 		}
 	}
@@ -211,7 +339,8 @@ func main() {
 	if webhookCertWatcher != nil {
 		setupLog.Info("Adding webhook certificate watcher to manager")
 		if err := mgr.Add(webhookCertWatcher); err != nil {
-			setupLog.Error(err, "unable to add webhook certificate watcher to manager")
+			setupLog.Error(err,
+				"unable to add webhook certificate watcher to manager")
 			os.Exit(1)
 		}
 	}
