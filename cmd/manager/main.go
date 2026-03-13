@@ -48,6 +48,7 @@ import (
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/controller"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/cephfs"
+	rbdmover "github.com/RamenDR/ceph-volsync-plugin/internal/mover/rbd"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -71,6 +72,9 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 
 	enabledMovers = append(enabledMovers, cephfs.Register)
+	enabledMovers = append(
+		enabledMovers, rbdmover.Register,
+	)
 	utils.SCCName = "ceph-volsync-plugin-privileged-mover"
 }
 
