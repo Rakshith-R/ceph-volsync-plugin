@@ -42,10 +42,12 @@ import (
 // driverConfig holds driver-specific parameters
 // for parameterized e2e tests.
 type driverConfig struct {
-	name     string
-	provider string
-	sc       string
-	vsClass  string
+	name       string
+	provider   string
+	sc         string
+	vsClass    string
+	volumeMode *corev1.PersistentVolumeMode
+	accessMode corev1.PersistentVolumeAccessMode
 }
 
 // drivers is the list of storage drivers to test.
@@ -62,17 +64,34 @@ var drivers = []driverConfig{
 			"cephfs.csi.ceph.com",
 		sc:      "rook-cephfs",
 		vsClass: "csi-cephfsplugin-snapclass",
+	}, {
+		name: "rbd",
+		provider: "rook-ceph." +
+			"rbd.csi.ceph.com",
+		sc:      "rook-ceph-block",
+		vsClass: "csi-rbdplugin-snapclass",
+		volumeMode: ptr.To(
+			corev1.PersistentVolumeBlock),
+		accessMode: corev1.ReadWriteOnce,
 	},
 }
 
-// createAndWaitForPVC creates a 1Gi ReadWriteMany
-// PVC with the given StorageClass and waits for it
-// to be bound.
+// createAndWaitForPVC creates a 1Gi PVC with the
+// given StorageClass and waits for it to be bound.
+// It respects driver-specific volumeMode and
+// accessMode settings, defaulting to Filesystem
+// mode and ReadWriteMany access.
 func createAndWaitForPVC(
 	ctx context.Context,
-	name, sc string,
+	name string,
+	drv driverConfig,
 ) {
 	By("creating PVC " + name)
+
+	accessMode := corev1.ReadWriteMany
+	if drv.accessMode != "" {
+		accessMode = drv.accessMode
+	}
 
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -81,9 +100,10 @@ func createAndWaitForPVC(
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteMany,
+				accessMode,
 			},
-			StorageClassName: ptr.To(sc),
+			StorageClassName: ptr.To(drv.sc),
+			VolumeMode:       drv.volumeMode,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: resource.MustParse(
