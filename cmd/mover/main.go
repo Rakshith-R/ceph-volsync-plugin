@@ -24,17 +24,17 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/destination"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/rbd"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/source"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/tunnel"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
+	"github.com/backube/volsync/controllers/utils"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	ctrl "sigs.k8s.io/controller-runtime"
-
-	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/destination"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/source"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/tunnel"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
-	"github.com/backube/volsync/controllers/utils"
 )
 
 const (
@@ -45,6 +45,7 @@ const (
 // Config holds configuration for the mover.
 type Config struct {
 	WorkerType         string
+	MoverType          string
 	DestinationAddress string
 	LogLevel           string
 	ServerPort         string
@@ -83,6 +84,9 @@ func normalizeBool(val string) bool {
 func loadConfig() Config {
 	return Config{
 		WorkerType: os.Getenv(worker.EnvWorkerType),
+		MoverType: envOrDefault(
+			"MOVER_TYPE", "cephfs",
+		),
 		DestinationAddress: os.Getenv(
 			worker.EnvDestinationAddress,
 		),
@@ -167,6 +171,7 @@ func runMover(config Config) error {
 
 	logger.Info("Starting mover",
 		"workerType", config.WorkerType,
+		"moverType", config.MoverType,
 		"destinationAddress",
 		config.DestinationAddress,
 	)
@@ -178,7 +183,26 @@ func runMover(config Config) error {
 	)
 	defer cancel()
 
-	// Start the appropriate worker
+	// Start the mover based on mover type and worker type
+	switch config.MoverType {
+	case "rbd":
+		return runRBDMover(ctx, logger, config)
+	case "cephfs":
+		return runCephFSMover(ctx, logger, config)
+	default:
+		return fmt.Errorf(
+			"invalid MOVER_TYPE '%s':"+
+				" must be 'cephfs' or 'rbd'",
+			config.MoverType,
+		)
+	}
+}
+
+func runCephFSMover(
+	ctx context.Context,
+	logger logr.Logger,
+	config Config,
+) error {
 	switch config.WorkerType {
 	case workerTypeSource:
 		srcCfg := source.Config{
@@ -192,6 +216,36 @@ func runMover(config Config) error {
 		}
 		w := destination.NewWorker(logger, dstCfg)
 		return w.Run(ctx)
+	default:
+		return fmt.Errorf(
+			"invalid worker type: %s",
+			config.WorkerType,
+		)
+	}
+}
+
+func runRBDMover(
+	ctx context.Context,
+	logger logr.Logger,
+	config Config,
+) error {
+	switch config.WorkerType {
+	case workerTypeSource:
+		sourceConfig := rbd.SourceConfig{
+			DestinationAddress: config.DestinationAddress,
+		}
+		worker := rbd.NewSourceWorker(
+			logger, sourceConfig,
+		)
+		return worker.Run(ctx)
+	case workerTypeDestination:
+		destConfig := rbd.DestinationConfig{
+			ServerPort: config.ServerPort,
+		}
+		worker := rbd.NewDestinationWorker(
+			logger, destConfig,
+		)
+		return worker.Run(ctx)
 	default:
 		return fmt.Errorf(
 			"invalid worker type: %s",

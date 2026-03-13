@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/backube/volsync v0.11.0
 	github.com/ceph/ceph-csi/api v0.0.0-20260306160649-6fda146e5dbb
+	github.com/ceph/go-ceph v0.37.1-0.20260203213935-18caddfb147d
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.0.0
