@@ -67,10 +67,10 @@ func scheduleSnapshotTest(drv driverConfig) {
 
 			It("should create PVCs", func() {
 				createAndWaitForPVC(
-					ctx, srcPVC, drv.sc,
+					ctx, srcPVC, drv,
 				)
 				createAndWaitForPVC(
-					ctx, destPVC, drv.sc,
+					ctx, destPVC, drv,
 				)
 			})
 
@@ -164,10 +164,10 @@ func scheduleDirectTest(drv driverConfig) {
 
 			It("should create PVCs", func() {
 				createAndWaitForPVC(
-					ctx, srcPVC, drv.sc,
+					ctx, srcPVC, drv,
 				)
 				createAndWaitForPVC(
-					ctx, destPVC, drv.sc,
+					ctx, destPVC, drv,
 				)
 			})
 

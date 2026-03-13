@@ -272,6 +272,17 @@ func (m *Mover) getVolumeEnvVars(
 		baseSnapshotName := m.options[optBaseSnapshotName]
 		targetSnapshotName := m.options[optTargetSnapshotName]
 		if volumeName == "" || baseSnapshotName == "" || targetSnapshotName == "" {
+			volumeHandle, err := m.getVolumeHandle(ctx, dataPVC.Spec.VolumeName)
+			if err != nil {
+				return envVars, err
+			}
+
+			envVars = append(envVars,
+				corev1.EnvVar{
+					Name:  worker.EnvVolumeHandle,
+					Value: volumeHandle,
+				},
+			)
 			return envVars, nil
 		}
 		pvc := &corev1.PersistentVolumeClaim{
