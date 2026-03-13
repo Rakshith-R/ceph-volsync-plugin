@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package api.v1;
+
+option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1";
+
+// MetadataService provides checkpoint and state persistence APIs.
+service MetadataService {
+  // Get returns the current metadata state.
+  rpc Get(GetMetadataRequest) returns (Metadata);
+
+  // Update persists new metadata state atomically.
+  rpc Update(UpdateMetadataRequest) returns (Metadata);
+}
+
+// --------------------
+// Requests
+// --------------------
+
+// Explicit empty request for forward compatibility.
+message GetMetadataRequest {}
+
+// UpdateMetadataRequest updates metadata.
+message UpdateMetadataRequest {
+  map<string, string> values = 1;
+}
+
+// --------------------
+// Core Types
+// --------------------
+
+// Metadata represents persisted key-value state.
+message Metadata {
+  map<string, string> values = 1;
+}
