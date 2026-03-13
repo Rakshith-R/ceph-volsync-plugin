@@ -19,6 +19,10 @@ jobs:
   test-e2e:
     name: Run on Ubuntu
     runs-on: ubuntu-latest
+    env:
+      CONTAINER_TOOL: docker
+      IMG: localhost/ceph-volsync-plugin-operator:test
+      MOVER_IMG: localhost/ceph-volsync-plugin-mover:test
     steps:
       - name: Clone the code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -54,16 +58,14 @@ jobs:
         with:
           detached: true
 
-      - name: Build, load and deploy ceph-volsync-plugin operator
+
+      - name: Build and load container images
         run: |
-          IMG=localhost/ceph-volsync-plugin-operator:test
-          MOVER_IMG=localhost/ceph-volsync-plugin-mover:test
           go mod tidy
-          make manifests generate fmt vet test check-uncommitted
+          make manifests generate fmt check-uncommitted
           make docker-build IMG=$IMG
           make docker-build-mover MOVER_IMG=$MOVER_IMG
           make install
-          make deploy IMG=$IMG MOVER_IMG=$MOVER_IMG
 
       - name: Install snapshot controller
         run: test/scripts/install_snapshot.sh install
@@ -71,14 +73,26 @@ jobs:
       - name: Deploy Rook Ceph
         run: test/scripts/deploy_rook_ceph.sh install
 
+      - name: Deploy ceph-volsync-plugin operator
+        run: |
+          sed -i \
+            's/namespace: .*/namespace: rook-ceph/' \
+            config/default/kustomization.yaml
+          make deploy IMG=$IMG MOVER_IMG=$MOVER_IMG
+
       - name: Running Test e2e
         run: |
-          go test ./test/e2e/ -v -ginkgo.v
+          go test ./test/e2e/ -v -ginkgo.v -timeout=20m
 
       - name: Cleanup ceph-volsync-plugin operator
         run: |
           make undeploy
           make uninstall
+
+      - name: Setup tmate session on failure
+        if: failure()
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 15
 
       - name: Collect logs on failure
         if: failure()
