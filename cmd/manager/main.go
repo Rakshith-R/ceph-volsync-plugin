@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/controller"
+	cephMover "github.com/RamenDR/ceph-volsync-plugin/internal/mover/ceph"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -69,8 +70,7 @@ func init() {
 	utilruntime.Must(v1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
-	// TODO: append register functions here.
-	// enabledMovers = append(enabledMovers, mover<Movertype>Register)
+	enabledMovers = append(enabledMovers, cephMover.Register)
 	utils.SCCName = "ceph-volsync-plugin-privileged-mover"
 }
 
