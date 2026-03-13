@@ -24,6 +24,7 @@ import (
 	"syscall"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/destination"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/rbd"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/source"
 	"github.com/backube/volsync/controllers/utils"
 	"github.com/go-logr/logr"
@@ -40,6 +41,7 @@ const (
 
 type Config struct {
 	WorkerType         string
+	MoverType          string
 	DestinationAddress string
 	LogLevel           string
 	ServerPort         string
@@ -64,6 +66,9 @@ func envOrDefault(key, defaultVal string) string {
 func loadConfig() Config {
 	return Config{
 		WorkerType: os.Getenv("WORKER_TYPE"),
+		MoverType: envOrDefault(
+			"MOVER_TYPE", "cephfs",
+		),
 		DestinationAddress: os.Getenv(
 			"DESTINATION_ADDRESS",
 		),
@@ -106,6 +111,7 @@ func runMover(config Config) error {
 
 	logger.Info("Starting mover",
 		"workerType", config.WorkerType,
+		"moverType", config.MoverType,
 		"destinationAddress",
 		config.DestinationAddress,
 	)
@@ -117,19 +123,70 @@ func runMover(config Config) error {
 	)
 	defer cancel()
 
-	// Start the mover based on worker type
+	// Start the mover based on mover type and worker type
+	switch config.MoverType {
+	case "rbd":
+		return runRBDMover(ctx, logger, config)
+	case "cephfs":
+		return runCephFSMover(ctx, logger, config)
+	default:
+		return fmt.Errorf(
+			"invalid MOVER_TYPE '%s':"+
+				" must be 'cephfs' or 'rbd'",
+			config.MoverType,
+		)
+	}
+}
+
+func runCephFSMover(
+	ctx context.Context,
+	logger logr.Logger,
+	config Config,
+) error {
 	switch config.WorkerType {
 	case WorkerTypeSource:
 		sourceConfig := source.Config{
 			DestinationAddress: config.DestinationAddress,
 		}
-		worker := source.NewWorker(logger, sourceConfig)
+		worker := source.NewWorker(
+			logger, sourceConfig,
+		)
 		return worker.Run(ctx)
 	case WorkerTypeDestination:
 		destConfig := destination.Config{
 			ServerPort: config.ServerPort,
 		}
 		worker := destination.NewWorker(
+			logger, destConfig,
+		)
+		return worker.Run(ctx)
+	default:
+		return fmt.Errorf(
+			"invalid worker type: %s",
+			config.WorkerType,
+		)
+	}
+}
+
+func runRBDMover(
+	ctx context.Context,
+	logger logr.Logger,
+	config Config,
+) error {
+	switch config.WorkerType {
+	case WorkerTypeSource:
+		sourceConfig := rbd.SourceConfig{
+			DestinationAddress: config.DestinationAddress,
+		}
+		worker := rbd.NewSourceWorker(
+			logger, sourceConfig,
+		)
+		return worker.Run(ctx)
+	case WorkerTypeDestination:
+		destConfig := rbd.DestinationConfig{
+			ServerPort: config.ServerPort,
+		}
+		worker := rbd.NewDestinationWorker(
 			logger, destConfig,
 		)
 		return worker.Run(ctx)
