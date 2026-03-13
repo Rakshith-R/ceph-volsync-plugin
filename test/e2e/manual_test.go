@@ -62,6 +62,8 @@ func manualDirectTest(drv driverConfig) {
 					ctx, rsName, rdName,
 					[]string{
 						srcPVC, destPVC,
+						drv.name + "-md-v1-temp",
+						drv.name + "-md-v2-temp",
 					},
 				)
 				cleanupSnapshots(
@@ -69,6 +71,8 @@ func manualDirectTest(drv driverConfig) {
 					[]string{
 						baseSnap,
 						targetSnap,
+						drv.name + "-md-v1-validate",
+						drv.name + "-md-v2-validate",
 					},
 				)
 			})
@@ -98,7 +102,13 @@ func manualDirectTest(drv driverConfig) {
 					)
 			})
 
-			// TODO: write data to source PVC
+			It("should write initial data",
+				func() {
+					writeDataToPVC(
+						ctx, srcPVC, drv, 1,
+					)
+				},
+			)
 
 			It("should sync just source PVC",
 				func() {
@@ -126,6 +136,17 @@ func manualDirectTest(drv driverConfig) {
 				},
 			)
 
+			It("should validate first sync",
+				func() {
+					validateSyncedData(
+						ctx, srcPVC,
+						destPVC, drv,
+						"Direct", rdName,
+						drv.name+"-md-v1",
+					)
+				},
+			)
+
 			It("should take base snapshot",
 				func() {
 					createVolumeSnapshot(
@@ -137,7 +158,13 @@ func manualDirectTest(drv driverConfig) {
 				},
 			)
 
-			// TODO: write data to source PVC
+			It("should write more data",
+				func() {
+					writeDataToPVC(
+						ctx, srcPVC, drv, 2,
+					)
+				},
+			)
 
 			It("should take target snapshot",
 				func() {
@@ -199,6 +226,17 @@ func manualDirectTest(drv driverConfig) {
 					)
 				},
 			)
+
+			It("should validate second sync",
+				func() {
+					validateSyncedData(
+						ctx, srcPVC,
+						destPVC, drv,
+						"Direct", rdName,
+						drv.name+"-md-v2",
+					)
+				},
+			)
 		},
 	)
 }
@@ -225,6 +263,8 @@ func manualSnapshotTest(drv driverConfig) {
 					ctx, rsName, rdName,
 					[]string{
 						srcPVC, destPVC,
+						drv.name + "-ms-v1-temp",
+						drv.name + "-ms-v2-temp",
 					},
 				)
 			})
@@ -254,7 +294,13 @@ func manualSnapshotTest(drv driverConfig) {
 					)
 			})
 
-			// TODO: write data to source PVC
+			It("should write initial data",
+				func() {
+					writeDataToPVC(
+						ctx, srcPVC, drv, 1,
+					)
+				},
+			)
 
 			It("should first sync "+
 				"(just source PVC)",
@@ -283,9 +329,26 @@ func manualSnapshotTest(drv driverConfig) {
 				},
 			)
 
-			// TODO: write data to source PVC
+			It("should validate first sync",
+				func() {
+					validateSyncedData(
+						ctx, srcPVC,
+						destPVC, drv,
+						"Snapshot", rdName,
+						drv.name+"-ms-v1",
+					)
+				},
+			)
 
-			It("should second sync ",
+			It("should write more data",
+				func() {
+					writeDataToPVC(
+						ctx, srcPVC, drv, 2,
+					)
+				},
+			)
+
+			It("should second sync",
 				func() {
 					updateManualTrigger(
 						ctx,
@@ -297,6 +360,17 @@ func manualSnapshotTest(drv driverConfig) {
 						ctx, rsName,
 						manualID2,
 						5*time.Minute,
+					)
+				},
+			)
+
+			It("should validate second sync",
+				func() {
+					validateSyncedData(
+						ctx, srcPVC,
+						destPVC, drv,
+						"Snapshot", rdName,
+						drv.name+"-ms-v2",
 					)
 				},
 			)

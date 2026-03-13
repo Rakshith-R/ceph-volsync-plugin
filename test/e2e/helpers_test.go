@@ -801,3 +801,372 @@ type tokenRequest struct {
 		Token string `json:"token"`
 	} `json:"status"`
 }
+
+// runPodWithPVC creates a pod that mounts a PVC
+// and runs a shell command, then waits for it to
+// complete. The caller is responsible for deleting
+// the pod after use.
+func runPodWithPVC(
+	ctx context.Context,
+	podName, pvcName string,
+	drv driverConfig,
+	command string,
+) {
+	By("creating pod " + podName +
+		" with PVC " + pvcName)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:  "worker",
+					Image: "busybox",
+					Command: []string{
+						"/bin/sh", "-c", command,
+					},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "vol",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: pvcName,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	isBlock := drv.volumeMode != nil &&
+		*drv.volumeMode == corev1.PersistentVolumeBlock
+
+	if isBlock {
+		pod.Spec.Containers[0].VolumeDevices =
+			[]corev1.VolumeDevice{
+				{
+					Name:       "vol",
+					DevicePath: "/dev/block",
+				},
+			}
+	} else {
+		pod.Spec.Containers[0].VolumeMounts =
+			[]corev1.VolumeMount{
+				{
+					Name:      "vol",
+					MountPath: "/data",
+				},
+			}
+	}
+
+	By("submitting pod " + podName)
+
+	_, err := k8sClientSet.CoreV1().
+		Pods(namespace).
+		Create(ctx, pod, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+
+	By("waiting for pod " + podName +
+		" to succeed")
+
+	Eventually(func(g Gomega) {
+		got, err := k8sClientSet.CoreV1().
+			Pods(namespace).
+			Get(ctx, podName, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(got.Status.Phase).To(
+			Equal(corev1.PodSucceeded),
+		)
+	}).WithTimeout(
+		2 * time.Minute,
+	).Should(Succeed())
+}
+
+// writeDataToPVC writes test data to a PVC using
+// a short-lived pod. The phase argument selects
+// which data set to write.
+func writeDataToPVC(
+	ctx context.Context,
+	pvcName string,
+	drv driverConfig,
+	phase int,
+) {
+	podName := fmt.Sprintf(
+		"write-%s-p%d", pvcName, phase,
+	)
+
+	isBlock := drv.volumeMode != nil &&
+		*drv.volumeMode == corev1.PersistentVolumeBlock
+
+	var command string
+
+	if isBlock {
+		switch phase {
+		case 1:
+			command = "dd if=/dev/urandom" +
+				" of=/dev/block bs=4096" +
+				" count=64 && sync"
+		case 2:
+			command = "dd if=/dev/urandom" +
+				" of=/dev/block bs=4096" +
+				" count=64 seek=64 && sync"
+		}
+	} else {
+		switch phase {
+		case 1:
+			command = "mkdir -p /data/dir1/subdir" +
+				" && echo 'file1-content'" +
+				" > /data/file1.txt" +
+				" && echo 'file2-content'" +
+				" > /data/dir1/file2.txt" +
+				" && echo 'subdir-content'" +
+				" > /data/dir1/subdir/file3.txt" +
+				" && echo 'to-delete'" +
+				" > /data/deleteme.txt" +
+				" && mkdir -p /data/removedir" +
+				" && echo 'gone'" +
+				" > /data/removedir/gone.txt" +
+				" && sync"
+		case 2:
+			command = "echo 'file1-modified'" +
+				" > /data/file1.txt" +
+				" && echo 'new-file'" +
+				" > /data/newfile.txt" +
+				" && rm -f /data/deleteme.txt" +
+				" && rm -rf /data/removedir" +
+				" && sync"
+		}
+	}
+
+	runPodWithPVC(ctx, podName, pvcName, drv, command)
+
+	By("deleting write pod " + podName)
+
+	_ = k8sClientSet.CoreV1().
+		Pods(namespace).
+		Delete(ctx, podName, metav1.DeleteOptions{})
+}
+
+// getDataFingerprint runs a pod that computes a
+// deterministic fingerprint of the data on a PVC
+// and returns the output as a string.
+func getDataFingerprint(
+	ctx context.Context,
+	pvcName string,
+	drv driverConfig,
+) string {
+	podName := "fp-" + pvcName
+
+	isBlock := drv.volumeMode != nil &&
+		*drv.volumeMode == corev1.PersistentVolumeBlock
+
+	var command string
+
+	if isBlock {
+		command = "md5sum /dev/block"
+	} else {
+		command = "find /data -not -path /data" +
+			" -printf '%p %s %y\\n' | sort" +
+			" && find /data -type f | sort" +
+			" | xargs md5sum"
+	}
+
+	runPodWithPVC(ctx, podName, pvcName, drv, command)
+
+	By("capturing logs from " + podName)
+
+	cmd := exec.Command(
+		"kubectl", "logs",
+		podName, "-n", namespace,
+	)
+	output, err := utils.Run(cmd)
+	Expect(err).NotTo(
+		HaveOccurred(),
+		"Failed to get logs from "+podName,
+	)
+
+	By("deleting fingerprint pod " + podName)
+
+	_ = k8sClientSet.CoreV1().
+		Pods(namespace).
+		Delete(ctx, podName, metav1.DeleteOptions{})
+
+	return output
+}
+
+// validateSyncedData verifies that the data on
+// the destination matches the source by restoring
+// a snapshot to a temporary PVC and comparing
+// fingerprints.
+func validateSyncedData(
+	ctx context.Context,
+	srcPVC, destPVC string,
+	drv driverConfig,
+	copyMethod, rdName, snapPrefix string,
+) {
+	var snapName string
+
+	if copyMethod == "Snapshot" {
+		By("getting snapshot from RD latestImage")
+
+		rd := &volsyncv1alpha1.ReplicationDestination{}
+		Expect(k8sClient.Get(
+			ctx, types.NamespacedName{
+				Name:      rdName,
+				Namespace: namespace,
+			}, rd,
+		)).To(Succeed())
+		Expect(rd.Status).NotTo(BeNil())
+		Expect(
+			rd.Status.LatestImage,
+		).NotTo(BeNil())
+		snapName = rd.Status.LatestImage.Name
+	} else {
+		By("creating validation snapshot " +
+			snapPrefix + "-validate")
+
+		snapName = snapPrefix + "-validate"
+		snap := &snapv1.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      snapName,
+				Namespace: namespace,
+			},
+			Spec: snapv1.VolumeSnapshotSpec{
+				VolumeSnapshotClassName: ptr.To(
+					drv.vsClass,
+				),
+				Source: snapv1.VolumeSnapshotSource{
+					PersistentVolumeClaimName: ptr.To(
+						destPVC,
+					),
+				},
+			},
+		}
+		Expect(
+			k8sClient.Create(ctx, snap),
+		).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			got := &snapv1.VolumeSnapshot{}
+			g.Expect(k8sClient.Get(
+				ctx,
+				types.NamespacedName{
+					Name:      snapName,
+					Namespace: namespace,
+				},
+				got,
+			)).To(Succeed())
+			g.Expect(
+				got.Status,
+			).NotTo(BeNil())
+			g.Expect(
+				got.Status.ReadyToUse,
+			).NotTo(BeNil())
+			g.Expect(
+				*got.Status.ReadyToUse,
+			).To(BeTrue())
+		}).WithTimeout(
+			5 * time.Minute,
+		).Should(Succeed())
+	}
+
+	By("restoring snapshot to temp PVC " +
+		snapPrefix + "-temp")
+
+	tempPVC := snapPrefix + "-temp"
+	accessMode := corev1.ReadWriteMany
+	if drv.accessMode != "" {
+		accessMode = drv.accessMode
+	}
+
+	snapAPIGroup := "snapshot.storage.k8s.io"
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      tempPVC,
+			Namespace: namespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{
+				accessMode,
+			},
+			StorageClassName: ptr.To(drv.sc),
+			VolumeMode:       drv.volumeMode,
+			DataSource: &corev1.TypedLocalObjectReference{
+				APIGroup: &snapAPIGroup,
+				Kind:     "VolumeSnapshot",
+				Name:     snapName,
+			},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(
+						"1Gi",
+					),
+				},
+			},
+		},
+	}
+
+	_, err := k8sClientSet.CoreV1().
+		PersistentVolumeClaims(namespace).
+		Create(ctx, pvc, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+
+	Eventually(func(g Gomega) {
+		got, err := k8sClientSet.CoreV1().
+			PersistentVolumeClaims(namespace).
+			Get(ctx, tempPVC, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(got.Status.Phase).To(
+			Equal(corev1.ClaimBound),
+		)
+	}).WithTimeout(
+		2 * time.Minute,
+	).Should(Succeed())
+
+	By("computing source fingerprint")
+
+	srcFP := getDataFingerprint(
+		ctx, srcPVC, drv,
+	)
+
+	By("computing destination fingerprint")
+
+	destFP := getDataFingerprint(
+		ctx, tempPVC, drv,
+	)
+
+	Expect(destFP).To(
+		Equal(srcFP),
+		"data mismatch between source"+
+			" and restored destination",
+	)
+
+	By("cleaning up temp PVC " + tempPVC)
+
+	_ = k8sClientSet.CoreV1().
+		PersistentVolumeClaims(namespace).
+		Delete(
+			ctx, tempPVC,
+			metav1.DeleteOptions{},
+		)
+
+	if copyMethod == "Direct" {
+		By("cleaning up validation snapshot")
+
+		snap := &snapv1.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      snapName,
+				Namespace: namespace,
+			},
+		}
+		_ = client.IgnoreNotFound(
+			k8sClient.Delete(ctx, snap),
+		)
+	}
+}
