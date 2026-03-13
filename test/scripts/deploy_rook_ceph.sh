@@ -105,6 +105,8 @@ function wait_for_ceph() {
 function deploy_test_resources() {
     echo "Deploying e2e test resources..."
     kubectl_retry create \
+        -f "${ROOK_EXAMPLES}/pool-test.yaml"
+    kubectl_retry create \
         -f "${ROOK_EXAMPLES}/filesystem-test.yaml"
     kubectl_retry create \
         -f "${ROOK_EXAMPLES}/nfs-test.yaml"
@@ -118,9 +120,33 @@ function deploy_test_resources() {
         -f "${ROOK_EXAMPLES}/csi/nfs/storageclass.yaml"
     kubectl_retry create \
         -f "${ROOK_EXAMPLES}/csi/nfs/snapshotclass.yaml"
+    kubectl_retry create \
+        -f "${ROOK_EXAMPLES}/csi/rbd/storageclass-test.yaml"
+    kubectl_retry create \
+        -f "${ROOK_EXAMPLES}/csi/rbd/snapshotclass.yaml"
 }
 
 function wait_for_ceph_resources() {
+    echo "Waiting for CephBlockPool..."
+    local INC=0
+    local phase
+    until [ $INC -gt 30 ]; do
+        phase=$(
+            kubectl -n "${ROOK_CEPH_NS}" \
+                get cephblockpool replicapool \
+                -o jsonpath='{.status.phase}' \
+                2>/dev/null || true
+        )
+        if [ "${phase}" = "Ready" ]; then
+            echo "CephBlockPool is ${phase}"
+            break
+        fi
+        echo "CephBlockPool phase:" \
+            "${phase:-unknown} ($((INC + 1))/30)"
+        sleep 10
+        ((++INC))
+    done
+
     echo "Waiting for CephFilesystem..."
     local INC=0
     local phase
@@ -176,7 +202,7 @@ function wait_for_ceph_resources() {
 
     echo "All Ceph resources:"
     kubectl -n "${ROOK_CEPH_NS}" get \
-        cephcluster,cephfilesystem,cephnfs
+        cephcluster,cephfilesystem,cephnfs,cephblockpool
     kubectl get storageclasses
     kubectl get volumesnapshotclasses
 
@@ -222,10 +248,19 @@ function cleanup() {
         -f "${ROOK_EXAMPLES}/subvolumegroup.yaml" \
         --ignore-not-found
     kubectl_retry delete \
+        -f "${ROOK_EXAMPLES}/csi/rbd/snapshotclass.yaml" \
+        --ignore-not-found
+    kubectl_retry delete \
+        -f "${ROOK_EXAMPLES}/csi/rbd/storageclass-test.yaml" \
+        --ignore-not-found
+    kubectl_retry delete \
         -f "${ROOK_EXAMPLES}/nfs-test.yaml" \
         --ignore-not-found
     kubectl_retry delete \
         -f "${ROOK_EXAMPLES}/filesystem-test.yaml" \
+        --ignore-not-found
+    kubectl_retry delete \
+        -f "${ROOK_EXAMPLES}/pool-test.yaml" \
         --ignore-not-found
     kubectl_retry delete \
         -f "${ROOK_EXAMPLES}/cluster-test.yaml" \
