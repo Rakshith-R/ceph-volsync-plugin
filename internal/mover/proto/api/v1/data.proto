@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package api.v1;
+
+option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1";
+
+// DataService provides streaming sync and deletion APIs.
+service DataService {
+  // Sync opens a client-streaming RPC that handles one file at a time.
+  // Each stream is reusable: after a CommitRequest the stream accepts
+  // writes for the next file.
+  rpc Sync(stream SyncRequest) returns (SyncResponse);
+
+  // Delete removes files or directories at the specified paths.
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+// --------------------
+// Core Types
+// --------------------
+
+// ChangedBlock represents a modified data range.
+message ChangedBlock {
+  // Byte offset where the write should begin.
+  uint64 offset = 1;
+
+  // Length of the write in bytes.
+  uint64 length = 2;
+
+  // Data payload. May be empty if is_zero is true.
+  bytes data = 3;
+
+  // Indicates this write represents a zeroed range.
+  bool is_zero = 4;
+}
+
+// --------------------
+// Requests
+// --------------------
+
+// SyncRequest wraps a single write or commit operation sent over the stream.
+message SyncRequest {
+  oneof operation {
+    WriteRequest write = 1;
+    CommitRequest commit = 3;
+  }
+}
+
+// WriteRequest represents a batched write operation.
+message WriteRequest {
+  // Target path or object identifier.
+  string path = 1;
+
+  // List of changed blocks to be written.
+  repeated ChangedBlock blocks = 2;
+}
+
+// DeleteRequest represents a batch file or directory deletion operation.
+message DeleteRequest {
+  // Target paths to files or directories to delete (recursive by default).
+  repeated string paths = 1;
+}
+
+// CommitRequest signals that all data for the specified file has been sent
+// and the destination should sync and close the file.
+message CommitRequest {
+  // Target path of the file to commit.
+  string path = 1;
+}
+
+// --------------------
+// Responses
+// --------------------
+
+// SyncResponse is empty on success.
+// Errors are reported via gRPC status codes.
+message SyncResponse {}
+
+// DeleteResponse is empty on success.
+// Errors are reported via gRPC status codes.
+message DeleteResponse {}
