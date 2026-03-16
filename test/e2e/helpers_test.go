@@ -1176,7 +1176,7 @@ func validateSyncedData(
 		snapPrefix + "-temp")
 
 	tempPVC := snapPrefix + "-temp"
-	accessMode := corev1.ReadWriteMany
+	accessMode := corev1.ReadOnlyMany
 	if drv.accessMode != "" {
 		accessMode = drv.accessMode
 	}
