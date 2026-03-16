@@ -72,10 +72,19 @@ jobs:
             's/namespace: .*/namespace: rook-ceph/' \
             config/default/kustomization.yaml
           make deploy IMG=$IMG MOVER_IMG=$MOVER_IMG
+          kubectl -n rook-ceph wait --for=condition=available \
+          deployment/ceph-volsync-plugin-operator-controller-manager --timeout=5m
+
+      - name: Install ginkgo
+        run: >
+          go install
+          github.com/onsi/ginkgo/v2/ginkgo@$(
+          go list -m -f '{{ .Version }}'
+          github.com/onsi/ginkgo/v2)
 
       - name: Running Test e2e
         run: |
-          go test ./test/e2e/ -v -ginkgo.v -timeout=30m
+          ginkgo -v -p --timeout=30m ./test/e2e/
 
       - name: Cleanup ceph-volsync-plugin operator
         run: |
