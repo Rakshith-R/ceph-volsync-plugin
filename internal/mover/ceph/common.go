@@ -38,6 +38,7 @@ type rsyncSvcDescription struct {
 	Selector    map[string]string
 	Port        *int32
 	Annotations map[string]string
+	MoverType   MoverType
 }
 
 func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
@@ -64,7 +65,12 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 		if len(d.Service.Spec.Ports) != 2 {
 			d.Service.Spec.Ports = []corev1.ServicePort{{}, {}}
 		}
-		d.Service.Spec.Ports[0].Name = "cephfs-mover"
+
+		if d.MoverType == MoverTypeRBD {
+			d.Service.Spec.Ports[0].Name = "rbd-mover"
+		} else {
+			d.Service.Spec.Ports[0].Name = "cephfs-mover"
+		}
 		if d.Port != nil {
 			d.Service.Spec.Ports[0].Port = *d.Port
 		} else {
@@ -75,10 +81,18 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 		if d.Service.Spec.Type == corev1.ServiceTypeClusterIP {
 			d.Service.Spec.Ports[0].NodePort = 0
 		}
-		d.Service.Spec.Ports[1].Name = "rsync-server"
-		d.Service.Spec.Ports[1].Port = 8873
-		d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP
-		d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(8873)
+
+		if d.MoverType == MoverTypeRBD {
+			d.Service.Spec.Ports[1].Name = "rbd-grpc-server"
+			d.Service.Spec.Ports[1].Port = 8080
+			d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP
+			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(8080)
+		} else {
+			d.Service.Spec.Ports[1].Name = "rsync-server"
+			d.Service.Spec.Ports[1].Port = 8873
+			d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP
+			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(8873)
+		}
 		return nil
 	})
 	if err != nil {

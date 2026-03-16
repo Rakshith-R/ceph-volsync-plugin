@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/mover/destination"
@@ -72,21 +71,11 @@ func envOrDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
-func normalizeBool(val string) bool {
-	switch strings.ToLower(val) {
-	case "true", "1", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
 func loadConfig() Config {
+	moverType := envOrDefault("MOVER_TYPE", "cephfs")
 	return Config{
 		WorkerType: os.Getenv(worker.EnvWorkerType),
-		MoverType: envOrDefault(
-			"MOVER_TYPE", "cephfs",
-		),
+		MoverType:  moverType,
 		DestinationAddress: os.Getenv(
 			worker.EnvDestinationAddress,
 		),
@@ -99,9 +88,7 @@ func loadConfig() Config {
 		DestinationPort: envOrDefault(
 			worker.EnvDestinationPort, "8000",
 		),
-		EnableRsyncTunnel: normalizeBool(
-			os.Getenv(worker.EnvEnableRsyncTunnel),
-		),
+		EnableRsyncTunnel: moverType == "cephfs",
 		RsyncPort: envOrDefault(
 			worker.EnvRsyncPort, "8873",
 		),

@@ -1,5 +1,3 @@
-//go:build ceph_preview
-
 /*
 Copyright 2025.
 
@@ -36,6 +34,7 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
 	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/version/v1"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
 )
 
 const (
@@ -556,8 +555,8 @@ func readMountedRBDCredentials() (
 	*ceph.Credentials, error,
 ) {
 	path := filepath.Join(
-		CsiSecretMountPath,
-		CsiSecretJSONKey,
+		worker.CsiSecretMountPath,
+		worker.CsiSecretJSONKey,
 	)
 	content, err := os.ReadFile(path)
 	if err != nil {

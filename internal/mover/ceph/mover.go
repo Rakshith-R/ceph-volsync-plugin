@@ -70,6 +70,16 @@ const (
 	csiSecretVolumeName = "ceph-csi-secret"
 	CsiSecretMountPath  = "/etc/ceph-csi-secret"
 	CsiSecretJSONKey    = "credentials.json"
+
+	maxGRPCMessageSize = 8 * 1024 * 1024 // 8MB
+)
+
+// MoverType represents the type of data mover.
+type MoverType string
+
+const (
+	MoverTypeCephFS MoverType = "cephfs"
+	MoverTypeRBD    MoverType = "rbd"
 )
 
 // Mover is the reconciliation logic for the CephFS-based data mover.
@@ -81,6 +91,7 @@ type Mover struct {
 	vh                 *volumehandler.VolumeHandler
 	saHandler          utils.SAHandler
 	containerImage     string
+	moverType          MoverType
 	key                *string
 	serviceType        *corev1.ServiceType
 	serviceAnnotations map[string]string
@@ -194,7 +205,7 @@ func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context) (bool, error
 
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      volSyncCephFSPrefix + m.direction() + "-" + m.owner.GetName(),
+			Name:      m.moverPrefix() + m.direction() + "-" + m.owner.GetName(),
 			Namespace: m.owner.GetNamespace(),
 		},
 	}
@@ -207,6 +218,7 @@ func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context) (bool, error
 		Selector:    m.serviceSelector(),
 		Port:        m.port,
 		Annotations: m.serviceAnnotations,
+		MoverType:   m.moverType,
 	}
 	err := svcDesc.Reconcile(m.logger)
 	if err != nil {
@@ -280,7 +292,7 @@ func (m *Mover) ensureSecrets(ctx context.Context) (*string, error) {
 
 	keySecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      volSyncCephFSPrefix + m.owner.GetName(),
+			Name:      m.moverPrefix() + m.owner.GetName(),
 			Namespace: m.owner.GetNamespace(),
 		},
 	}
@@ -325,7 +337,7 @@ func (m *Mover) ensureCephCSIConfigMap(
 	ctx context.Context,
 	_ string,
 ) (*string, error) {
-	cmName := volSyncCephFSPrefix +
+	cmName := m.moverPrefix() +
 		"csi-config-" + m.direction() + "-" +
 		m.owner.GetName()
 	cm := &corev1.ConfigMap{
@@ -423,10 +435,12 @@ func (m *Mover) ensureCephCSISecret(
 	}
 
 	// Look up the secret ref from csi config
+	getSecretRef := config.GetCephFSControllerPublishSecretRef
+	if m.moverType == MoverTypeRBD {
+		getSecretRef = config.GetRBDControllerPublishSecretRef
+	}
 	secretName, secretNS, err :=
-		config.GetCephFSControllerPublishSecretRef(
-			config.CsiConfigFile, clusterID,
-		)
+		getSecretRef(config.CsiConfigFile, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"failed to get secret ref: %w", err,
@@ -446,7 +460,7 @@ func (m *Mover) ensureCephCSISecret(
 	}
 
 	// Create/update a copy in the owner's namespace
-	newName := volSyncCephFSPrefix +
+	newName := m.moverPrefix() +
 		"csi-secret-" + m.direction() + "-" +
 		m.owner.GetName()
 	newSecret := &corev1.Secret{
@@ -511,10 +525,24 @@ func (m *Mover) direction() string {
 	return dir
 }
 
+func (m *Mover) moverPrefix() string {
+	if m.moverType == MoverTypeRBD {
+		return mover.VolSyncPrefix + "rbd-"
+	}
+	return volSyncCephFSPrefix
+}
+
+func (m *Mover) containerName() string {
+	if m.moverType == MoverTypeRBD {
+		return "rbd-mover"
+	}
+	return "cephfs-mover"
+}
+
 func (m *Mover) serviceSelector() map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":      m.direction() + "-" + m.owner.GetName(),
-		"app.kubernetes.io/component": "cephfs-mover",
+		"app.kubernetes.io/component": m.containerName(),
 		"app.kubernetes.io/part-of":   "ceph-volsync-plugin",
 	}
 }
@@ -631,7 +659,7 @@ func (m *Mover) ensureJob(
 ) (*batchv1.Job, error) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      volSyncCephFSPrefix + m.direction() + "-" + m.owner.GetName(),
+			Name:      m.moverPrefix() + m.direction() + "-" + m.owner.GetName(),
 			Namespace: m.owner.GetNamespace(),
 		},
 	}
@@ -693,19 +721,23 @@ func (m *Mover) ensureJob(
 			Value: "info",
 		})
 
-		// Enable rsync tunnel by default for CephFS mover
+		// Set MOVER_TYPE for the worker
 		containerEnv = append(containerEnv, corev1.EnvVar{
-			Name:  worker.EnvEnableRsyncTunnel,
-			Value: "true",
+			Name:  "MOVER_TYPE",
+			Value: string(m.moverType),
 		})
-		containerEnv = append(containerEnv, corev1.EnvVar{
-			Name:  worker.EnvRsyncPort,
-			Value: defaultRsyncStunnelPort,
-		})
-		containerEnv = append(containerEnv, corev1.EnvVar{
-			Name:  worker.EnvRsyncDaemonPort,
-			Value: defaultRsyncPort,
-		})
+
+		// CephFS-specific: rsync port configuration
+		if m.moverType == MoverTypeCephFS {
+			containerEnv = append(containerEnv, corev1.EnvVar{
+				Name:  worker.EnvRsyncPort,
+				Value: defaultRsyncStunnelPort,
+			})
+			containerEnv = append(containerEnv, corev1.EnvVar{
+				Name:  worker.EnvRsyncDaemonPort,
+				Value: defaultRsyncPort,
+			})
+		}
 
 		containerEnv = append(containerEnv, corev1.EnvVar{
 			Name: worker.EnvPodNamespace,
@@ -738,7 +770,7 @@ func (m *Mover) ensureJob(
 
 		podSpec := &job.Spec.Template.Spec
 		podSpec.Containers = []corev1.Container{{
-			Name:  "cephfs-mover",
+			Name:  m.containerName(),
 			Env:   containerEnv,
 			Image: m.containerImage,
 			SecurityContext: &corev1.SecurityContext{

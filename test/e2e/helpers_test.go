@@ -226,7 +226,7 @@ func createRS(
 		"volumeSnapshotClassName": drv.vsClass,
 	}
 	if rdKey != "" {
-		params["secretKey"] = rdKey
+		params["keySecret"] = rdKey
 	}
 	if rdAddr != "" {
 		params["address"] = rdAddr
