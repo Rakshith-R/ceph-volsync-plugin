@@ -24,7 +24,6 @@ const (
 	EnvDestinationPort      = "DESTINATION_PORT"
 	EnvServerPort           = "SERVER_PORT"
 	EnvLogLevel             = "LOG_LEVEL"
-	EnvEnableRsyncTunnel    = "ENABLE_RSYNC_TUNNEL"
 	EnvRsyncPort            = "RSYNC_PORT"
 	EnvRsyncDaemonPort      = "RSYNC_DAEMON_PORT"
 	EnvPodNamespace         = "POD_NAMESPACE"
@@ -33,4 +32,11 @@ const (
 	EnvVolumeHandle         = "VOLUME_HANDLE"
 	EnvBaseSnapshotHandle   = "BASE_SNAPSHOT_HANDLE"
 	EnvTargetSnapshotHandle = "TARGET_SNAPSHOT_HANDLE"
+
+	// CsiSecretMountPath is the mount path for the
+	// ceph-csi secret volume.
+	CsiSecretMountPath = "/etc/ceph-csi-secret"
+	// CsiSecretJSONKey is the key for the ceph-csi
+	// secret JSON file.
+	CsiSecretJSONKey = "credentials.json"
 )
