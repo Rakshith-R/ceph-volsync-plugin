@@ -88,7 +88,7 @@ func createAndWaitForPVC(
 ) {
 	By("creating PVC " + name)
 
-	accessMode := corev1.ReadWriteMany
+	accessMode := corev1.ReadOnlyMany
 	if drv.accessMode != "" {
 		accessMode = drv.accessMode
 	}
@@ -493,9 +493,11 @@ func waitForNextSync(
 	rsName string,
 	prevTime *metav1.Time,
 	timeout time.Duration,
-) {
+) *metav1.Time {
 	By("waiting for next sync after " +
 		prevTime.String())
+
+	var syncTime *metav1.Time
 
 	Eventually(func(g Gomega) {
 		rs := &volsyncv1alpha1.
@@ -517,9 +519,12 @@ func waitForNextSync(
 				prevTime.Time,
 			),
 		).To(BeTrue())
+		syncTime = rs.Status.LastSyncTime
 	}).WithTimeout(timeout).WithPolling(
 		15 * time.Second,
 	).Should(Succeed())
+
+	return syncTime
 }
 
 // waitForRDSyncTime waits for
@@ -562,9 +567,11 @@ func waitForRDNextSync(
 	rdName string,
 	prevTime *metav1.Time,
 	timeout time.Duration,
-) {
+) *metav1.Time {
 	By("waiting for RD next sync after " +
 		prevTime.String())
+
+	var syncTime *metav1.Time
 
 	Eventually(func(g Gomega) {
 		rd := &volsyncv1alpha1.
@@ -586,9 +593,12 @@ func waitForRDNextSync(
 				prevTime.Time,
 			),
 		).To(BeTrue())
+		syncTime = rd.Status.LastSyncTime
 	}).WithTimeout(timeout).WithPolling(
 		15 * time.Second,
 	).Should(Succeed())
+
+	return syncTime
 }
 
 // cleanupReplication deletes RS, RD, and PVCs.

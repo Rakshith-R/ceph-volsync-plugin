@@ -49,10 +49,9 @@ func scheduleSnapshotTest(drv driverConfig) {
 			rsName := drv.name + "-ss-rs"
 
 			var (
-				rdAddr                string
-				rdKey                 string
-				lastSyncBeforeWrite   *metav1.Time
-				lastRDSyncBeforeWrite *metav1.Time
+				rdAddr              string
+				rdKey               string
+				lastSyncBeforeWrite *metav1.Time
 			)
 
 			ctx := context.TODO()
@@ -150,11 +149,6 @@ func scheduleSnapshotTest(drv driverConfig) {
 							ctx, rsName,
 							5*time.Minute,
 						)
-					lastRDSyncBeforeWrite =
-						waitForRDSyncTime(
-							ctx, rdName,
-							5*time.Minute,
-						)
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
 					)
@@ -163,14 +157,23 @@ func scheduleSnapshotTest(drv driverConfig) {
 
 			It("should complete second sync",
 				func() {
-					waitForNextSync(
+					// Wait for 2 RS sync cycles:
+					// the first may have raced
+					// with the data write.
+					rsT := waitForNextSync(
 						ctx, rsName,
 						lastSyncBeforeWrite,
 						10*time.Minute,
 					)
+					rsT2 := waitForNextSync(
+						ctx, rsName, rsT,
+						10*time.Minute,
+					)
+					// Wait for RD to sync after
+					// the 2nd RS sync, ensuring
+					// RD has the new data.
 					waitForRDNextSync(
-						ctx, rdName,
-						lastRDSyncBeforeWrite,
+						ctx, rdName, rsT2,
 						10*time.Minute,
 					)
 				},
@@ -199,10 +202,9 @@ func scheduleDirectTest(drv driverConfig) {
 			rsName := drv.name + "-sd-rs"
 
 			var (
-				rdAddr                string
-				rdKey                 string
-				lastSyncBeforeWrite   *metav1.Time
-				lastRDSyncBeforeWrite *metav1.Time
+				rdAddr              string
+				rdKey               string
+				lastSyncBeforeWrite *metav1.Time
 			)
 
 			ctx := context.TODO()
@@ -306,11 +308,6 @@ func scheduleDirectTest(drv driverConfig) {
 							ctx, rsName,
 							5*time.Minute,
 						)
-					lastRDSyncBeforeWrite =
-						waitForRDSyncTime(
-							ctx, rdName,
-							5*time.Minute,
-						)
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
 					)
@@ -319,14 +316,23 @@ func scheduleDirectTest(drv driverConfig) {
 
 			It("should complete second sync",
 				func() {
-					waitForNextSync(
+					// Wait for 2 RS sync cycles:
+					// the first may have raced
+					// with the data write.
+					rsT := waitForNextSync(
 						ctx, rsName,
 						lastSyncBeforeWrite,
 						10*time.Minute,
 					)
+					rsT2 := waitForNextSync(
+						ctx, rsName, rsT,
+						10*time.Minute,
+					)
+					// Wait for RD to sync after
+					// the 2nd RS sync, ensuring
+					// RD has the new data.
 					waitForRDNextSync(
-						ctx, rdName,
-						lastRDSyncBeforeWrite,
+						ctx, rdName, rsT2,
 						10*time.Minute,
 					)
 				},
