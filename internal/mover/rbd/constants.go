@@ -1,7 +1,5 @@
-//go:build ceph_preview
-
 /*
-Copyright 2019 The Ceph-CSI Authors.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,13 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ceph
+package rbd
 
-import "errors"
-
-var (
-	// ErrKeyNotFound is returned when requested key is not found.
-	ErrKeyNotFound = errors.New("key not found")
-	// ErrPoolNotFound is returned when pool is not found.
-	ErrPoolNotFound = errors.New("pool not found")
+const (
+	devicePath         = "/dev/block"
+	maxGRPCMessageSize = 8 * 1024 * 1024 // 8MB
 )

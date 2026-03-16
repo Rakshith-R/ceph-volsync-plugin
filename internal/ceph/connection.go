@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ceph/go-ceph/cephfs"
+	ca "github.com/ceph/go-ceph/cephfs/admin"
 	"github.com/ceph/go-ceph/rados"
 )
 
@@ -107,4 +109,25 @@ func (cc *ClusterConnection) GetPoolByID(
 	}
 
 	return cc.conn.GetPoolByID(poolID)
+}
+
+// GetFSAdmin returns an FSAdmin for CephFS administration.
+func (cc *ClusterConnection) GetFSAdmin() (
+	*ca.FSAdmin, error,
+) {
+	if cc.conn == nil {
+		return nil, errors.New(
+			"cluster is not connected yet",
+		)
+	}
+
+	return ca.NewFromConn(cc.conn), nil
+}
+
+// CreateMountFromRados creates a CephFS mount from the
+// existing RADOS connection.
+func (cc *ClusterConnection) CreateMountFromRados() (
+	*cephfs.MountInfo, error,
+) {
+	return cephfs.CreateFromRados(cc.conn)
 }
