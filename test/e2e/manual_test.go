@@ -29,12 +29,12 @@ import (
 var _ = Describe(
 	"Manual Trigger Replication",
 	func() {
-		// for _, drv := range drivers {
-		// 	drv := drv
+		for _, drv := range drivers {
+			drv := drv
 
-		// 	manualDirectTest(drv)
-		// 	manualSnapshotTest(drv)
-		// }
+			manualDirectTest(drv)
+			manualSnapshotTest(drv)
+		}
 	},
 )
 

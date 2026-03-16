@@ -26,7 +26,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-const schedule = "*/5 * * * *"
+const schedule = "*/3 * * * *"
 
 var _ = Describe(
 	"Schedule Replication",
@@ -49,10 +49,9 @@ func scheduleSnapshotTest(drv driverConfig) {
 			rsName := drv.name + "-ss-rs"
 
 			var (
-				rdAddr                string
-				rdKey                 string
-				lastSyncBeforeWrite   *metav1.Time
-				lastRDSyncBeforeWrite *metav1.Time
+				rdAddr           string
+				rdKey            string
+				writeCompletedAt *metav1.Time
 			)
 
 			ctx := context.TODO()
@@ -129,6 +128,9 @@ func scheduleSnapshotTest(drv driverConfig) {
 						ctx, rdName,
 						10*time.Minute,
 					)
+					setRSPaused(
+						ctx, rsName, true,
+					)
 				},
 			)
 
@@ -145,38 +147,33 @@ func scheduleSnapshotTest(drv driverConfig) {
 
 			It("should write more data",
 				func() {
-					setRSPaused(
-						ctx, rsName, true,
-					)
-					lastSyncBeforeWrite =
-						waitForSyncTime(
-							ctx, rsName,
-							10*time.Minute,
-						)
-					lastRDSyncBeforeWrite =
-						waitForRDSyncTime(
-							ctx, rdName,
-							10*time.Minute,
-						)
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
+					)
+					writeCompletedAt = &metav1.Time{
+						Time: time.Now(),
+					}
+					setRSPaused(
+						ctx, rsName, false,
 					)
 				},
 			)
 
 			It("should complete second sync",
 				func() {
-					setRSPaused(
-						ctx, rsName, false,
+					waitForSnapshot(
+						ctx, rsName,
+						writeCompletedAt,
+						10*time.Minute,
 					)
 					waitForNextSync(
 						ctx, rsName,
-						lastSyncBeforeWrite,
+						writeCompletedAt,
 						10*time.Minute,
 					)
 					waitForRDNextSync(
 						ctx, rdName,
-						lastRDSyncBeforeWrite,
+						writeCompletedAt,
 						10*time.Minute,
 					)
 				},
@@ -205,10 +202,9 @@ func scheduleDirectTest(drv driverConfig) {
 			rsName := drv.name + "-sd-rs"
 
 			var (
-				rdAddr                string
-				rdKey                 string
-				lastSyncBeforeWrite   *metav1.Time
-				lastRDSyncBeforeWrite *metav1.Time
+				rdAddr           string
+				rdKey            string
+				writeCompletedAt *metav1.Time
 			)
 
 			ctx := context.TODO()
@@ -291,6 +287,9 @@ func scheduleDirectTest(drv driverConfig) {
 						ctx, rdName,
 						10*time.Minute,
 					)
+					setRSPaused(
+						ctx, rsName, true,
+					)
 				},
 			)
 
@@ -307,38 +306,33 @@ func scheduleDirectTest(drv driverConfig) {
 
 			It("should write more data",
 				func() {
-					setRSPaused(
-						ctx, rsName, true,
-					)
-					lastSyncBeforeWrite =
-						waitForSyncTime(
-							ctx, rsName,
-							10*time.Minute,
-						)
-					lastRDSyncBeforeWrite =
-						waitForRDSyncTime(
-							ctx, rdName,
-							10*time.Minute,
-						)
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
+					)
+					writeCompletedAt = &metav1.Time{
+						Time: time.Now(),
+					}
+					setRSPaused(
+						ctx, rsName, false,
 					)
 				},
 			)
 
 			It("should complete second sync",
 				func() {
-					setRSPaused(
-						ctx, rsName, false,
+					waitForSnapshot(
+						ctx, rsName,
+						writeCompletedAt,
+						10*time.Minute,
 					)
 					waitForNextSync(
 						ctx, rsName,
-						lastSyncBeforeWrite,
+						writeCompletedAt,
 						10*time.Minute,
 					)
 					waitForRDNextSync(
 						ctx, rdName,
-						lastRDSyncBeforeWrite,
+						writeCompletedAt,
 						10*time.Minute,
 					)
 				},
