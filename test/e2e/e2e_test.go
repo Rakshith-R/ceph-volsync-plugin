@@ -45,7 +45,7 @@ const metricsServiceName = "ceph-volsync-plugin" +
 const metricsRoleBindingName = "ceph-volsync" +
 	"-plugin-operator-metrics-binding"
 
-var _ = Describe("Manager", Ordered, func() {
+var _ = Describe("Manager", Serial, Ordered, func() {
 	var controllerPodName string
 
 	BeforeAll(func() {
