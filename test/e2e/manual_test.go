@@ -224,6 +224,11 @@ func manualDirectTest(drv driverConfig) {
 						manualID2,
 						5*time.Minute,
 					)
+					waitForRDManualSync(
+						ctx, rdName,
+						manualID2,
+						5*time.Minute,
+					)
 				},
 			)
 
@@ -358,6 +363,11 @@ func manualSnapshotTest(drv driverConfig) {
 					)
 					waitForManualSync(
 						ctx, rsName,
+						manualID2,
+						5*time.Minute,
+					)
+					waitForRDManualSync(
+						ctx, rdName,
 						manualID2,
 						5*time.Minute,
 					)

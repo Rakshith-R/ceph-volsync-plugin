@@ -65,7 +65,7 @@ func TestE2E(t *testing.T) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "Starting ceph-volsync-plugin-operator integration test suite\n")
 	suiteConfig, reporterConfig :=
 		GinkgoConfiguration()
-	suiteConfig.FailFast = true
+	suiteConfig.FailFast = false
 	RunSpecs(t, "e2e suite",
 		suiteConfig, reporterConfig,
 	)
