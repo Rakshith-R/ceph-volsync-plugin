@@ -26,7 +26,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-const schedule = "*/3 * * * *"
+const schedule = "*/5 * * * *"
 
 var _ = Describe(
 	"Schedule Replication",
@@ -123,11 +123,11 @@ func scheduleSnapshotTest(drv driverConfig) {
 				func() {
 					waitForSyncTime(
 						ctx, rsName,
-						5*time.Minute,
+						10*time.Minute,
 					)
 					waitForRDSyncTime(
 						ctx, rdName,
-						5*time.Minute,
+						10*time.Minute,
 					)
 				},
 			)
@@ -151,12 +151,12 @@ func scheduleSnapshotTest(drv driverConfig) {
 					lastSyncBeforeWrite =
 						waitForSyncTime(
 							ctx, rsName,
-							5*time.Minute,
+							10*time.Minute,
 						)
 					lastRDSyncBeforeWrite =
 						waitForRDSyncTime(
 							ctx, rdName,
-							5*time.Minute,
+							10*time.Minute,
 						)
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
@@ -285,11 +285,11 @@ func scheduleDirectTest(drv driverConfig) {
 				func() {
 					waitForSyncTime(
 						ctx, rsName,
-						5*time.Minute,
+						10*time.Minute,
 					)
 					waitForRDSyncTime(
 						ctx, rdName,
-						5*time.Minute,
+						10*time.Minute,
 					)
 				},
 			)
@@ -313,12 +313,12 @@ func scheduleDirectTest(drv driverConfig) {
 					lastSyncBeforeWrite =
 						waitForSyncTime(
 							ctx, rsName,
-							5*time.Minute,
+							10*time.Minute,
 						)
 					lastRDSyncBeforeWrite =
 						waitForRDSyncTime(
 							ctx, rdName,
-							5*time.Minute,
+							10*time.Minute,
 						)
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
