@@ -42,7 +42,7 @@ var (
 	// installed, avoiding re-installation and conflicts.
 	skipCertManagerInstall = os.Getenv(
 		"CERT_MANAGER_INSTALL_SKIP",
-	) == "true"
+	) == "false"
 	// isCertManagerAlreadyInstalled will be set true when
 	// CertManager CRDs be found on the cluster
 	isCertManagerAlreadyInstalled = false
