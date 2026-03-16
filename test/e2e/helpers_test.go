@@ -522,6 +522,75 @@ func waitForNextSync(
 	).Should(Succeed())
 }
 
+// waitForRDSyncTime waits for
+// RD.Status.LastSyncTime to be non-nil.
+func waitForRDSyncTime(
+	ctx context.Context,
+	rdName string,
+	timeout time.Duration,
+) *metav1.Time {
+	By("waiting for RD first sync time")
+
+	var syncTime *metav1.Time
+
+	Eventually(func(g Gomega) {
+		rd := &volsyncv1alpha1.
+			ReplicationDestination{}
+		g.Expect(k8sClient.Get(
+			ctx,
+			types.NamespacedName{
+				Name:      rdName,
+				Namespace: namespace,
+			},
+			rd,
+		)).To(Succeed())
+		g.Expect(rd.Status).NotTo(BeNil())
+		g.Expect(
+			rd.Status.LastSyncTime,
+		).NotTo(BeNil())
+		syncTime = rd.Status.LastSyncTime
+	}).WithTimeout(timeout).Should(Succeed())
+
+	return syncTime
+}
+
+// waitForRDNextSync waits for
+// RD.Status.LastSyncTime to be strictly after
+// prevTime.
+func waitForRDNextSync(
+	ctx context.Context,
+	rdName string,
+	prevTime *metav1.Time,
+	timeout time.Duration,
+) {
+	By("waiting for RD next sync after " +
+		prevTime.String())
+
+	Eventually(func(g Gomega) {
+		rd := &volsyncv1alpha1.
+			ReplicationDestination{}
+		g.Expect(k8sClient.Get(
+			ctx,
+			types.NamespacedName{
+				Name:      rdName,
+				Namespace: namespace,
+			},
+			rd,
+		)).To(Succeed())
+		g.Expect(rd.Status).NotTo(BeNil())
+		g.Expect(
+			rd.Status.LastSyncTime,
+		).NotTo(BeNil())
+		g.Expect(
+			rd.Status.LastSyncTime.Time.After(
+				prevTime.Time,
+			),
+		).To(BeTrue())
+	}).WithTimeout(timeout).WithPolling(
+		15 * time.Second,
+	).Should(Succeed())
+}
+
 // cleanupReplication deletes RS, RD, and PVCs.
 func cleanupReplication(
 	ctx context.Context,

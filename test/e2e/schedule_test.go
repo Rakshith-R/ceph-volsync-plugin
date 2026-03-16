@@ -22,6 +22,7 @@ import (
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 )
 
@@ -48,8 +49,10 @@ func scheduleSnapshotTest(drv driverConfig) {
 			rsName := drv.name + "-ss-rs"
 
 			var (
-				rdAddr string
-				rdKey  string
+				rdAddr                string
+				rdKey                 string
+				lastSyncBeforeWrite   *metav1.Time
+				lastRDSyncBeforeWrite *metav1.Time
 			)
 
 			ctx := context.TODO()
@@ -122,6 +125,10 @@ func scheduleSnapshotTest(drv driverConfig) {
 						ctx, rsName,
 						5*time.Minute,
 					)
+					waitForRDSyncTime(
+						ctx, rdName,
+						5*time.Minute,
+					)
 				},
 			)
 
@@ -138,6 +145,16 @@ func scheduleSnapshotTest(drv driverConfig) {
 
 			It("should write more data",
 				func() {
+					lastSyncBeforeWrite =
+						waitForSyncTime(
+							ctx, rsName,
+							5*time.Minute,
+						)
+					lastRDSyncBeforeWrite =
+						waitForRDSyncTime(
+							ctx, rdName,
+							5*time.Minute,
+						)
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
 					)
@@ -146,13 +163,14 @@ func scheduleSnapshotTest(drv driverConfig) {
 
 			It("should complete second sync",
 				func() {
-					firstSync := waitForSyncTime(
-						ctx, rsName,
-						5*time.Minute,
-					)
 					waitForNextSync(
 						ctx, rsName,
-						firstSync,
+						lastSyncBeforeWrite,
+						10*time.Minute,
+					)
+					waitForRDNextSync(
+						ctx, rdName,
+						lastRDSyncBeforeWrite,
 						10*time.Minute,
 					)
 				},
@@ -181,8 +199,10 @@ func scheduleDirectTest(drv driverConfig) {
 			rsName := drv.name + "-sd-rs"
 
 			var (
-				rdAddr string
-				rdKey  string
+				rdAddr                string
+				rdKey                 string
+				lastSyncBeforeWrite   *metav1.Time
+				lastRDSyncBeforeWrite *metav1.Time
 			)
 
 			ctx := context.TODO()
@@ -261,6 +281,10 @@ func scheduleDirectTest(drv driverConfig) {
 						ctx, rsName,
 						5*time.Minute,
 					)
+					waitForRDSyncTime(
+						ctx, rdName,
+						5*time.Minute,
+					)
 				},
 			)
 
@@ -277,6 +301,16 @@ func scheduleDirectTest(drv driverConfig) {
 
 			It("should write more data",
 				func() {
+					lastSyncBeforeWrite =
+						waitForSyncTime(
+							ctx, rsName,
+							5*time.Minute,
+						)
+					lastRDSyncBeforeWrite =
+						waitForRDSyncTime(
+							ctx, rdName,
+							5*time.Minute,
+						)
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
 					)
@@ -285,13 +319,14 @@ func scheduleDirectTest(drv driverConfig) {
 
 			It("should complete second sync",
 				func() {
-					firstSync := waitForSyncTime(
-						ctx, rsName,
-						5*time.Minute,
-					)
 					waitForNextSync(
 						ctx, rsName,
-						firstSync,
+						lastSyncBeforeWrite,
+						10*time.Minute,
+					)
+					waitForRDNextSync(
+						ctx, rdName,
+						lastRDSyncBeforeWrite,
 						10*time.Minute,
 					)
 				},
