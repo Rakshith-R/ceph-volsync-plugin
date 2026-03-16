@@ -453,6 +453,33 @@ func updateManualTrigger(
 	).To(Succeed())
 }
 
+func setRSPaused(
+	ctx context.Context,
+	rsName string,
+	paused bool,
+) {
+	action := "pausing"
+	if !paused {
+		action = "unpausing"
+	}
+
+	By(action + " ReplicationSource " + rsName)
+
+	rs := &volsyncv1alpha1.ReplicationSource{}
+	Expect(k8sClient.Get(
+		ctx,
+		types.NamespacedName{
+			Name:      rsName,
+			Namespace: namespace,
+		},
+		rs,
+	)).To(Succeed())
+	rs.Spec.Paused = paused
+	Expect(
+		k8sClient.Update(ctx, rs),
+	).To(Succeed())
+}
+
 // waitForSyncTime waits for
 // RS.Status.LastSyncTime to be non-nil.
 func waitForSyncTime(
