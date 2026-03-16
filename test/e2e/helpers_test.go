@@ -53,12 +53,12 @@ type driverConfig struct {
 // drivers is the list of storage drivers to test.
 var drivers = []driverConfig{
 	{
-		// 	name: "nfs",
-		// 	provider: "rook-ceph." +
-		// 		"nfs.csi.ceph.com",
-		// 	sc:      "rook-nfs",
-		// 	vsClass: "csi-nfsplugin-snapclass",
-		// }, {
+		name: "nfs",
+		provider: "rook-ceph." +
+			"nfs.csi.ceph.com",
+		sc:      "rook-nfs",
+		vsClass: "csi-nfsplugin-snapclass",
+	}, {
 		name: "cephfs",
 		provider: "rook-ceph." +
 			"cephfs.csi.ceph.com",
@@ -313,6 +313,7 @@ func waitForRDManualSync(
 func waitForSnapshot(
 	ctx context.Context,
 	rsName string,
+	after *metav1.Time,
 	timeout time.Duration,
 ) {
 	By("waiting for VolumeSnapshot for " + rsName)
@@ -333,6 +334,17 @@ func waitForSnapshot(
 			len(snapList.Items),
 		).To(BeNumerically(">=", 1))
 		snap := &snapList.Items[0]
+		if after != nil {
+			g.Expect(
+				snap.CreationTimestamp.
+					After(after.Time),
+			).To(BeTrue(),
+				"snapshot created at %v,"+
+					" expected after %v",
+				snap.CreationTimestamp.Time,
+				after.Time,
+			)
+		}
 		g.Expect(snap.Status).NotTo(BeNil())
 		g.Expect(
 			snap.Status.ReadyToUse,
