@@ -145,6 +145,9 @@ func scheduleSnapshotTest(drv driverConfig) {
 
 			It("should write more data",
 				func() {
+					setRSPaused(
+						ctx, rsName, true,
+					)
 					lastSyncBeforeWrite =
 						waitForSyncTime(
 							ctx, rsName,
@@ -163,6 +166,9 @@ func scheduleSnapshotTest(drv driverConfig) {
 
 			It("should complete second sync",
 				func() {
+					setRSPaused(
+						ctx, rsName, false,
+					)
 					waitForNextSync(
 						ctx, rsName,
 						lastSyncBeforeWrite,
@@ -301,6 +307,9 @@ func scheduleDirectTest(drv driverConfig) {
 
 			It("should write more data",
 				func() {
+					setRSPaused(
+						ctx, rsName, true,
+					)
 					lastSyncBeforeWrite =
 						waitForSyncTime(
 							ctx, rsName,
@@ -319,6 +328,9 @@ func scheduleDirectTest(drv driverConfig) {
 
 			It("should complete second sync",
 				func() {
+					setRSPaused(
+						ctx, rsName, false,
+					)
 					waitForNextSync(
 						ctx, rsName,
 						lastSyncBeforeWrite,
