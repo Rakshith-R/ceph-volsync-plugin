@@ -1,10 +1,7 @@
 #-- Build the mover binary with go-ceph support
-# Use a Ceph-based image that has the required development libraries
-ARG TARGETOS
-ARG TARGETARCH
+ARG CEPH_BASE_IMAGE=quay.io/ceph/ceph:v20
 
-
-FROM quay.io/ceph/ceph:v20 AS updated_base
+FROM ${CEPH_BASE_IMAGE} AS updated_base
 ARG CEPH_VERSION=tentacle
 
 # TODO: remove the reinstall, when issues
@@ -12,32 +9,22 @@ ARG CEPH_VERSION=tentacle
 # https://github.com/ceph/ceph-container/issues/2141
 # are fixed.
 RUN echo ${CEPH_VERSION} \
-    && true \
     && dnf -y reinstall \
-       https://download.ceph.com/rpm-tentacle/el9/noarch/ceph-release-1-1.el9.noarch.rpm \
-    && true \
-    && mkdir -p /etc/selinux \
-    && touch /etc/selinux/config \
-    && dnf -y update --nobest \
-    && dnf -y install nfs-utils \
-    && dnf clean all \
-    && rm -rf /var/cache/yum
+       https://download.ceph.com/rpm-${CEPH_VERSION}/el9/noarch/ceph-release-1-1.el9.noarch.rpm
 
 FROM updated_base AS builder
 
-# Re-declare ARGs that need to be used in this
-# stage (ARGs before FROM are not inherited)
 ARG GOLANG_VERSION=1.25.6
 ARG TARGETOS
 ARG TARGETARCH
 
 # Install Go and build dependencies
-# (including curl for downloading Go)
+# NOTE: Go tarball hardcoded to linux-amd64;
+# builder runs on the build host, not the target.
 RUN dnf -y install --nodocs \
     librados-devel librbd-devel libcephfs-devel \
     /usr/bin/cc \
     && dnf clean all \
-    && rm -rf /var/cache/yum \
     && mkdir -p /usr/local/go \
     && curl -L \
       https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz \
@@ -56,27 +43,19 @@ COPY go.mod go.sum ./
 # so that we don't need to re-download as much
 # and so that source changes don't invalidate
 # our downloaded layer
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy the go source
 COPY cmd/mover/main.go cmd/mover/main.go
 COPY internal/ internal/
 
-# Build with go-ceph support (CGO enabled,
-# ceph_preview tag)
-# The GOARCH has no default value to allow the
-# binary be built according to the host where
-# the command was called. For example, if we call
-# make docker-build in a local env which has the
-# Apple Silicon M1 SO the docker BUILDPLATFORM
-# arg will be linux/arm64 when for Apple x86 it
-# will be linux/amd64. Therefore, by leaving it
-# empty we can ensure that the container and
-# binary shipped on it will have the same
-# platform.
-RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
+# Build with go-ceph support (CGO enabled)
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
     GOARCH=${TARGETARCH} \
-    go build -tags=ceph_preview -a -o mover \
+    go build -tags=ceph_preview -o mover \
     cmd/mover/main.go
 
 #-- Final container with Ceph runtime libraries
@@ -86,13 +65,12 @@ FROM updated_base
 # Allow specifying rsync version
 ARG RSYNC_VERSION=""
 
-# Install runtime dependencies: stunnel, bash, and rsync
+# Install runtime dependencies
 RUN dnf -y install --nodocs \
     stunnel \
     bash \
-    rsync \
-    && dnf clean all \
-    && rm -rf /var/cache/yum
+    rsync${RSYNC_VERSION:+-$RSYNC_VERSION} \
+    && dnf clean all
 
 WORKDIR /
 COPY --from=builder /workspace/mover .
