@@ -29,6 +29,7 @@ import (
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
+	wcommon "github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 	"github.com/backube/volsync/controllers/mover/rsynctls"
 	"github.com/go-logr/logr"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
@@ -51,25 +52,15 @@ import (
 )
 
 const (
-	mountPath                = "/data"
-	devicePath               = "/dev/block"
-	dataVolumeName           = "data"
-	tlsContainerPort         = 8000
-	defaultServerStunnelPort = "8000"
-	defaultServerPort        = "8080"
-	defaultRsyncStunnelPort  = "8873"
-	defaultRsyncPort         = "8874"
+	dataVolumeName = "data"
 
 	volSyncCephFSPrefix = mover.VolSyncPrefix + "cephfs-"
 
 	// Paths for ceph-csi config mounted in the operator
 	csiConfigMountPath = "/etc/ceph-csi-config"
 
-	// Volume name, mount path, and JSON key for
-	// ceph-csi secret
-	csiSecretVolumeName = "ceph-csi-secret"      //nolint:gosec // G101: volume name, not credentials
-	CsiSecretMountPath  = "/etc/ceph-csi-secret" //nolint:gosec // G101: mount path, not credentials
-	CsiSecretJSONKey    = "credentials.json"
+	// Volume name for ceph-csi secret
+	csiSecretVolumeName = "ceph-csi-secret" //nolint:gosec // G101: volume name, not credentials
 )
 
 // MoverType represents the type of data mover.
@@ -499,7 +490,7 @@ func (m *Mover) ensureCephCSISecret(
 				)
 			}
 			newSecret.Data = map[string][]byte{
-				CsiSecretJSONKey: jsonBytes,
+				worker.CsiSecretJSONKey: jsonBytes,
 			}
 			return nil
 		},
@@ -700,7 +691,7 @@ func (m *Mover) ensureJob(
 		})
 
 		// Add DESTINATION_PORT for stunnel configuration
-		serverPort := defaultServerStunnelPort
+		serverPort := wcommon.DefaultServerStunnelPort
 		if m.port != nil {
 			serverPort = strconv.Itoa(int(*m.port))
 		}
@@ -711,7 +702,7 @@ func (m *Mover) ensureJob(
 
 		containerEnv = append(containerEnv, corev1.EnvVar{
 			Name:  worker.EnvServerPort,
-			Value: defaultServerPort,
+			Value: wcommon.DefaultServerPort,
 		})
 
 		containerEnv = append(containerEnv, corev1.EnvVar{
@@ -729,11 +720,11 @@ func (m *Mover) ensureJob(
 		if m.moverType == MoverTypeCephFS {
 			containerEnv = append(containerEnv, corev1.EnvVar{
 				Name:  worker.EnvRsyncPort,
-				Value: defaultRsyncStunnelPort,
+				Value: wcommon.DefaultRsyncStunnelPort,
 			})
 			containerEnv = append(containerEnv, corev1.EnvVar{
 				Name:  worker.EnvRsyncDaemonPort,
-				Value: defaultRsyncPort,
+				Value: wcommon.DefaultRsyncDaemonPort,
 			})
 		}
 
@@ -786,7 +777,7 @@ func (m *Mover) ensureJob(
 			volumeMounts = append(volumeMounts,
 				corev1.VolumeMount{
 					Name:      dataVolumeName,
-					MountPath: mountPath,
+					MountPath: wcommon.DataMountPath,
 				})
 		}
 		volumeMounts = append(volumeMounts,
@@ -809,14 +800,14 @@ func (m *Mover) ensureJob(
 			},
 			corev1.VolumeMount{
 				Name:      csiSecretVolumeName,
-				MountPath: CsiSecretMountPath,
+				MountPath: worker.CsiSecretMountPath,
 				ReadOnly:  true,
 			},
 		)
 		job.Spec.Template.Spec.Containers[0].VolumeMounts = volumeMounts
 		if blockVolume {
 			job.Spec.Template.Spec.Containers[0].VolumeDevices = []corev1.VolumeDevice{
-				{Name: dataVolumeName, DevicePath: devicePath},
+				{Name: dataVolumeName, DevicePath: wcommon.DevicePath},
 			}
 		}
 		podSpec.RestartPolicy = corev1.RestartPolicyNever

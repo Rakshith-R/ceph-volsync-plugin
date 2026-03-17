@@ -27,6 +27,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	wcommon "github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
 type rsyncSvcDescription struct {
@@ -51,16 +53,7 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 		}
 		utils.SetOwnedByVolSync(d.Service)
 
-		if d.Service.Annotations == nil {
-			d.Service.Annotations = map[string]string{}
-		}
-		updateAnnotationsOrDefault(d.Service.Annotations, d.Annotations)
-
-		if d.Type != nil {
-			d.Service.Spec.Type = *d.Type
-		} else {
-			d.Service.Spec.Type = corev1.ServiceTypeClusterIP
-		}
+		d.Service.Spec.Type = corev1.ServiceTypeClusterIP
 		d.Service.Spec.Selector = d.Selector
 		if len(d.Service.Spec.Ports) != 2 {
 			d.Service.Spec.Ports = []corev1.ServicePort{{}, {}}
@@ -71,27 +64,21 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 		} else {
 			d.Service.Spec.Ports[0].Name = "cephfs-mover"
 		}
-		if d.Port != nil {
-			d.Service.Spec.Ports[0].Port = *d.Port
-		} else {
-			d.Service.Spec.Ports[0].Port = 8000
-		}
+		d.Service.Spec.Ports[0].Port = wcommon.TLSPort
 		d.Service.Spec.Ports[0].Protocol = corev1.ProtocolTCP
-		d.Service.Spec.Ports[0].TargetPort = intstr.FromInt32(tlsContainerPort)
-		if d.Service.Spec.Type == corev1.ServiceTypeClusterIP {
-			d.Service.Spec.Ports[0].NodePort = 0
-		}
+		d.Service.Spec.Ports[0].TargetPort = intstr.FromInt32(wcommon.TLSPort)
+		d.Service.Spec.Ports[0].NodePort = 0
 
 		if d.MoverType == MoverTypeRBD {
 			d.Service.Spec.Ports[1].Name = "rbd-grpc-server"
-			d.Service.Spec.Ports[1].Port = 8080
+			d.Service.Spec.Ports[1].Port = wcommon.RBDGRPCPort
 			d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP
-			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(8080)
+			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(wcommon.RBDGRPCPort)
 		} else {
 			d.Service.Spec.Ports[1].Name = "rsync-server"
-			d.Service.Spec.Ports[1].Port = 8873
+			d.Service.Spec.Ports[1].Port = wcommon.RsyncStunnelPort
 			d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP
-			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(8873)
+			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(wcommon.RsyncStunnelPort)
 		}
 		return nil
 	})
@@ -102,21 +89,4 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 
 	logger.V(1).Info("Service reconciled", "operation", op)
 	return nil
-}
-
-func updateAnnotationsOrDefault(annotations, userSuppliedAnnotations map[string]string) {
-	if userSuppliedAnnotations == nil {
-		// Set our default annotations
-		annotations["service.beta.kubernetes.io/aws-load-balancer-type"] = "nlb"
-	} else {
-		// Use user-supplied annotations - do not replace Annotations entirely in case of system-added annotations
-		updateMap(annotations, userSuppliedAnnotations)
-	}
-}
-
-// Update map1 with any k,v pairs from map2
-func updateMap(map1, map2 map[string]string) {
-	for k, v := range map2 {
-		map1[k] = v
-	}
 }
