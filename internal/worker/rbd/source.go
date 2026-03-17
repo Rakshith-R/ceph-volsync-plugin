@@ -1,3 +1,5 @@
+//go:build ceph_preview
+
 /*
 Copyright 2025.
 
@@ -18,49 +20,28 @@ package rbd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
-	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/version/v1"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
-const (
-	// sourceConnectionTimeout is the timeout for the first RPC call
-	// which establishes the connection.
-	sourceConnectionTimeout = 60 * time.Second
-
-	// sourceRPCTimeout is the timeout for subsequent RPC calls.
-	sourceRPCTimeout = 30 * time.Second
-
-	// sourceWritePayloadMinSize is the minimum accumulated data
-	// payload size before sending a WriteRequest over the gRPC stream.
-	sourceWritePayloadMinSize = 2 * 1024 * 1024 // 2MB
-
-	// sourceWritePayloadMaxSize is the maximum accumulated data
-	// payload size. Prevents exceeding the 4MB gRPC default server
-	// max receive message size.
-	sourceWritePayloadMaxSize = 3 * 1024 * 1024 // 3MB
-)
-
-// SourceConfig holds configuration for the RBD source worker.
+// SourceConfig holds configuration for the RBD source
+// worker.
 type SourceConfig struct {
 	DestinationAddress string
 }
 
-// SourceWorker represents an RBD source worker instance.
+// SourceWorker represents an RBD source worker
+// instance.
 type SourceWorker struct {
 	logger logr.Logger
 	config SourceConfig
@@ -100,7 +81,15 @@ func (w *SourceWorker) Run(
 ) (err error) {
 	w.logger.Info("Starting RBD source worker")
 
-	conn, err := w.connectToDestination(ctx)
+	conn, err := common.ConnectToDestination(
+		ctx, w.logger,
+		w.config.DestinationAddress,
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(
+				common.MaxGRPCMessageSize,
+			),
+		),
+	)
 	if err != nil {
 		return err
 	}
@@ -123,7 +112,6 @@ func (w *SourceWorker) Run(
 		return err
 	}
 
-	// Get volume size from parent image
 	parentSpec := ceph.RBDImageSpec(
 		sc.parentPoolName, sc.parentNS,
 		sc.parentImageName,
@@ -145,7 +133,6 @@ func (w *SourceWorker) Run(
 	}
 	_ = parentImage.Close()
 
-	// Create RBD block diff iterator
 	iter, err := ceph.NewRBDBlockDiffIterator(
 		sc.mons, sc.user, sc.key,
 		sc.parentPoolID, sc.parentNS,
@@ -160,16 +147,15 @@ func (w *SourceWorker) Run(
 	}
 	defer func() { _ = iter.Close() }()
 
-	// Open block device for reading
-	device, err := os.Open(devicePath)
+	device, err := os.Open(common.DevicePath)
 	if err != nil {
 		return fmt.Errorf(
-			"failed to open %s: %w", devicePath, err,
+			"failed to open %s: %w",
+			common.DevicePath, err,
 		)
 	}
 	defer func() { _ = device.Close() }()
 
-	// Create gRPC data client and sync stream
 	dataClient := apiv1.NewDataServiceClient(conn)
 	stream, err := dataClient.Sync(ctx)
 	if err != nil {
@@ -187,58 +173,11 @@ func (w *SourceWorker) Run(
 	return w.commitAndSignalDone(ctx, conn, stream)
 }
 
-// connectToDestination establishes a gRPC connection and
-// verifies it with a GetVersion call.
-func (w *SourceWorker) connectToDestination(
-	ctx context.Context,
-) (*grpc.ClientConn, error) {
-	conn, err := grpc.NewClient(
-		w.config.DestinationAddress,
-		grpc.WithTransportCredentials(
-			insecure.NewCredentials(),
-		),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallSendMsgSize(maxGRPCMessageSize),
-		),
-	)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to create gRPC client for %s: %w",
-			w.config.DestinationAddress, err,
-		)
-	}
-
-	versionClient := versionv1.NewVersionServiceClient(
-		conn,
-	)
-	callCtx, cancel := context.WithTimeout(
-		ctx, sourceConnectionTimeout,
-	)
-	defer cancel()
-
-	resp, err := versionClient.GetVersion(
-		callCtx, &versionv1.GetVersionRequest{},
-	)
-	if err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf(
-			"failed to get version from "+
-				"destination %s: %w",
-			w.config.DestinationAddress, err,
-		)
-	}
-	w.logger.Info(
-		"Connected to destination",
-		"version", resp.GetVersion(),
-	)
-
-	return conn, nil
-}
-
 // resolveSourceConfig reads environment variables,
-// credentials, and Ceph cluster configuration to populate
-// a sourceContext. Returns the sourceContext and an active
-// ClusterConnection that the caller must destroy.
+// credentials, and Ceph cluster configuration to
+// populate a sourceContext. Returns the sourceContext
+// and an active ClusterConnection that the caller must
+// destroy.
 func (w *SourceWorker) resolveSourceConfig() (
 	*sourceContext, *ceph.ClusterConnection, error,
 ) {
@@ -249,11 +188,12 @@ func (w *SourceWorker) resolveSourceConfig() (
 		volumeHandle,
 	); err != nil {
 		return nil, nil, fmt.Errorf(
-			"failed to decompose VOLUME_HANDLE: %w", err,
+			"failed to decompose VOLUME_HANDLE: %w",
+			err,
 		)
 	}
 
-	creds, err := readMountedRBDCredentials()
+	creds, err := common.ReadMountedCredentials()
 	if err != nil {
 		return nil, nil, fmt.Errorf(
 			"failed to get ceph credentials: %w", err,
@@ -282,14 +222,17 @@ func (w *SourceWorker) resolveSourceConfig() (
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf(
-			"failed to get RBD rados namespace: %w", err,
+			"failed to get RBD rados namespace: %w",
+			err,
 		)
 	}
 
 	user := creds.ID
 	key := string(userKey)
 
-	cc, err := ceph.NewClusterConnection(mons, user, key)
+	cc, err := ceph.NewClusterConnection(
+		mons, user, key,
+	)
 	if err != nil {
 		return nil, nil, fmt.Errorf(
 			"failed to connect to cluster: %w", err,
@@ -319,8 +262,6 @@ func (w *SourceWorker) resolveParentImage(
 		"TARGET_SNAPSHOT_HANDLE",
 	)
 
-	// If no snapshot handles, diff iterate yields all
-	// allocated blocks from the volume image.
 	if baseSnapshotHandle == "" &&
 		targetSnapshotHandle == "" {
 		return w.resolveFullDiffFromVolume(cc, sc)
@@ -393,10 +334,6 @@ func (w *SourceWorker) resolveSnapshotDiff(
 		}
 	}
 
-	// Use the target snapshot to find the parent
-	// image. The target snapshot's GetParent()
-	// reliably identifies the source RBD image
-	// regardless of how it was cloned.
 	targetSnapName := "csi-snap-" +
 		targetSnapCSI.ObjectUUID
 
@@ -446,7 +383,6 @@ func (w *SourceWorker) resolveSnapshotDiff(
 	sc.parentPoolID = int64(parentInfo.Image.PoolID) //nolint:gosec // G115: pool ID within safe range
 	sc.targetSnapID = parentInfo.Snap.ID
 
-	// Determine fromSnapID for incremental diff
 	if baseSnapCSI != nil {
 		baseSnapName := "csi-snap-" +
 			baseSnapCSI.ObjectUUID
@@ -501,9 +437,9 @@ func (w *SourceWorker) resolveSnapshotDiff(
 	return nil
 }
 
-// streamBlocks iterates over changed blocks from the diff
-// iterator, reads data from the device, and sends batched
-// write requests over the gRPC stream.
+// streamBlocks iterates over changed blocks from the
+// diff iterator, reads data from the device, and sends
+// batched write requests over the gRPC stream.
 func (w *SourceWorker) streamBlocks(
 	iter *ceph.RBDBlockDiffIterator,
 	device *os.File,
@@ -530,7 +466,7 @@ func (w *SourceWorker) streamBlocks(
 		}
 		data = data[:n]
 
-		isZero := isAllZero(data)
+		isZero := common.IsAllZero(data)
 		protoBlock := &apiv1.ChangedBlock{
 			Offset: uint64(block.Offset), //nolint:gosec // G115: RBD offsets are non-negative
 			Length: uint64(block.Len),    //nolint:gosec // G115: RBD offsets are non-negative
@@ -548,11 +484,10 @@ func (w *SourceWorker) streamBlocks(
 			accumulatedBlocks, protoBlock,
 		)
 
-		// Flush at max threshold
 		if accumulatedPayloadSize >=
-			sourceWritePayloadMaxSize {
-			if err := sendBlockWrite(
-				stream, devicePath,
+			common.WritePayloadMaxSize {
+			if err := common.SendBlockWrite(
+				stream, common.DevicePath,
 				accumulatedBlocks,
 			); err != nil {
 				return err
@@ -561,11 +496,10 @@ func (w *SourceWorker) streamBlocks(
 			accumulatedPayloadSize = 0
 		}
 
-		// Flush at min threshold
 		if accumulatedPayloadSize >=
-			sourceWritePayloadMinSize {
-			if err := sendBlockWrite(
-				stream, devicePath,
+			common.WritePayloadMinSize {
+			if err := common.SendBlockWrite(
+				stream, common.DevicePath,
 				accumulatedBlocks,
 			); err != nil {
 				return err
@@ -575,10 +509,10 @@ func (w *SourceWorker) streamBlocks(
 		}
 	}
 
-	// Flush remaining
 	if len(accumulatedBlocks) > 0 {
-		if err := sendBlockWrite(
-			stream, devicePath, accumulatedBlocks,
+		if err := common.SendBlockWrite(
+			stream, common.DevicePath,
+			accumulatedBlocks,
 		); err != nil {
 			return err
 		}
@@ -599,7 +533,7 @@ func (w *SourceWorker) commitAndSignalDone(
 	if err := stream.Send(&apiv1.SyncRequest{
 		Operation: &apiv1.SyncRequest_Commit{
 			Commit: &apiv1.CommitRequest{
-				Path: devicePath,
+				Path: common.DevicePath,
 			},
 		},
 	}); err != nil {
@@ -625,91 +559,5 @@ func (w *SourceWorker) commitAndSignalDone(
 
 	w.logger.Info("Block diff sync completed")
 
-	// Signal Done
-	doneClient := apiv1.NewDoneServiceClient(conn)
-	doneCtx, doneCancel := context.WithTimeout(
-		ctx, sourceRPCTimeout,
-	)
-	defer doneCancel()
-
-	if _, err := doneClient.Done(
-		doneCtx, &apiv1.DoneRequest{},
-	); err != nil {
-		return fmt.Errorf(
-			"failed to send Done signal: %w", err,
-		)
-	}
-
-	w.logger.Info("Successfully sent Done signal")
-	return nil
-}
-
-// sendBlockWrite sends a batch of accumulated blocks as a
-// single WriteRequest on the given stream.
-func sendBlockWrite(
-	stream grpc.ClientStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
-	],
-	path string,
-	blocks []*apiv1.ChangedBlock,
-) error {
-	if err := stream.Send(&apiv1.SyncRequest{
-		Operation: &apiv1.SyncRequest_Write{
-			Write: &apiv1.WriteRequest{
-				Path:   path,
-				Blocks: blocks,
-			},
-		},
-	}); err != nil {
-		if err == io.EOF {
-			if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
-				return fmt.Errorf(
-					"destination error during write for %s: %w",
-					path, recvErr,
-				)
-			}
-		}
-		return fmt.Errorf(
-			"failed to send write blocks for %s: %w",
-			path, err,
-		)
-	}
-	return nil
-}
-
-// isAllZero checks if a byte slice contains only zeros.
-func isAllZero(data []byte) bool {
-	for _, b := range data {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-// readMountedRBDCredentials reads ceph admin credentials
-// from a JSON file mounted at
-// /etc/ceph-csi-secret/credentials.json.
-func readMountedRBDCredentials() (
-	*ceph.Credentials, error,
-) {
-	path := filepath.Join(
-		worker.CsiSecretMountPath,
-		worker.CsiSecretJSONKey,
-	)
-	content, err := os.ReadFile(path) //nolint:gosec // G304: path is internally constructed
-	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to read %s: %w", path, err,
-		)
-	}
-
-	data := map[string]string{}
-	if err := json.Unmarshal(content, &data); err != nil {
-		return nil, fmt.Errorf(
-			"failed to parse %s: %w", path, err,
-		)
-	}
-
-	return ceph.NewAdminCredentials(data)
+	return common.SignalDone(ctx, w.logger, conn)
 }

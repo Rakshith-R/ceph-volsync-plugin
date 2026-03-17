@@ -14,9 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rbd
+package common
 
-const (
-	devicePath         = "/dev/block"
-	maxGRPCMessageSize = 8 * 1024 * 1024 // 8MB
-)
+// IsAllZero checks if a byte slice contains only zeros.
+func IsAllZero(data []byte) bool {
+	for _, b := range data {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}

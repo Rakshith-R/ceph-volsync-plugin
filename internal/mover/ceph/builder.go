@@ -143,6 +143,7 @@ func (rb *Builder) FromSource(cl client.Client, logger logr.Logger,
 		return nil, fmt.Errorf("missing external parameters in ceph replication source")
 	}
 
+	// TODO: validate copy method and other parameters here before creating the Mover.
 	copyMethod := volsyncv1alpha1.CopyMethodDirect
 	rawCopyMethod, ok := source.Spec.External.Parameters[optCopyMethod]
 	if ok {
@@ -152,7 +153,6 @@ func (rb *Builder) FromSource(cl client.Client, logger logr.Logger,
 	var (
 		storageClassName, volumeSnapshotClassName, secretKey, address *string
 	)
-
 	storageClassNameStr, ok := options[optStorageClassName]
 	if ok {
 		storageClassName = &storageClassNameStr
@@ -245,6 +245,7 @@ func (rb *Builder) FromDestination(cl client.Client, logger logr.Logger,
 		return nil, fmt.Errorf("missing external parameters in ceph replication destination")
 	}
 
+	// TODO: validate copy method and other parameters here before creating the Mover.
 	copyMethod := volsyncv1alpha1.CopyMethodDirect
 	rawCopyMethod, ok := options[optCopyMethod]
 	if ok {
@@ -254,7 +255,6 @@ func (rb *Builder) FromDestination(cl client.Client, logger logr.Logger,
 	var (
 		storageClassName, volumeSnapshotClassName, keySecret *string
 	)
-
 	storageClassNameStr, ok := options[optStorageClassName]
 	if ok {
 		storageClassName = &storageClassNameStr
@@ -285,7 +285,7 @@ func (rb *Builder) FromDestination(cl client.Client, logger logr.Logger,
 	isSource := false
 
 	saHandler := utils.NewSAHandler(cl, destination, isSource, privileged,
-		nil) // No specific SA for ceph mover
+		nil)
 
 	var destPVC = options[optDestinationPVC]
 
