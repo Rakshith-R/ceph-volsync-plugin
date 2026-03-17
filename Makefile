@@ -1,3 +1,8 @@
+# Include build configuration (versions, base images).
+# Variables can be overridden on the CLI:
+#   make docker-build-mover GOLANG_VERSION=1.25.7
+-include build/build.env
+
 # VERSION defines the project version for the bundle.
 # Update this value when you upgrade the version of your project.
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
@@ -66,6 +71,13 @@ IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
 
 # MOVER_IMG defines the image:tag used for the mover plugin image.
 MOVER_IMG ?= $(MOVER_IMAGE_TAG_BASE):v$(VERSION)
+
+# Mover container --build-arg flags
+MOVER_BUILD_ARGS = \
+	--build-arg CEPH_BASE_IMAGE=$(CEPH_BASE_IMAGE) \
+	--build-arg CEPH_VERSION=$(CEPH_VERSION) \
+	--build-arg GOLANG_VERSION=$(GOLANG_VERSION) \
+	--build-arg RSYNC_VERSION=$(RSYNC_VERSION)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -218,7 +230,9 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 
 .PHONY: docker-build-mover
 docker-build-mover: ## Build docker image with the mover.
-	$(CONTAINER_TOOL) build -t ${MOVER_IMG} -f build/Containerfile.mover .
+	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build \
+		$(MOVER_BUILD_ARGS) \
+		-t ${MOVER_IMG} -f build/Containerfile.mover .
 
 .PHONY: docker-push-mover
 docker-push-mover: ## Push docker image with the mover.
@@ -230,7 +244,9 @@ docker-buildx-mover: ## Build and push docker image for the mover for cross-plat
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' build/Containerfile.mover > build/Containerfile.mover.cross
 	- $(CONTAINER_TOOL) buildx create --name ceph-volsync-plugin-mover-builder
 	$(CONTAINER_TOOL) buildx use ceph-volsync-plugin-mover-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${MOVER_IMG} -f build/Containerfile.mover.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) \
+		$(MOVER_BUILD_ARGS) \
+		--tag ${MOVER_IMG} -f build/Containerfile.mover.cross .
 	- $(CONTAINER_TOOL) buildx rm ceph-volsync-plugin-mover-builder
 	rm build/Containerfile.mover.cross
 
