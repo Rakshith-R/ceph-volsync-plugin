@@ -24,7 +24,7 @@ jobs:
       - name: Run codespell
         uses: codespell-project/actions-codespell@v2
         with:
-          ignore_words_list: BeforeAll,AfterAll
+          ignore_words_list: BeforeAll,AfterAll,createRS
 
   golangci-lint:
     name: golangci-lint
