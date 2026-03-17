@@ -127,8 +127,8 @@ func New(
 // Must be called when done with the SnapshotDiffer.
 func (sd *SnapshotDiffer) Destroy() {
 	if sd.mountInfo != nil {
-		sd.mountInfo.Unmount()
-		sd.mountInfo.Release()
+		_ = sd.mountInfo.Unmount()
+		_ = sd.mountInfo.Release()
 	}
 	if sd.conn != nil {
 		sd.conn.Destroy()

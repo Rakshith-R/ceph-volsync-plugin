@@ -65,14 +65,22 @@ type DataServer struct {
 // accepts writes for the next file.
 func (s *DataServer) Sync(
 	stream grpc.ClientStreamingServer[apiv1.SyncRequest, apiv1.SyncResponse],
-) error {
+) (err error) {
 	var file *os.File
 	var fullPath string
 
 	defer func() {
 		if file != nil {
-			file.Sync()
-			file.Close()
+			if serr := file.Sync(); serr != nil && err == nil {
+				err = fmt.Errorf(
+					"failed to sync file: %w", serr,
+				)
+			}
+			if cerr := file.Close(); cerr != nil && err == nil {
+				err = fmt.Errorf(
+					"failed to close file: %w", cerr,
+				)
+			}
 		}
 	}()
 

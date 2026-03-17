@@ -58,13 +58,23 @@ type RBDDataServer struct {
 // open across all writes. CommitRequests sync but do not close the device.
 func (s *RBDDataServer) Sync(
 	stream grpc.ClientStreamingServer[apiv1.SyncRequest, apiv1.SyncResponse],
-) error {
+) (err error) {
 	var file *os.File
 
 	defer func() {
 		if file != nil {
-			file.Sync()
-			file.Close()
+			if serr := file.Sync(); serr != nil && err == nil {
+				err = fmt.Errorf(
+					"failed to sync block device %s: %w",
+					s.devicePath, serr,
+				)
+			}
+			if cerr := file.Close(); cerr != nil && err == nil {
+				err = fmt.Errorf(
+					"failed to close block device %s: %w",
+					s.devicePath, cerr,
+				)
+			}
 		}
 	}()
 
