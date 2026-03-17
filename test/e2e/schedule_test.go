@@ -26,7 +26,10 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-const schedule = "*/3 * * * *"
+const (
+	schedule = "*/2 * * * *"
+	interval = 2 * time.Minute
+)
 
 var _ = Describe(
 	"Schedule Replication",
@@ -49,9 +52,9 @@ func scheduleSnapshotTest(drv driverConfig) {
 			rsName := drv.name + "-ss-rs"
 
 			var (
-				rdAddr           string
-				rdKey            string
-				writeCompletedAt *metav1.Time
+				rdAddr   string
+				rdKey    string
+				waitTill *metav1.Time
 			)
 
 			ctx := context.TODO()
@@ -150,8 +153,9 @@ func scheduleSnapshotTest(drv driverConfig) {
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
 					)
-					writeCompletedAt = &metav1.Time{
-						Time: time.Now(),
+					// waitTill 2x the interval.
+					waitTill = &metav1.Time{
+						Time: time.Now().Add(interval * 2),
 					}
 					setRSPaused(
 						ctx, rsName, false,
@@ -163,17 +167,17 @@ func scheduleSnapshotTest(drv driverConfig) {
 				func() {
 					waitForSnapshot(
 						ctx, rsName,
-						writeCompletedAt,
+						waitTill,
 						10*time.Minute,
 					)
 					waitForNextSync(
 						ctx, rsName,
-						writeCompletedAt,
+						waitTill,
 						10*time.Minute,
 					)
 					waitForRDNextSync(
 						ctx, rdName,
-						writeCompletedAt,
+						waitTill,
 						10*time.Minute,
 					)
 				},
@@ -202,9 +206,9 @@ func scheduleDirectTest(drv driverConfig) {
 			rsName := drv.name + "-sd-rs"
 
 			var (
-				rdAddr           string
-				rdKey            string
-				writeCompletedAt *metav1.Time
+				rdAddr   string
+				rdKey    string
+				waitTill *metav1.Time
 			)
 
 			ctx := context.TODO()
@@ -309,8 +313,9 @@ func scheduleDirectTest(drv driverConfig) {
 					writeDataToPVC(
 						ctx, srcPVC, drv, 2,
 					)
-					writeCompletedAt = &metav1.Time{
-						Time: time.Now(),
+					// waitTill 2x the interval.
+					waitTill = &metav1.Time{
+						Time: time.Now().Add(interval * 2),
 					}
 					setRSPaused(
 						ctx, rsName, false,
@@ -322,17 +327,17 @@ func scheduleDirectTest(drv driverConfig) {
 				func() {
 					waitForSnapshot(
 						ctx, rsName,
-						writeCompletedAt,
+						waitTill,
 						10*time.Minute,
 					)
 					waitForNextSync(
 						ctx, rsName,
-						writeCompletedAt,
+						waitTill,
 						10*time.Minute,
 					)
 					waitForRDNextSync(
 						ctx, rdName,
-						writeCompletedAt,
+						waitTill,
 						10*time.Minute,
 					)
 				},
