@@ -1,6 +1,10 @@
 # Build the manager binary
+<<<<<<< HEAD
 ARG GOLANG_VERSION=1.25.8
 FROM golang:${GOLANG_VERSION} AS builder
+=======
+FROM golang:1.25.8 AS builder
+>>>>>>> bf45e46 (fix lint errors)
 ARG TARGETOS
 ARG TARGETARCH
 

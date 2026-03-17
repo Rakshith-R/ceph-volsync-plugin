@@ -138,6 +138,8 @@ func GetMappedID(key, value, id string) string {
 }
 
 // fetchMappedClusterIDAndMons returns monitors and clusterID info after checking cluster mapping.
+//
+//nolint:unparam // ctx reserved for future use
 func fetchMappedClusterIDAndMons(ctx context.Context,
 	clusterID, clusterMappingConfigFile, csiConfigFile string,
 ) (string, string, error) {

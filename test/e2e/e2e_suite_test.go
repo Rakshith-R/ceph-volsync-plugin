@@ -18,7 +18,6 @@ package e2e
 
 import (
 	"fmt"
-	"os"
 	"testing"
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
@@ -33,18 +32,6 @@ import (
 )
 
 var (
-	// Optional Environment Variables:
-	// - CERT_MANAGER_INSTALL_SKIP=true: Skips CertManager
-	//   installation during test setup.
-	// These variables are useful if CertManager is already
-	// installed, avoiding re-installation and conflicts.
-	skipCertManagerInstall = os.Getenv(
-		"CERT_MANAGER_INSTALL_SKIP",
-	) == "false"
-	// isCertManagerAlreadyInstalled will be set true when
-	// CertManager CRDs be found on the cluster
-	isCertManagerAlreadyInstalled = false
-
 	// k8sClient is a controller-runtime client for typed
 	// access to VolSync CRDs and VolumeSnapshots.
 	k8sClient client.Client

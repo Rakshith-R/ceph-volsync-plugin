@@ -17,10 +17,14 @@ RUN echo ${CEPH_VERSION} \
 FROM updated_base AS builder
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ARG GOLANG_VERSION=1.25.8
 =======
 ARG GOLANG_VERSION=1.25.6
 >>>>>>> 8d3a515 (optimize mover build: extract vars to build.env)
+=======
+ARG GOLANG_VERSION=1.25.8
+>>>>>>> bf45e46 (fix lint errors)
 ARG TARGETOS
 ARG TARGETARCH
 

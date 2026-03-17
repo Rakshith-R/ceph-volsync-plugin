@@ -96,10 +96,10 @@ func (ci CSIIdentifier) ComposeCSIID() (string, error) {
 	binary.BigEndian.PutUint16(buf16, encodingVersion)
 	versionEncodedHex := hex.EncodeToString(buf16)
 
-	binary.BigEndian.PutUint16(buf16, uint16(len(ci.ClusterID)))
+	binary.BigEndian.PutUint16(buf16, uint16(len(ci.ClusterID))) //nolint:gosec // G115: value range validated
 	clusterIDLength := hex.EncodeToString(buf16)
 
-	binary.BigEndian.PutUint64(buf64, uint64(ci.LocationID))
+	binary.BigEndian.PutUint64(buf64, uint64(ci.LocationID)) //nolint:gosec // G115: value range validated
 	poolIDEncodedHex := hex.EncodeToString(buf64)
 
 	return strings.Join([]string{
@@ -112,7 +112,7 @@ func (ci CSIIdentifier) ComposeCSIID() (string, error) {
 DecomposeCSIID composes a CSIIdentifier from passed in string.
 */
 func (ci *CSIIdentifier) DecomposeCSIID(composedCSIID string) error {
-	bytesToProcess := uint16(len(composedCSIID))
+	bytesToProcess := uint16(len(composedCSIID)) //nolint:gosec // G115: value range validated
 
 	// if length is less that expected constant elements, then bail out!
 	if bytesToProcess < knownFieldSize {
@@ -153,7 +153,7 @@ func (ci *CSIIdentifier) DecomposeCSIID(composedCSIID string) error {
 	if err != nil {
 		return err
 	}
-	ci.LocationID = int64(binary.BigEndian.Uint64(buf64))
+	ci.LocationID = int64(binary.BigEndian.Uint64(buf64)) //nolint:gosec // G115: value range validated
 	// 16 for poolID encoding and 1 for '-' separator
 	bytesToProcess -= 17
 	nextFieldStartIdx += 17

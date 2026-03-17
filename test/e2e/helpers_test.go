@@ -259,7 +259,6 @@ func createRS(
 func waitForManualSync(
 	ctx context.Context,
 	rsName, manualID string,
-	timeout time.Duration,
 ) {
 	By("waiting for RS sync " + manualID)
 
@@ -278,7 +277,9 @@ func waitForManualSync(
 		g.Expect(
 			rs.Status.LastManualSync,
 		).To(Equal(manualID))
-	}).WithTimeout(timeout).Should(Succeed())
+	}).WithTimeout(
+		5 * time.Minute,
+	).Should(Succeed())
 }
 
 // waitForRDManualSync waits for
@@ -286,7 +287,6 @@ func waitForManualSync(
 func waitForRDManualSync(
 	ctx context.Context,
 	rdName, manualID string,
-	timeout time.Duration,
 ) {
 	By("waiting for RD sync " + manualID)
 
@@ -305,7 +305,9 @@ func waitForRDManualSync(
 		g.Expect(
 			rd.Status.LastManualSync,
 		).To(Equal(manualID))
-	}).WithTimeout(timeout).Should(Succeed())
+	}).WithTimeout(
+		5 * time.Minute,
+	).Should(Succeed())
 }
 
 // waitForSnapshot waits for a VolumeSnapshot with
@@ -331,8 +333,8 @@ func waitForSnapshot(
 			},
 		)).To(Succeed())
 		g.Expect(
-			len(snapList.Items),
-		).To(BeNumerically(">=", 1))
+			snapList.Items,
+		).NotTo(BeEmpty())
 		snap := &snapList.Items[0]
 		if after != nil {
 			g.Expect(
@@ -353,28 +355,6 @@ func waitForSnapshot(
 			*snap.Status.ReadyToUse,
 		).To(BeTrue())
 	}).WithTimeout(timeout).Should(Succeed())
-}
-
-// assertNoSourceSnapshot asserts that no
-// VolumeSnapshot with the RS status label exists.
-func assertNoSourceSnapshot(
-	ctx context.Context,
-	rsName string,
-) {
-	By("verifying no snapshot for " + rsName)
-
-	labelKey := "volsync.backube/" +
-		"snapshot-status-" + rsName
-
-	snapList := &snapv1.VolumeSnapshotList{}
-	Expect(k8sClient.List(
-		ctx, snapList,
-		client.InNamespace(namespace),
-		client.MatchingLabels{
-			labelKey: "current",
-		},
-	)).To(Succeed())
-	Expect(snapList.Items).To(BeEmpty())
 }
 
 // createVolumeSnapshot creates a VolumeSnapshot
@@ -498,10 +478,8 @@ func waitForSyncTime(
 	ctx context.Context,
 	rsName string,
 	timeout time.Duration,
-) *metav1.Time {
+) {
 	By("waiting for first sync time")
-
-	var syncTime *metav1.Time
 
 	Eventually(func(g Gomega) {
 		rs := &volsyncv1alpha1.
@@ -518,10 +496,7 @@ func waitForSyncTime(
 		g.Expect(
 			rs.Status.LastSyncTime,
 		).NotTo(BeNil())
-		syncTime = rs.Status.LastSyncTime
 	}).WithTimeout(timeout).Should(Succeed())
-
-	return syncTime
 }
 
 // waitForNextSync waits for
@@ -567,10 +542,8 @@ func waitForRDSyncTime(
 	ctx context.Context,
 	rdName string,
 	timeout time.Duration,
-) *metav1.Time {
+) {
 	By("waiting for RD first sync time")
-
-	var syncTime *metav1.Time
 
 	Eventually(func(g Gomega) {
 		rd := &volsyncv1alpha1.
@@ -587,10 +560,7 @@ func waitForRDSyncTime(
 		g.Expect(
 			rd.Status.LastSyncTime,
 		).NotTo(BeNil())
-		syncTime = rd.Status.LastSyncTime
 	}).WithTimeout(timeout).Should(Succeed())
-
-	return syncTime
 }
 
 // waitForRDNextSync waits for

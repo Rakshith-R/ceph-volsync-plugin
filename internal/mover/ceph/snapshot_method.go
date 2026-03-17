@@ -37,11 +37,6 @@ import (
 )
 
 const (
-	// cleanupLabelKey matches the private constant in utils package
-	// We need it here to query snapshots with cleanup label
-	cleanupLabelKey          = utils.VolsyncLabelPrefix + "/cleanup"
-	preserveLastSnapLabelKey = utils.VolsyncLabelPrefix + "/preserve-last-snapshot"
-
 	// Snapshot status labels for lifecycle management
 	snapshotStatusCurrent  = "current"
 	snapshotStatusPrevious = "previous"

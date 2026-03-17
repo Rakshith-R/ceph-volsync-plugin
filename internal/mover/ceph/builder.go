@@ -81,9 +81,9 @@ func Register() error {
 	return nil
 }
 
-func newBuilder(viper *viper.Viper, flags *flag.FlagSet) (*Builder, error) {
+func newBuilder(v *viper.Viper, flags *flag.FlagSet) (*Builder, error) {
 	b := &Builder{
-		viper: viper,
+		viper: v,
 		flags: flags,
 	}
 
@@ -110,7 +110,7 @@ func (rb *Builder) getCephContainerImage() string {
 	return rb.viper.GetString(cephContainerImageFlag)
 }
 
-func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
+func (rb *Builder) FromSource(cl client.Client, logger logr.Logger,
 	eventRecorder events.EventRecorder,
 	source *volsyncv1alpha1.ReplicationSource, privileged bool) (mover.Mover, error) {
 	// Only build if the CR belongs to us
@@ -171,7 +171,7 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 	}
 
 	vh, err := volumehandler.NewVolumeHandler(
-		volumehandler.WithClient(client),
+		volumehandler.WithClient(cl),
 		volumehandler.WithRecorder(eventRecorder),
 		volumehandler.WithOwner(source),
 		volumehandler.FromSource(&volsyncv1alpha1.ReplicationSourceVolumeOptions{
@@ -186,11 +186,11 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 
 	isSource := true
 
-	saHandler := utils.NewSAHandler(client, source, isSource, privileged,
+	saHandler := utils.NewSAHandler(cl, source, isSource, privileged,
 		nil)
 
 	return &Mover{
-		client:            client,
+		client:            cl,
 		logger:            logger.WithValues("method", "Ceph"),
 		eventRecorder:     eventRecorder,
 		owner:             source,
@@ -212,7 +212,7 @@ func (rb *Builder) FromSource(client client.Client, logger logr.Logger,
 }
 
 //nolint:funlen
-func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
+func (rb *Builder) FromDestination(cl client.Client, logger logr.Logger,
 	eventRecorder events.EventRecorder,
 	destination *volsyncv1alpha1.ReplicationDestination, privileged bool) (mover.Mover, error) {
 	// Only build if the CR belongs to us
@@ -269,7 +269,7 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 	}
 
 	vh, err := volumehandler.NewVolumeHandler(
-		volumehandler.WithClient(client),
+		volumehandler.WithClient(cl),
 		volumehandler.WithRecorder(eventRecorder),
 		volumehandler.WithOwner(destination),
 		volumehandler.FromDestination(&volsyncv1alpha1.ReplicationDestinationVolumeOptions{
@@ -284,13 +284,13 @@ func (rb *Builder) FromDestination(client client.Client, logger logr.Logger,
 
 	isSource := false
 
-	saHandler := utils.NewSAHandler(client, destination, isSource, privileged,
+	saHandler := utils.NewSAHandler(cl, destination, isSource, privileged,
 		nil) // No specific SA for ceph mover
 
 	var destPVC = options[optDestinationPVC]
 
 	return &Mover{
-		client:            client,
+		client:            cl,
 		logger:            logger.WithValues("method", "Ceph"),
 		eventRecorder:     eventRecorder,
 		owner:             destination,

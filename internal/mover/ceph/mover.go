@@ -67,11 +67,9 @@ const (
 
 	// Volume name, mount path, and JSON key for
 	// ceph-csi secret
-	csiSecretVolumeName = "ceph-csi-secret"
-	CsiSecretMountPath  = "/etc/ceph-csi-secret"
+	csiSecretVolumeName = "ceph-csi-secret"      //nolint:gosec // G101: volume name, not credentials
+	CsiSecretMountPath  = "/etc/ceph-csi-secret" //nolint:gosec // G101: mount path, not credentials
 	CsiSecretJSONKey    = "credentials.json"
-
-	maxGRPCMessageSize = 8 * 1024 * 1024 // 8MB
 )
 
 // MoverType represents the type of data mover.
@@ -673,7 +671,7 @@ func (m *Mover) ensureJob(
 		utils.SetOwnedByVolSync(job)
 		utils.MarkForCleanup(m.owner, job)
 
-		job.Spec.Template.ObjectMeta.Name = job.Name
+		job.Spec.Template.Name = job.Name
 		utils.AddAllLabels(&job.Spec.Template, m.serviceSelector())
 		utils.SetOwnedByVolSync(&job.Spec.Template) // ensure the Job's Pod gets the ownership label
 		backoffLimit := int32(2)

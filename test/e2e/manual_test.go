@@ -18,7 +18,6 @@ package e2e
 
 import (
 	"context"
-	"time"
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -124,12 +123,10 @@ func manualDirectTest(drv driverConfig) {
 					waitForManualSync(
 						ctx, rsName,
 						manualID1,
-						5*time.Minute,
 					)
 					waitForRDManualSync(
 						ctx, rdName,
 						manualID1,
-						5*time.Minute,
 					)
 				},
 			)
@@ -220,12 +217,10 @@ func manualDirectTest(drv driverConfig) {
 					waitForManualSync(
 						ctx, rsName,
 						manualID2,
-						5*time.Minute,
 					)
 					waitForRDManualSync(
 						ctx, rdName,
 						manualID2,
-						5*time.Minute,
 					)
 				},
 			)
@@ -322,12 +317,10 @@ func manualSnapshotTest(drv driverConfig) {
 					waitForManualSync(
 						ctx, rsName,
 						manualID1,
-						5*time.Minute,
 					)
 					waitForRDManualSync(
 						ctx, rdName,
 						manualID1,
-						5*time.Minute,
 					)
 				},
 			)
@@ -362,12 +355,10 @@ func manualSnapshotTest(drv driverConfig) {
 					waitForManualSync(
 						ctx, rsName,
 						manualID2,
-						5*time.Minute,
 					)
 					waitForRDManualSync(
 						ctx, rdName,
 						manualID2,
-						5*time.Minute,
 					)
 				},
 			)

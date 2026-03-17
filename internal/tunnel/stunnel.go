@@ -37,11 +37,6 @@ const (
 	stunnelLog  = "/tmp/stunnel.log"
 	stunnelBin  = "stunnel"
 
-	defaultDestPort   = "8000"
-	defaultServerPort = "8080"
-	defaultRsyncPort  = "8873"
-	defaultDaemonPort = "8874"
-
 	// sourceGRPCLocalPort is the local listen port on
 	// source for the gRPC tunnel client endpoint.
 	sourceGRPCLocalPort = "8001"
@@ -156,7 +151,7 @@ func (s *Stunnel) SourceGRPCAddress() string {
 }
 
 func (s *Stunnel) generateConfig() error {
-	if err := os.MkdirAll(stunnelDir, 0755); err != nil {
+	if err := os.MkdirAll(stunnelDir, 0750); err != nil {
 		return fmt.Errorf(
 			"failed to create stunnel dir: %w", err,
 		)
@@ -350,7 +345,7 @@ func (s *Stunnel) checkPort(addr string) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close()
 	return true
 }
 

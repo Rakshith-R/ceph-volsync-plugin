@@ -62,7 +62,7 @@ func (r *RsyncDaemon) Start() error {
 		"Starting rsync daemon", "port", r.port,
 	)
 
-	r.cmd = exec.Command(
+	r.cmd = exec.Command( //nolint:gosec // G204: command args are not user-controlled
 		rsyncBin,
 		"--daemon",
 		"--config="+rsyncdConf,

@@ -68,32 +68,41 @@ type SourceWorker struct {
 
 // NewSourceWorker creates a new RBD source worker.
 func NewSourceWorker(
-	logger logr.Logger, config SourceConfig,
+	logger logr.Logger, cfg SourceConfig,
 ) *SourceWorker {
 	return &SourceWorker{
 		logger: logger.WithName("rbd-source-worker"),
-		config: config,
+		config: cfg,
 	}
+}
+
+// sourceContext holds resolved state needed for the
+// sync operation.
+type sourceContext struct {
+	mons            string
+	user            string
+	key             string
+	radosNS         string
+	volumeID        *volid.CSIIdentifier
+	parentPoolID    int64
+	parentNS        string
+	parentImageName string
+	parentPoolName  string
+	fromSnapID      uint64
+	targetSnapID    uint64
 }
 
 // Run starts the RBD source worker.
 //
-//nolint:cyclop,funlen // sequential orchestration steps
-func (w *SourceWorker) Run(ctx context.Context) (err error) {
+//nolint:funlen // sequential orchestration steps
+func (w *SourceWorker) Run(
+	ctx context.Context,
+) (err error) {
 	w.logger.Info("Starting RBD source worker")
 
-	conn, err := grpc.NewClient(
-		w.config.DestinationAddress,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallSendMsgSize(maxGRPCMessageSize),
-		),
-	)
+	conn, err := w.connectToDestination(ctx)
 	if err != nil {
-		return fmt.Errorf(
-			"failed to create gRPC client for %s: %w",
-			w.config.DestinationAddress, err,
-		)
+		return err
 	}
 	defer func() {
 		if cerr := conn.Close(); cerr != nil && err == nil {
@@ -104,247 +113,20 @@ func (w *SourceWorker) Run(ctx context.Context) (err error) {
 		}
 	}()
 
-	// Verify connection with GetVersion
-	versionClient := versionv1.NewVersionServiceClient(conn)
-	callCtx, cancel := context.WithTimeout(
-		ctx, sourceConnectionTimeout,
-	)
-	defer cancel()
-
-	resp, err := versionClient.GetVersion(
-		callCtx, &versionv1.GetVersionRequest{},
-	)
+	sc, cc, err := w.resolveSourceConfig()
 	if err != nil {
-		return fmt.Errorf(
-			"failed to get version from destination %s: %w",
-			w.config.DestinationAddress, err,
-		)
-	}
-	w.logger.Info(
-		"Connected to destination",
-		"version", resp.GetVersion(),
-	)
-
-	volumeHandle := os.Getenv("VOLUME_HANDLE")
-	baseSnapshotHandle := os.Getenv("BASE_SNAPSHOT_HANDLE")
-	targetSnapshotHandle := os.Getenv("TARGET_SNAPSHOT_HANDLE")
-
-	// Parse handles
-	volumeID := &volid.CSIIdentifier{}
-	if err := volumeID.DecomposeCSIID(volumeHandle); err != nil {
-		return fmt.Errorf(
-			"failed to decompose VOLUME_HANDLE: %w", err,
-		)
-	}
-
-	// Read credentials
-	creds, err := readMountedRBDCredentials()
-	if err != nil {
-		return fmt.Errorf(
-			"failed to get ceph credentials: %w", err,
-		)
-	}
-
-	// Read the actual key from the key file
-	userKey, err := os.ReadFile(creds.KeyFile)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to read key file %s: %w",
-			creds.KeyFile, err,
-		)
-	}
-	user := creds.ID
-	key := string(userKey)
-
-	// Get monitors
-	mons, err := config.Mons(
-		config.CsiConfigFile, volumeID.ClusterID,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to get mons: %w", err)
-	}
-
-	// Get RBD RADOS namespace
-	radosNS, err := config.GetRBDRadosNamespace(
-		config.CsiConfigFile, volumeID.ClusterID,
-	)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to get RBD rados namespace: %w", err,
-		)
-	}
-
-	cc, err := ceph.NewClusterConnection(mons, user, key)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to connect to cluster: %w", err,
-		)
+		return err
 	}
 	defer cc.Destroy()
 
-	var (
-		parentPoolID       int64
-		parentNS           string
-		parentImageName    string
-		parentPoolName     string
-		fromSnapID         uint64
-		targetParentSnapID uint64
-	)
-
-	// If no snapshot handles, diff iterate yields all
-	// allocated blocks from the volume image.
-	if baseSnapshotHandle == "" &&
-		targetSnapshotHandle == "" {
-		parentPoolID = volumeID.LocationID
-		parentNS = radosNS
-		parentImageName = "csi-vol-" + volumeID.ObjectUUID
-		parentPoolName, err = ceph.PoolNameByID(
-			cc, volumeID.LocationID,
-		)
-		if err != nil {
-			return fmt.Errorf(
-				"failed to resolve volume pool: %w", err,
-			)
-		}
-
-		w.logger.Info(
-			"Using full diff (no snapshots)",
-			"image", parentImageName,
-		)
-	} else {
-		targetSnapID := &volid.CSIIdentifier{}
-		if err := targetSnapID.DecomposeCSIID(
-			targetSnapshotHandle,
-		); err != nil {
-			return fmt.Errorf(
-				"failed to decompose "+
-					"TARGET_SNAPSHOT_HANDLE: %w",
-				err,
-			)
-		}
-
-		var baseSnapID *volid.CSIIdentifier
-		if baseSnapshotHandle != "" {
-			baseSnapID = &volid.CSIIdentifier{}
-			if err := baseSnapID.DecomposeCSIID(
-				baseSnapshotHandle,
-			); err != nil {
-				return fmt.Errorf(
-					"failed to decompose "+
-						"BASE_SNAPSHOT_HANDLE: %w",
-					err,
-				)
-			}
-		}
-
-		// Use the target snapshot to find the parent
-		// image. The target snapshot's GetParent()
-		// reliably identifies the source RBD image
-		// regardless of how it was cloned.
-		targetSnapName := "csi-snap-" +
-			targetSnapID.ObjectUUID
-
-		targetPoolName, err := ceph.PoolNameByID(
-			cc, targetSnapID.LocationID,
-		)
-		if err != nil {
-			return fmt.Errorf(
-				"failed to resolve target pool: %w",
-				err,
-			)
-		}
-
-		targetImageName := "csi-snap-" +
-			targetSnapID.ObjectUUID
-		targetSpec := ceph.RBDImageSpec(
-			targetPoolName, radosNS, targetImageName,
-		)
-		targetImage, err := ceph.NewImage(
-			cc, targetSpec,
-		)
-		if err != nil {
-			return fmt.Errorf(
-				"failed to open target image %s: %w",
-				targetSpec, err,
-			)
-		}
-
-		parentInfo, err := targetImage.GetParent()
-		targetImage.Close()
-		if err != nil {
-			return fmt.Errorf(
-				"failed to get parent from "+
-					"target snap: %w",
-				err,
-			)
-		}
-		if parentInfo == nil {
-			return fmt.Errorf(
-				"target snapshot has no parent",
-			)
-		}
-
-		parentPoolName = parentInfo.Image.PoolName
-		parentNS = parentInfo.Image.PoolNamespace
-		parentImageName = parentInfo.Image.ImageName
-		parentPoolID = int64(parentInfo.Image.PoolID)
-		targetParentSnapID = parentInfo.Snap.ID
-
-		// Determine fromSnapID for incremental diff
-		if baseSnapID != nil {
-			baseSnapName := "csi-snap-" +
-				baseSnapID.ObjectUUID
-
-			baseSpec := ceph.RBDImageSpec(
-				parentPoolName, parentNS, baseSnapName,
-			)
-			baseImage, err := ceph.NewImage(
-				cc, baseSpec,
-			)
-			if err != nil {
-				return fmt.Errorf(
-					"failed to open base "+
-						"image %s: %w",
-					baseSpec, err,
-				)
-			}
-
-			bParentInfo, err := baseImage.GetParent()
-			if err != nil {
-				baseImage.Close()
-				return fmt.Errorf(
-					"failed to get parent from "+
-						"base snap: %w",
-					err,
-				)
-			}
-
-			if bParentInfo == nil {
-				baseImage.Close()
-				return fmt.Errorf(
-					"base snapshot has no parent",
-				)
-			}
-			fromSnapID = bParentInfo.Snap.ID
-			baseImage.Close()
-
-			w.logger.Info(
-				"Using incremental diff",
-				"baseSnap", baseSnapName,
-				"targetSnap", targetSnapName,
-				"fromSnapID", fromSnapID,
-			)
-		} else {
-			w.logger.Info(
-				"Using full diff (no base snapshot)",
-				"targetSnap", targetSnapName,
-			)
-		}
+	if err := w.resolveParentImage(cc, sc); err != nil {
+		return err
 	}
 
 	// Get volume size from parent image
 	parentSpec := ceph.RBDImageSpec(
-		parentPoolName, parentNS, parentImageName,
+		sc.parentPoolName, sc.parentNS,
+		sc.parentImageName,
 	)
 	parentImage, err := ceph.NewImage(cc, parentSpec)
 	if err != nil {
@@ -356,25 +138,27 @@ func (w *SourceWorker) Run(ctx context.Context) (err error) {
 
 	volSize, err := parentImage.GetSize()
 	if err != nil {
-		parentImage.Close()
+		_ = parentImage.Close()
 		return fmt.Errorf(
 			"failed to get volume size: %w", err,
 		)
 	}
-	parentImage.Close()
+	_ = parentImage.Close()
 
 	// Create RBD block diff iterator
 	iter, err := ceph.NewRBDBlockDiffIterator(
-		mons, user, key,
-		parentPoolID, parentNS, parentImageName,
-		fromSnapID, targetParentSnapID, volSize,
+		sc.mons, sc.user, sc.key,
+		sc.parentPoolID, sc.parentNS,
+		sc.parentImageName,
+		sc.fromSnapID, sc.targetSnapID, volSize,
 	)
 	if err != nil {
 		return fmt.Errorf(
-			"failed to create block diff iterator: %w", err,
+			"failed to create block diff iterator: %w",
+			err,
 		)
 	}
-	defer iter.Close()
+	defer func() { _ = iter.Close() }()
 
 	// Open block device for reading
 	device, err := os.Open(devicePath)
@@ -383,7 +167,7 @@ func (w *SourceWorker) Run(ctx context.Context) (err error) {
 			"failed to open %s: %w", devicePath, err,
 		)
 	}
-	defer device.Close()
+	defer func() { _ = device.Close() }()
 
 	// Create gRPC data client and sync stream
 	dataClient := apiv1.NewDataServiceClient(conn)
@@ -394,7 +178,339 @@ func (w *SourceWorker) Run(ctx context.Context) (err error) {
 		)
 	}
 
-	// Iterate over changed blocks and send them
+	if err := w.streamBlocks(
+		iter, device, stream,
+	); err != nil {
+		return err
+	}
+
+	return w.commitAndSignalDone(ctx, conn, stream)
+}
+
+// connectToDestination establishes a gRPC connection and
+// verifies it with a GetVersion call.
+func (w *SourceWorker) connectToDestination(
+	ctx context.Context,
+) (*grpc.ClientConn, error) {
+	conn, err := grpc.NewClient(
+		w.config.DestinationAddress,
+		grpc.WithTransportCredentials(
+			insecure.NewCredentials(),
+		),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(maxGRPCMessageSize),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to create gRPC client for %s: %w",
+			w.config.DestinationAddress, err,
+		)
+	}
+
+	versionClient := versionv1.NewVersionServiceClient(
+		conn,
+	)
+	callCtx, cancel := context.WithTimeout(
+		ctx, sourceConnectionTimeout,
+	)
+	defer cancel()
+
+	resp, err := versionClient.GetVersion(
+		callCtx, &versionv1.GetVersionRequest{},
+	)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf(
+			"failed to get version from "+
+				"destination %s: %w",
+			w.config.DestinationAddress, err,
+		)
+	}
+	w.logger.Info(
+		"Connected to destination",
+		"version", resp.GetVersion(),
+	)
+
+	return conn, nil
+}
+
+// resolveSourceConfig reads environment variables,
+// credentials, and Ceph cluster configuration to populate
+// a sourceContext. Returns the sourceContext and an active
+// ClusterConnection that the caller must destroy.
+func (w *SourceWorker) resolveSourceConfig() (
+	*sourceContext, *ceph.ClusterConnection, error,
+) {
+	volumeHandle := os.Getenv("VOLUME_HANDLE")
+
+	volumeID := &volid.CSIIdentifier{}
+	if err := volumeID.DecomposeCSIID(
+		volumeHandle,
+	); err != nil {
+		return nil, nil, fmt.Errorf(
+			"failed to decompose VOLUME_HANDLE: %w", err,
+		)
+	}
+
+	creds, err := readMountedRBDCredentials()
+	if err != nil {
+		return nil, nil, fmt.Errorf(
+			"failed to get ceph credentials: %w", err,
+		)
+	}
+
+	userKey, err := os.ReadFile(creds.KeyFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf(
+			"failed to read key file %s: %w",
+			creds.KeyFile, err,
+		)
+	}
+
+	mons, err := config.Mons(
+		config.CsiConfigFile, volumeID.ClusterID,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf(
+			"failed to get mons: %w", err,
+		)
+	}
+
+	radosNS, err := config.GetRBDRadosNamespace(
+		config.CsiConfigFile, volumeID.ClusterID,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf(
+			"failed to get RBD rados namespace: %w", err,
+		)
+	}
+
+	user := creds.ID
+	key := string(userKey)
+
+	cc, err := ceph.NewClusterConnection(mons, user, key)
+	if err != nil {
+		return nil, nil, fmt.Errorf(
+			"failed to connect to cluster: %w", err,
+		)
+	}
+
+	sc := &sourceContext{
+		mons:     mons,
+		user:     user,
+		key:      key,
+		radosNS:  radosNS,
+		volumeID: volumeID,
+	}
+
+	return sc, cc, nil
+}
+
+// resolveParentImage determines the parent image, pool,
+// namespace, and snapshot IDs based on snapshot handles.
+func (w *SourceWorker) resolveParentImage(
+	cc *ceph.ClusterConnection, sc *sourceContext,
+) error {
+	baseSnapshotHandle := os.Getenv(
+		"BASE_SNAPSHOT_HANDLE",
+	)
+	targetSnapshotHandle := os.Getenv(
+		"TARGET_SNAPSHOT_HANDLE",
+	)
+
+	// If no snapshot handles, diff iterate yields all
+	// allocated blocks from the volume image.
+	if baseSnapshotHandle == "" &&
+		targetSnapshotHandle == "" {
+		return w.resolveFullDiffFromVolume(cc, sc)
+	}
+
+	return w.resolveSnapshotDiff(
+		cc, sc, baseSnapshotHandle,
+		targetSnapshotHandle,
+	)
+}
+
+// resolveFullDiffFromVolume sets up sourceContext for a
+// full diff (no snapshots) from the volume image.
+func (w *SourceWorker) resolveFullDiffFromVolume(
+	cc *ceph.ClusterConnection, sc *sourceContext,
+) error {
+	sc.parentPoolID = sc.volumeID.LocationID
+	sc.parentNS = sc.radosNS
+	sc.parentImageName = "csi-vol-" +
+		sc.volumeID.ObjectUUID
+
+	poolName, err := ceph.PoolNameByID(
+		cc, sc.volumeID.LocationID,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to resolve volume pool: %w", err,
+		)
+	}
+	sc.parentPoolName = poolName
+
+	w.logger.Info(
+		"Using full diff (no snapshots)",
+		"image", sc.parentImageName,
+	)
+
+	return nil
+}
+
+// resolveSnapshotDiff resolves parent image info from
+// target and optional base snapshot handles.
+//
+//nolint:cyclop // snapshot resolution with incremental diff
+func (w *SourceWorker) resolveSnapshotDiff(
+	cc *ceph.ClusterConnection, sc *sourceContext,
+	baseSnapshotHandle, targetSnapshotHandle string,
+) error {
+	targetSnapCSI := &volid.CSIIdentifier{}
+	if err := targetSnapCSI.DecomposeCSIID(
+		targetSnapshotHandle,
+	); err != nil {
+		return fmt.Errorf(
+			"failed to decompose "+
+				"TARGET_SNAPSHOT_HANDLE: %w",
+			err,
+		)
+	}
+
+	var baseSnapCSI *volid.CSIIdentifier
+	if baseSnapshotHandle != "" {
+		baseSnapCSI = &volid.CSIIdentifier{}
+		if err := baseSnapCSI.DecomposeCSIID(
+			baseSnapshotHandle,
+		); err != nil {
+			return fmt.Errorf(
+				"failed to decompose "+
+					"BASE_SNAPSHOT_HANDLE: %w",
+				err,
+			)
+		}
+	}
+
+	// Use the target snapshot to find the parent
+	// image. The target snapshot's GetParent()
+	// reliably identifies the source RBD image
+	// regardless of how it was cloned.
+	targetSnapName := "csi-snap-" +
+		targetSnapCSI.ObjectUUID
+
+	targetPoolName, err := ceph.PoolNameByID(
+		cc, targetSnapCSI.LocationID,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to resolve target pool: %w",
+			err,
+		)
+	}
+
+	targetImageName := "csi-snap-" +
+		targetSnapCSI.ObjectUUID
+	targetSpec := ceph.RBDImageSpec(
+		targetPoolName, sc.radosNS, targetImageName,
+	)
+	targetImage, err := ceph.NewImage(
+		cc, targetSpec,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to open target image %s: %w",
+			targetSpec, err,
+		)
+	}
+
+	parentInfo, err := targetImage.GetParent()
+	_ = targetImage.Close()
+	if err != nil {
+		return fmt.Errorf(
+			"failed to get parent from "+
+				"target snap: %w",
+			err,
+		)
+	}
+	if parentInfo == nil {
+		return fmt.Errorf(
+			"target snapshot has no parent",
+		)
+	}
+
+	sc.parentPoolName = parentInfo.Image.PoolName
+	sc.parentNS = parentInfo.Image.PoolNamespace
+	sc.parentImageName = parentInfo.Image.ImageName
+	sc.parentPoolID = int64(parentInfo.Image.PoolID) //nolint:gosec // G115: pool ID within safe range
+	sc.targetSnapID = parentInfo.Snap.ID
+
+	// Determine fromSnapID for incremental diff
+	if baseSnapCSI != nil {
+		baseSnapName := "csi-snap-" +
+			baseSnapCSI.ObjectUUID
+
+		baseSpec := ceph.RBDImageSpec(
+			sc.parentPoolName, sc.parentNS,
+			baseSnapName,
+		)
+		baseImage, err := ceph.NewImage(
+			cc, baseSpec,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to open base "+
+					"image %s: %w",
+				baseSpec, err,
+			)
+		}
+
+		bParentInfo, err := baseImage.GetParent()
+		if err != nil {
+			_ = baseImage.Close()
+			return fmt.Errorf(
+				"failed to get parent from "+
+					"base snap: %w",
+				err,
+			)
+		}
+
+		if bParentInfo == nil {
+			_ = baseImage.Close()
+			return fmt.Errorf(
+				"base snapshot has no parent",
+			)
+		}
+		sc.fromSnapID = bParentInfo.Snap.ID
+		_ = baseImage.Close()
+
+		w.logger.Info(
+			"Using incremental diff",
+			"baseSnap", baseSnapName,
+			"targetSnap", targetSnapName,
+			"fromSnapID", sc.fromSnapID,
+		)
+	} else {
+		w.logger.Info(
+			"Using full diff (no base snapshot)",
+			"targetSnap", targetSnapName,
+		)
+	}
+
+	return nil
+}
+
+// streamBlocks iterates over changed blocks from the diff
+// iterator, reads data from the device, and sends batched
+// write requests over the gRPC stream.
+func (w *SourceWorker) streamBlocks(
+	iter *ceph.RBDBlockDiffIterator,
+	device *os.File,
+	stream grpc.ClientStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	],
+) error {
 	var accumulatedBlocks []*apiv1.ChangedBlock
 	accumulatedPayloadSize := 0
 
@@ -416,8 +532,8 @@ func (w *SourceWorker) Run(ctx context.Context) (err error) {
 
 		isZero := isAllZero(data)
 		protoBlock := &apiv1.ChangedBlock{
-			Offset: uint64(block.Offset),
-			Length: uint64(block.Len),
+			Offset: uint64(block.Offset), //nolint:gosec // G115: RBD offsets are non-negative
+			Length: uint64(block.Len),    //nolint:gosec // G115: RBD offsets are non-negative
 			IsZero: isZero,
 		}
 
@@ -433,9 +549,11 @@ func (w *SourceWorker) Run(ctx context.Context) (err error) {
 		)
 
 		// Flush at max threshold
-		if accumulatedPayloadSize >= sourceWritePayloadMaxSize {
+		if accumulatedPayloadSize >=
+			sourceWritePayloadMaxSize {
 			if err := sendBlockWrite(
-				stream, devicePath, accumulatedBlocks,
+				stream, devicePath,
+				accumulatedBlocks,
 			); err != nil {
 				return err
 			}
@@ -444,9 +562,11 @@ func (w *SourceWorker) Run(ctx context.Context) (err error) {
 		}
 
 		// Flush at min threshold
-		if accumulatedPayloadSize >= sourceWritePayloadMinSize {
+		if accumulatedPayloadSize >=
+			sourceWritePayloadMinSize {
 			if err := sendBlockWrite(
-				stream, devicePath, accumulatedBlocks,
+				stream, devicePath,
+				accumulatedBlocks,
 			); err != nil {
 				return err
 			}
@@ -464,7 +584,18 @@ func (w *SourceWorker) Run(ctx context.Context) (err error) {
 		}
 	}
 
-	// Send CommitRequest
+	return nil
+}
+
+// commitAndSignalDone sends the commit request on the
+// stream and signals done to the destination.
+func (w *SourceWorker) commitAndSignalDone(
+	ctx context.Context,
+	conn *grpc.ClientConn,
+	stream grpc.ClientStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	],
+) error {
 	if err := stream.Send(&apiv1.SyncRequest{
 		Operation: &apiv1.SyncRequest_Commit{
 			Commit: &apiv1.CommitRequest{
@@ -475,7 +606,8 @@ func (w *SourceWorker) Run(ctx context.Context) (err error) {
 		if err == io.EOF {
 			if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
 				return fmt.Errorf(
-					"destination error during commit: %w",
+					"destination error during "+
+						"commit: %w",
 					recvErr,
 				)
 			}
@@ -565,7 +697,7 @@ func readMountedRBDCredentials() (
 		worker.CsiSecretMountPath,
 		worker.CsiSecretJSONKey,
 	)
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) //nolint:gosec // G304: path is internally constructed
 	if err != nil {
 		return nil, fmt.Errorf(
 			"failed to read %s: %w", path, err,
