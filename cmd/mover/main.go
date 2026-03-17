@@ -221,18 +221,18 @@ func runRBDMover(
 		sourceConfig := rbd.SourceConfig{
 			DestinationAddress: config.DestinationAddress,
 		}
-		worker := rbd.NewSourceWorker(
+		w := rbd.NewSourceWorker(
 			logger, sourceConfig,
 		)
-		return worker.Run(ctx)
+		return w.Run(ctx)
 	case workerTypeDestination:
 		destConfig := rbd.DestinationConfig{
 			ServerPort: config.ServerPort,
 		}
-		worker := rbd.NewDestinationWorker(
+		w := rbd.NewDestinationWorker(
 			logger, destConfig,
 		)
-		return worker.Run(ctx)
+		return w.Run(ctx)
 	default:
 		return fmt.Errorf(
 			"invalid worker type: %s",

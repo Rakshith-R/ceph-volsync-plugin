@@ -110,10 +110,10 @@ type Worker struct {
 }
 
 // NewWorker creates a new source worker
-func NewWorker(logger logr.Logger, config Config) *Worker {
+func NewWorker(logger logr.Logger, cfg Config) *Worker {
 	return &Worker{
 		logger: logger.WithName("source-worker"),
-		config: config,
+		config: cfg,
 	}
 }
 
@@ -141,7 +141,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			w.config.DestinationAddress, err,
 		)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Create version service client
 	versionClient := versionv1.NewVersionServiceClient(conn)
@@ -170,29 +170,38 @@ func (w *Worker) Run(ctx context.Context) error {
 	volumeHandle := os.Getenv(worker.EnvVolumeHandle)
 	if baseSnapshotHandle == "" || targetSnapshotHandle == "" || volumeHandle == "" {
 		w.logger.Info("Snapshot handles not set, using rsync on /data")
-		// just use rsync on /data
-		err := w.rsync()
-		if err != nil {
-			w.logger.Error(err, "rsync failed")
-			return fmt.Errorf("rsync failed: %w", err)
-		}
-
-		// Create done service client and signal completion
-		doneClient := apiv1.NewDoneServiceClient(conn)
-		doneCtx, doneCancel := context.WithTimeout(ctx, rpcTimeout)
-		defer doneCancel()
-
-		_, err = doneClient.Done(doneCtx, &apiv1.DoneRequest{})
-		if err != nil {
-			w.logger.Error(err, "Failed to send Done signal to destination")
-			return fmt.Errorf("failed to send Done signal to destination: %w", err)
-		}
-		w.logger.Info("Successfully sent Done signal to destination")
-		return nil
+		return w.runRsyncFallback(ctx, conn)
 	}
-	//decode
+
+	// decode and run snapdiff-based sync
+	return w.runSnapdiffSync(
+		ctx, conn,
+		baseSnapshotHandle, targetSnapshotHandle, volumeHandle,
+	)
+}
+
+// runRsyncFallback performs a plain rsync and signals completion.
+func (w *Worker) runRsyncFallback(
+	ctx context.Context, conn *grpc.ClientConn,
+) error {
+	err := w.rsync()
+	if err != nil {
+		w.logger.Error(err, "rsync failed")
+		return fmt.Errorf("rsync failed: %w", err)
+	}
+
+	return w.signalDone(ctx, conn)
+}
+
+// runSnapdiffSync decodes snapshot handles, creates a differ,
+// runs stateless sync, and signals completion.
+func (w *Worker) runSnapdiffSync(
+	ctx context.Context, conn *grpc.ClientConn,
+	baseSnapshotHandle, targetSnapshotHandle, volumeHandle string,
+) error {
+	// decode
 	baseSnapID := &volid.CSIIdentifier{}
-	err = baseSnapID.DecomposeCSIID(baseSnapshotHandle)
+	err := baseSnapID.DecomposeCSIID(baseSnapshotHandle)
 	if err != nil {
 		w.logger.Error(err, "Failed to decompose BASE_SNAPSHOT_HANDLE")
 		return fmt.Errorf("failed to decompose BASE_SNAPSHOT_HANDLE: %w", err)
@@ -259,12 +268,18 @@ func (w *Worker) Run(ctx context.Context) error {
 		return fmt.Errorf("stateless sync failed: %w", err)
 	}
 
-	// Signal completion
+	return w.signalDone(ctx, conn)
+}
+
+// signalDone sends the Done RPC to the destination.
+func (w *Worker) signalDone(
+	ctx context.Context, conn *grpc.ClientConn,
+) error {
 	doneClient := apiv1.NewDoneServiceClient(conn)
 	doneCtx, doneCancel := context.WithTimeout(ctx, rpcTimeout)
 	defer doneCancel()
 
-	_, err = doneClient.Done(doneCtx, &apiv1.DoneRequest{})
+	_, err := doneClient.Done(doneCtx, &apiv1.DoneRequest{})
 	if err != nil {
 		w.logger.Error(err, "Failed to send Done signal to destination")
 		return fmt.Errorf("failed to send Done signal to destination: %w", err)
@@ -344,7 +359,7 @@ func (w *Worker) rsync() error {
 func (w *Worker) createFileListAndSync(rsyncTarget string) (int, error) {
 	// Find all files/dirs at root of pvc, prepend / to each
 	// BusyBox find doesn't support -printf, so use find + sed
-	findCmd := exec.Command(
+	findCmd := exec.Command( //nolint:gosec // G204: command args constructed internally
 		"sh", "-c",
 		fmt.Sprintf(
 			"find %s -mindepth 1 -maxdepth 1 | sed 's|^%s|/|'",
@@ -358,7 +373,7 @@ func (w *Worker) createFileListAndSync(rsyncTarget string) (int, error) {
 	}
 
 	// Write file list to temp file
-	if err := os.WriteFile(fileListPath, output, 0644); err != nil {
+	if err := os.WriteFile(fileListPath, output, 0600); err != nil {
 		return 1, fmt.Errorf("failed to write file list: %w", err)
 	}
 
@@ -389,7 +404,7 @@ func (w *Worker) createFileListAndSync(rsyncTarget string) (int, error) {
 		"args", strings.Join(rsyncArgs, " "),
 	)
 
-	cmd := exec.Command("rsync", rsyncArgs...)
+	cmd := exec.Command("rsync", rsyncArgs...) //nolint:gosec // G204: command args constructed internally
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -424,7 +439,7 @@ func (w *Worker) syncForDeletion(rsyncTarget string) int {
 		"args", strings.Join(rsyncArgs, " "),
 	)
 
-	cmd := exec.Command("rsync", rsyncArgs...)
+	cmd := exec.Command("rsync", rsyncArgs...) //nolint:gosec // G204: command args constructed internally
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -604,7 +619,7 @@ func (w *Worker) processDirectorySnapdiff(
 	if err != nil {
 		return fmt.Errorf("failed to create snap diff iterator for %s: %w", dirPath, err)
 	}
-	defer iterator.Close()
+	defer func() { _ = iterator.Close() }()
 
 	for {
 		entry, err := iterator.Read()
@@ -709,20 +724,22 @@ func (w *Worker) processFile(ctx context.Context, state *syncState, entryPath st
 // streamBlockDiff uses CephFS block diff to send only changed blocks.
 // It sends all write requests for the file then sends a commit, using
 // the single shared stream from the sync state.
+//
+//nolint:unparam // ctx reserved for future use
 func (w *Worker) streamBlockDiff(ctx context.Context, state *syncState, relPath string) error {
 	blockIterator, err := state.differ.NewBlockDiffIterator(relPath)
 	if err != nil {
 		return fmt.Errorf("failed to create block diff iterator: %w", err)
 	}
-	defer blockIterator.Close()
+	defer func() { _ = blockIterator.Close() }()
 
 	// Open source file to read block data
 	fullPath := filepath.Join(sourceDir, relPath)
-	file, err := os.Open(fullPath)
+	file, err := os.Open(fullPath) //nolint:gosec // G304: path constructed from validated input
 	if err != nil {
 		return fmt.Errorf("failed to open source file %s: %w", fullPath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Accumulator for batching blocks across iterator reads
 	var accumulatedBlocks []*apiv1.ChangedBlock
@@ -738,7 +755,7 @@ func (w *Worker) streamBlockDiff(ctx context.Context, state *syncState, relPath 
 		for _, block := range changedBlocks.ChangedBlocks {
 			// Read block data from file at offset
 			data := make([]byte, block.Len)
-			n, err := file.ReadAt(data, int64(block.Offset))
+			n, err := file.ReadAt(data, int64(block.Offset)) //nolint:gosec // G115: value within safe range
 			if err != nil && err != io.EOF {
 				return fmt.Errorf("failed to read block at offset %d: %w", block.Offset, err)
 			}
@@ -932,10 +949,10 @@ func (w *Worker) rsyncBatch(paths []string, target string, includeContent bool) 
 		return fmt.Errorf("failed to create temp file for rsync batch: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	for _, p := range paths {
-		fmt.Fprintln(tmpFile, p)
+		_, _ = fmt.Fprintln(tmpFile, p)
 	}
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close rsync batch temp file: %w", err)
@@ -955,7 +972,7 @@ func (w *Worker) rsyncConvergence(state *syncState) error {
 		sourceDir + "/",
 		state.rsyncTarget,
 	}
-	cmd := exec.Command("rsync", rsyncDirArgs...)
+	cmd := exec.Command("rsync", rsyncDirArgs...) //nolint:gosec // G204: command args constructed internally
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -997,7 +1014,7 @@ func (w *Worker) rsyncFromList(listPath, target string, includeContent bool) err
 		}
 	}
 
-	cmd := exec.Command("rsync", rsyncArgs...)
+	cmd := exec.Command("rsync", rsyncArgs...) //nolint:gosec // G204: command args constructed internally
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -1018,7 +1035,7 @@ func readMountedCephCredentials() (
 		worker.CsiSecretMountPath,
 		worker.CsiSecretJSONKey,
 	)
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) //nolint:gosec // G304: path is internally constructed
 	if err != nil {
 		return nil, fmt.Errorf(
 			"failed to read %s: %w", path, err,

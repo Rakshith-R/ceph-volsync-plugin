@@ -145,7 +145,7 @@ func (s *RBDDataServer) writeBlocks(
 		if block.IsZero {
 			zeros := make([]byte, block.Length)
 			if _, err := file.WriteAt(
-				zeros, int64(block.Offset),
+				zeros, int64(block.Offset), //nolint:gosec // G115: value within safe range
 			); err != nil {
 				s.logger.Error(
 					err, "Failed to write zeros",
@@ -165,7 +165,7 @@ func (s *RBDDataServer) writeBlocks(
 			)
 		} else {
 			if _, err := file.WriteAt(
-				block.Data, int64(block.Offset),
+				block.Data, int64(block.Offset), //nolint:gosec // G115: value within safe range
 			); err != nil {
 				s.logger.Error(
 					err, "Failed to write data",

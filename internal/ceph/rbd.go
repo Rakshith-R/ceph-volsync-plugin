@@ -237,8 +237,8 @@ func NewRBDBlockDiffIterator(
 			_ interface{},
 		) int {
 			blocksChan <- ChangeBlock{
-				Offset: int64(offset),
-				Len:    int64(length),
+				Offset: int64(offset), //nolint:gosec // G115: RBD offsets are within safe range
+				Len:    int64(length), //nolint:gosec // G115: RBD lengths are within safe range
 			}
 			return 0
 		},

@@ -103,13 +103,13 @@ func (s *DataServer) Sync(
 				}
 
 				dir := filepath.Dir(fullPath)
-				if err := os.MkdirAll(dir, 0755); err != nil {
+				if err := os.MkdirAll(dir, 0755); err != nil { //nolint:gosec // G301: rsync daemon needs world-readable dirs
 					return fmt.Errorf(
 						"failed to create parent directory %s: %w", dir, err,
 					)
 				}
 
-				file, err = os.OpenFile(fullPath, os.O_RDWR|os.O_CREATE, 0644)
+				file, err = os.OpenFile(fullPath, os.O_RDWR|os.O_CREATE, 0644) //nolint:gosec // G304: path constructed from validated input
 				if err != nil {
 					return fmt.Errorf("failed to open file %s: %w", fullPath, err)
 				}
@@ -163,7 +163,7 @@ func (s *DataServer) writeBlocks(
 	// Calculate the maximum file size needed based on all blocks
 	var maxSize int64
 	for _, block := range req.Blocks {
-		endOffset := int64(block.Offset + block.Length)
+		endOffset := int64(block.Offset + block.Length) //nolint:gosec // G115: value within safe range
 		if endOffset > maxSize {
 			maxSize = endOffset
 		}
@@ -194,7 +194,7 @@ func (s *DataServer) writeBlocks(
 
 	// Process each block
 	for i, block := range req.Blocks {
-		if _, err := file.Seek(int64(block.Offset), 0); err != nil {
+		if _, err := file.Seek(int64(block.Offset), 0); err != nil { //nolint:gosec // G115: value within safe range
 			s.logger.Error(err, "Failed to seek",
 				"path", fullPath, "offset", block.Offset, "block_index", i,
 			)

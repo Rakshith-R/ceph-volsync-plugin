@@ -201,8 +201,8 @@ func (cp *ConnPool) gc() {
 func (cp *ConnPool) generateUniqueKey(
 	monitors, user, keyfile string,
 ) (string, error) {
-	//#nosec:G304, file inclusion via variable.
-	key, err := os.ReadFile(keyfile)
+	// #nosec:G304, file inclusion via variable.
+	key, err := os.ReadFile(keyfile) //nolint:gosec // file inclusion via variable
 	if err != nil {
 		return "", fmt.Errorf(
 			"could not open keyfile %s: %w",
