@@ -79,7 +79,7 @@ func NewSourceWorker(
 // Run starts the RBD source worker.
 //
 //nolint:cyclop,funlen // sequential orchestration steps
-func (w *SourceWorker) Run(ctx context.Context) error {
+func (w *SourceWorker) Run(ctx context.Context) (err error) {
 	w.logger.Info("Starting RBD source worker")
 
 	conn, err := grpc.NewClient(
@@ -95,7 +95,14 @@ func (w *SourceWorker) Run(ctx context.Context) error {
 			w.config.DestinationAddress, err,
 		)
 	}
-	defer conn.Close()
+	defer func() {
+		if cerr := conn.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf(
+				"failed to close gRPC connection: %w",
+				cerr,
+			)
+		}
+	}()
 
 	// Verify connection with GetVersion
 	versionClient := versionv1.NewVersionServiceClient(conn)

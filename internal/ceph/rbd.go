@@ -213,7 +213,7 @@ func NewRBDBlockDiffIterator(
 	}
 	if targetSnapID != 0 {
 		if err := image.SetSnapByID(targetSnapID); err != nil {
-			image.Close()
+			_ = image.Close()
 			conn.Destroy()
 			return nil, fmt.Errorf(
 				"failed to set snap context to %d: %w",

@@ -35,8 +35,6 @@ var _ = Describe(
 	"Schedule Replication",
 	func() {
 		for _, drv := range drivers {
-			drv := drv
-
 			scheduleSnapshotTest(drv)
 			scheduleDirectTest(drv)
 		}
