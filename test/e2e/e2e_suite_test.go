@@ -30,8 +30,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/RamenDR/ceph-volsync-plugin/test/utils"
 )
 
 var (
@@ -96,35 +94,37 @@ var _ = BeforeSuite(func() {
 		kubernetes.NewForConfig(cfg)
 	Expect(err).NotTo(HaveOccurred())
 
-	if !skipCertManagerInstall {
-		By("checking if cert manager is installed already")
-		isCertManagerAlreadyInstalled =
-			utils.IsCertManagerCRDsInstalled()
-		if !isCertManagerAlreadyInstalled {
-			_, _ = fmt.Fprintf(
-				GinkgoWriter,
-				"Installing CertManager...\n",
-			)
-			Expect(
-				utils.InstallCertManager(),
-			).To(Succeed(),
-				"Failed to install CertManager",
-			)
-		} else {
-			_, _ = fmt.Fprintf(
-				GinkgoWriter,
-				"WARNING: CertManager is already"+
-					" installed. Skipping"+
-					" installation...\n",
-			)
-		}
-	}
+	// TODO: uncomment if cert manager is required for future tests.
+	// if !skipCertManagerInstall {
+	// 	By("checking if cert manager is installed already")
+	// 	isCertManagerAlreadyInstalled =
+	// 		utils.IsCertManagerCRDsInstalled()
+	// 	if !isCertManagerAlreadyInstalled {
+	// 		_, _ = fmt.Fprintf(
+	// 			GinkgoWriter,
+	// 			"Installing CertManager...\n",
+	// 		)
+	// 		Expect(
+	// 			utils.InstallCertManager(),
+	// 		).To(Succeed(),
+	// 			"Failed to install CertManager",
+	// 		)
+	// 	} else {
+	// 		_, _ = fmt.Fprintf(
+	// 			GinkgoWriter,
+	// 			"WARNING: CertManager is already"+
+	// 				" installed. Skipping"+
+	// 				" installation...\n",
+	// 		)
+	// 	}
+	// }
 })
 
 var _ = AfterSuite(func() {
+	// TODO: uncomment if cert manager is required for future tests.
 	// Teardown CertManager after the suite if not skipped and if it was not already installed
-	if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
-		utils.UninstallCertManager()
-	}
+	// if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
+	// 	_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
+	// 	utils.UninstallCertManager()
+	// }
 })
