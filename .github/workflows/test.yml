@@ -105,11 +105,6 @@ jobs:
           make undeploy
           make uninstall
 
-      - name: Setup tmate session on failure
-        if: failure()
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 15
-
       - name: Collect logs on failure
         if: failure()
         run: |
