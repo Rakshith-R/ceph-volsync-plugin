@@ -1031,57 +1031,150 @@ func writeDataToPVC(
 		Delete(ctx, podName, metav1.DeleteOptions{})
 }
 
-// getDataFingerprint runs a pod that computes a
-// deterministic fingerprint of the data on a PVC
-// and returns the output as a string.
-func getDataFingerprint(
+// compareDataInPod creates a single pod that mounts
+// both PVCs and runs a direct comparison command.
+// For block devices it uses cmp; for filesystems it
+// uses diff -r. The test fails with diagnostic output
+// if data does not match.
+func compareDataInPod(
 	ctx context.Context,
-	pvcName string,
+	podName, srcPVC, dstPVC string,
 	drv driverConfig,
-) string {
-	podName := "fp-" + pvcName
+) {
+	By("creating comparison pod " + podName)
 
 	isBlock := drv.volumeMode != nil &&
 		*drv.volumeMode == corev1.PersistentVolumeBlock
 
 	var command string
-
 	if isBlock {
-		command = "md5sum /dev/block"
+		command = "cmp /dev/src-block /dev/dst-block"
 	} else {
-		command = "find /data -not -path /data" +
-			" -printf '%p %s %y\\n' | sort" +
-			" && find /data -type f | sort" +
-			" | xargs md5sum"
+		command = "diff -r /src /dst"
 	}
 
-	runPodWithPVC(ctx, podName, pvcName, drv, command)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:  "compare",
+					Image: "busybox",
+					Command: []string{
+						"/bin/sh", "-c", command,
+					},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "src-vol",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: srcPVC,
+							ReadOnly:  true,
+						},
+					},
+				},
+				{
+					Name: "dst-vol",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: dstPVC,
+							ReadOnly:  true,
+						},
+					},
+				},
+			},
+		},
+	}
 
-	By("capturing logs from " + podName)
+	if isBlock {
+		pod.Spec.Containers[0].VolumeDevices =
+			[]corev1.VolumeDevice{
+				{
+					Name:       "src-vol",
+					DevicePath: "/dev/src-block",
+				},
+				{
+					Name:       "dst-vol",
+					DevicePath: "/dev/dst-block",
+				},
+			}
+	} else {
+		pod.Spec.Containers[0].VolumeMounts =
+			[]corev1.VolumeMount{
+				{
+					Name:      "src-vol",
+					MountPath: "/src",
+					ReadOnly:  true,
+				},
+				{
+					Name:      "dst-vol",
+					MountPath: "/dst",
+					ReadOnly:  true,
+				},
+			}
+	}
 
-	cmd := exec.Command(
-		"kubectl", "logs",
-		podName, "-n", namespace,
-	)
-	output, err := utils.Run(cmd)
-	Expect(err).NotTo(
-		HaveOccurred(),
-		"Failed to get logs from "+podName,
-	)
+	_, err := k8sClientSet.CoreV1().
+		Pods(namespace).
+		Create(ctx, pod, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
 
-	By("deleting fingerprint pod " + podName)
+	By("waiting for comparison pod " + podName)
+
+	var phase corev1.PodPhase
+
+	Eventually(func(g Gomega) {
+		got, err := k8sClientSet.CoreV1().
+			Pods(namespace).
+			Get(ctx, podName, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred())
+		phase = got.Status.Phase
+		g.Expect(phase).To(
+			SatisfyAny(
+				Equal(corev1.PodSucceeded),
+				Equal(corev1.PodFailed),
+			),
+		)
+	}).WithTimeout(
+		2 * time.Minute,
+	).Should(Succeed())
+
+	if phase == corev1.PodFailed {
+		cmd := exec.Command(
+			"kubectl", "logs",
+			podName, "-n", namespace,
+		)
+		output, _ := utils.Run(cmd)
+
+		_ = k8sClientSet.CoreV1().
+			Pods(namespace).
+			Delete(
+				ctx, podName,
+				metav1.DeleteOptions{},
+			)
+
+		Fail("data mismatch between source" +
+			" and restored destination:\n" +
+			output)
+	}
+
+	By("deleting comparison pod " + podName)
 
 	_ = k8sClientSet.CoreV1().
 		Pods(namespace).
 		Delete(ctx, podName, metav1.DeleteOptions{})
-
-	return output
 }
 
 // validateSyncedData verifies that the data on
 // the destination matches the source by restoring
 // a snapshot to a temporary PVC and comparing
-// fingerprints.
+// both PVCs directly in a single pod.
 func validateSyncedData(
 	ctx context.Context,
 	srcPVC, destPVC string,
@@ -1207,22 +1300,11 @@ func validateSyncedData(
 		2 * time.Minute,
 	).Should(Succeed())
 
-	By("computing source fingerprint")
+	By("comparing source and destination data")
 
-	srcFP := getDataFingerprint(
-		ctx, srcPVC, drv,
-	)
-
-	By("computing destination fingerprint")
-
-	destFP := getDataFingerprint(
-		ctx, tempPVC, drv,
-	)
-
-	Expect(destFP).To(
-		Equal(srcFP),
-		"data mismatch between source"+
-			" and restored destination",
+	compareDataInPod(
+		ctx, snapPrefix+"-compare",
+		srcPVC, tempPVC, drv,
 	)
 
 	By("cleaning up temp PVC " + tempPVC)
