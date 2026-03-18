@@ -16,15 +16,7 @@ RUN echo ${CEPH_VERSION} \
 
 FROM updated_base AS builder
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 ARG GOLANG_VERSION=1.25.8
-=======
-ARG GOLANG_VERSION=1.25.6
->>>>>>> 8d3a515 (optimize mover build: extract vars to build.env)
-=======
-ARG GOLANG_VERSION=1.25.8
->>>>>>> bf45e46 (fix lint errors)
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -50,21 +42,14 @@ COPY go.mod go.sum ./
 # so that we don't need to re-download as much
 # and so that source changes don't invalidate
 # our downloaded layer
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
 # Copy the go source
 COPY cmd/mover/main.go cmd/mover/main.go
 COPY internal/ internal/
 
 # Build with go-ceph support (CGO enabled)
-<<<<<<< HEAD
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
-=======
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
->>>>>>> 8d3a515 (optimize mover build: extract vars to build.env)
     GOARCH=${TARGETARCH} \
     go build -tags=ceph_preview -o mover \
     cmd/mover/main.go
