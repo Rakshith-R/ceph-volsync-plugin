@@ -42,17 +42,14 @@ COPY go.mod go.sum ./
 # so that we don't need to re-download as much
 # and so that source changes don't invalidate
 # our downloaded layer
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
 # Copy the go source
 COPY cmd/mover/main.go cmd/mover/main.go
 COPY internal/ internal/
 
 # Build with go-ceph support (CGO enabled)
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
+RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
     GOARCH=${TARGETARCH} \
     go build -tags=ceph_preview -o mover \
     cmd/mover/main.go

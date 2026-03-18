@@ -1,5 +1,3 @@
-//go:build ceph_preview
-
 /*
 Copyright 2020 The Ceph-CSI Authors.
 

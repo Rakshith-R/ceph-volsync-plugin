@@ -132,7 +132,7 @@ fmt: ## Run go fmt against code.
 
 .PHONY: vet
 vet: ## Run go vet against code.
-	go vet ./...
+	go vet -tags=ceph_preview ./...
 
 .PHONY: test
 test: manifests generate fmt vet setup-envtest ## Run tests.
@@ -230,9 +230,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 
 .PHONY: docker-build-mover
 docker-build-mover: ## Build docker image with the mover.
-	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build \
-		$(MOVER_BUILD_ARGS) \
-		-t ${MOVER_IMG} -f build/Containerfile.mover .
+	$(CONTAINER_TOOL) build $(MOVER_BUILD_ARGS) -t ${MOVER_IMG} -f build/Containerfile.mover .
 
 .PHONY: docker-push-mover
 docker-push-mover: ## Push docker image with the mover.
