@@ -442,6 +442,27 @@ func updateManualTrigger(
 	).To(Succeed())
 }
 
+func updateRSManualTrigger(
+	ctx context.Context,
+	rsName, newID string,
+) {
+	By("updating RS manual trigger to " + newID)
+
+	rs := &volsyncv1alpha1.ReplicationSource{}
+	Expect(k8sClient.Get(
+		ctx,
+		types.NamespacedName{
+			Name:      rsName,
+			Namespace: namespace,
+		},
+		rs,
+	)).To(Succeed())
+	rs.Spec.Trigger.Manual = newID
+	Expect(
+		k8sClient.Update(ctx, rs),
+	).To(Succeed())
+}
+
 func setRSPaused(
 	ctx context.Context,
 	rsName string,
