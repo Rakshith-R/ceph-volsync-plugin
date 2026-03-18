@@ -1,3 +1,8 @@
+# Include build configuration (versions, base images).
+# Variables can be overridden on the CLI:
+#   make docker-build-mover GOLANG_VERSION=1.25.7
+-include build/build.env
+
 # VERSION defines the project version for the bundle.
 # Update this value when you upgrade the version of your project.
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
@@ -67,6 +72,14 @@ IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
 # MOVER_IMG defines the image:tag used for the mover plugin image.
 MOVER_IMG ?= $(MOVER_IMAGE_TAG_BASE):v$(VERSION)
 
+# Mover container --build-arg flags
+MOVER_BUILD_ARGS = \
+	--build-arg CEPH_BASE_IMAGE=$(CEPH_BASE_IMAGE) \
+	--build-arg CEPH_VERSION=$(CEPH_VERSION) \
+	--build-arg GOLANG_VERSION=$(GOLANG_VERSION) \
+	--build-arg RSYNC_VERSION=$(RSYNC_VERSION) \
+	--build-arg STUNNEL_VERSION=$(STUNNEL_VERSION)
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -109,11 +122,11 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./internal/controller/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./internal/controller/..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -121,7 +134,7 @@ fmt: ## Run go fmt against code.
 
 .PHONY: vet
 vet: ## Run go vet against code.
-	go vet ./...
+	go vet -tags=ceph_preview ./...
 
 .PHONY: test
 test: manifests generate fmt vet setup-envtest ## Run tests.
@@ -218,7 +231,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 
 .PHONY: docker-build-mover
 docker-build-mover: ## Build docker image with the mover.
-	$(CONTAINER_TOOL) build -t ${MOVER_IMG} -f build/Containerfile.mover .
+	$(CONTAINER_TOOL) build $(MOVER_BUILD_ARGS) -t ${MOVER_IMG} -f build/Containerfile.mover .
 
 .PHONY: docker-push-mover
 docker-push-mover: ## Push docker image with the mover.
@@ -230,7 +243,9 @@ docker-buildx-mover: ## Build and push docker image for the mover for cross-plat
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' build/Containerfile.mover > build/Containerfile.mover.cross
 	- $(CONTAINER_TOOL) buildx create --name ceph-volsync-plugin-mover-builder
 	$(CONTAINER_TOOL) buildx use ceph-volsync-plugin-mover-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${MOVER_IMG} -f build/Containerfile.mover.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) \
+		$(MOVER_BUILD_ARGS) \
+		--tag ${MOVER_IMG} -f build/Containerfile.mover.cross .
 	- $(CONTAINER_TOOL) buildx rm ceph-volsync-plugin-mover-builder
 	rm build/Containerfile.mover.cross
 
@@ -238,7 +253,7 @@ docker-buildx-mover: ## Build and push docker image for the mover for cross-plat
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default > dist/install.yaml
+	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g' > dist/install.yaml
 
 ##@ Deployment
 
@@ -257,7 +272,7 @@ uninstall: ## Uninstall VolSync CRDs from K8s cluster.
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g' | $(KUBECTL) apply -f -
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
