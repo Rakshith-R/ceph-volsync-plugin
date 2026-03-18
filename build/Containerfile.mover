@@ -58,14 +58,15 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
 #   (required for go-ceph CGO bindings)
 FROM updated_base
 
-# Allow specifying rsync version
+# Allow specifying rsync & stunnel version
 ARG RSYNC_VERSION=""
+ARG STUNNEL_VERSION=""
 
 # Install runtime dependencies
 RUN dnf -y install --nodocs \
-    stunnel \
-    bash \
+    stunnel${STUNNEL_VERSION:+-$STUNNEL_VERSION} \
     rsync${RSYNC_VERSION:+-$RSYNC_VERSION} \
+    bash \
     && dnf clean all
 
 WORKDIR /

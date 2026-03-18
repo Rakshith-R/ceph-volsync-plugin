@@ -77,7 +77,8 @@ MOVER_BUILD_ARGS = \
 	--build-arg CEPH_BASE_IMAGE=$(CEPH_BASE_IMAGE) \
 	--build-arg CEPH_VERSION=$(CEPH_VERSION) \
 	--build-arg GOLANG_VERSION=$(GOLANG_VERSION) \
-	--build-arg RSYNC_VERSION=$(RSYNC_VERSION)
+	--build-arg RSYNC_VERSION=$(RSYNC_VERSION) \
+	--build-arg STUNNEL_VERSION=$(STUNNEL_VERSION)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
