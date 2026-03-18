@@ -50,7 +50,7 @@ func TestE2E(t *testing.T) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "Starting ceph-volsync-plugin-operator integration test suite\n")
 	suiteConfig, reporterConfig :=
 		GinkgoConfiguration()
-	suiteConfig.FailFast = false
+	suiteConfig.FailFast = true
 	RunSpecs(t, "e2e suite",
 		suiteConfig, reporterConfig,
 	)
@@ -80,38 +80,4 @@ var _ = BeforeSuite(func() {
 	k8sClientSet, err =
 		kubernetes.NewForConfig(cfg)
 	Expect(err).NotTo(HaveOccurred())
-
-	// TODO: uncomment if cert manager is required for future tests.
-	// if !skipCertManagerInstall {
-	// 	By("checking if cert manager is installed already")
-	// 	isCertManagerAlreadyInstalled =
-	// 		utils.IsCertManagerCRDsInstalled()
-	// 	if !isCertManagerAlreadyInstalled {
-	// 		_, _ = fmt.Fprintf(
-	// 			GinkgoWriter,
-	// 			"Installing CertManager...\n",
-	// 		)
-	// 		Expect(
-	// 			utils.InstallCertManager(),
-	// 		).To(Succeed(),
-	// 			"Failed to install CertManager",
-	// 		)
-	// 	} else {
-	// 		_, _ = fmt.Fprintf(
-	// 			GinkgoWriter,
-	// 			"WARNING: CertManager is already"+
-	// 				" installed. Skipping"+
-	// 				" installation...\n",
-	// 		)
-	// 	}
-	// }
-})
-
-var _ = AfterSuite(func() {
-	// TODO: uncomment if cert manager is required for future tests.
-	// Teardown CertManager after the suite if not skipped and if it was not already installed
-	// if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
-	// 	_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
-	// 	utils.UninstallCertManager()
-	// }
 })
