@@ -58,11 +58,16 @@ jobs:
         with:
           detached: true
 
+      - name: Install Ceph development headers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            librados-dev librbd-dev libcephfs-dev
 
       - name: Build and load container images
         run: |
           go mod tidy
-          make manifests generate fmt check-uncommitted
+          make manifests generate fmt vet fmt check-uncommitted
           make docker-build IMG=$IMG
           make docker-build-mover MOVER_IMG=$MOVER_IMG
           make install
@@ -94,14 +99,10 @@ jobs:
           ginkgo -v -p --timeout=30m ./test/e2e/
 
       - name: Cleanup ceph-volsync-plugin operator
+        if: success() # do not run this step if the previous steps have failed.
         run: |
           make undeploy
           make uninstall
-
-      - name: Setup tmate session on failure
-        if: failure()
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 15
 
       - name: Collect logs on failure
         if: failure()
