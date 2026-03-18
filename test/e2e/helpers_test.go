@@ -36,6 +36,10 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/test/utils"
 )
 
+// syncTimeout is the default timeout for waiting
+// on sync operations in e2e tests.
+const syncTimeout = 10 * time.Minute
+
 // driverConfig holds driver-specific parameters
 // for parameterized e2e tests.
 type driverConfig struct {
@@ -313,7 +317,6 @@ func waitForSnapshot(
 	ctx context.Context,
 	rsName string,
 	after *metav1.Time,
-	timeout time.Duration,
 ) {
 	By("waiting for VolumeSnapshot for " + rsName)
 
@@ -351,7 +354,7 @@ func waitForSnapshot(
 		g.Expect(
 			*snap.Status.ReadyToUse,
 		).To(BeTrue())
-	}).WithTimeout(timeout).Should(Succeed())
+	}).WithTimeout(syncTimeout).Should(Succeed())
 }
 
 // createVolumeSnapshot creates a VolumeSnapshot
@@ -495,7 +498,6 @@ func setRSPaused(
 func waitForSyncTime(
 	ctx context.Context,
 	rsName string,
-	timeout time.Duration,
 ) {
 	By("waiting for first sync time")
 
@@ -514,7 +516,7 @@ func waitForSyncTime(
 		g.Expect(
 			rs.Status.LastSyncTime,
 		).NotTo(BeNil())
-	}).WithTimeout(timeout).Should(Succeed())
+	}).WithTimeout(syncTimeout).Should(Succeed())
 }
 
 // waitForNextSync waits for
@@ -524,7 +526,6 @@ func waitForNextSync(
 	ctx context.Context,
 	rsName string,
 	prevTime *metav1.Time,
-	timeout time.Duration,
 ) {
 	By("waiting for next sync after " +
 		prevTime.String())
@@ -549,7 +550,7 @@ func waitForNextSync(
 				prevTime.Time,
 			),
 		).To(BeTrue())
-	}).WithTimeout(timeout).WithPolling(
+	}).WithTimeout(syncTimeout).WithPolling(
 		15 * time.Second,
 	).Should(Succeed())
 }
@@ -559,7 +560,6 @@ func waitForNextSync(
 func waitForRDSyncTime(
 	ctx context.Context,
 	rdName string,
-	timeout time.Duration,
 ) {
 	By("waiting for RD first sync time")
 
@@ -578,7 +578,7 @@ func waitForRDSyncTime(
 		g.Expect(
 			rd.Status.LastSyncTime,
 		).NotTo(BeNil())
-	}).WithTimeout(timeout).Should(Succeed())
+	}).WithTimeout(syncTimeout).Should(Succeed())
 }
 
 // waitForRDNextSync waits for
@@ -588,7 +588,6 @@ func waitForRDNextSync(
 	ctx context.Context,
 	rdName string,
 	prevTime *metav1.Time,
-	timeout time.Duration,
 ) {
 	By("waiting for RD next sync after " +
 		prevTime.String())
@@ -613,7 +612,7 @@ func waitForRDNextSync(
 				prevTime.Time,
 			),
 		).To(BeTrue())
-	}).WithTimeout(timeout).WithPolling(
+	}).WithTimeout(syncTimeout).WithPolling(
 		15 * time.Second,
 	).Should(Succeed())
 }

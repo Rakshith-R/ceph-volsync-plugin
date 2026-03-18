@@ -125,11 +125,9 @@ func scheduleSnapshotTest(drv driverConfig) {
 				func() {
 					waitForSyncTime(
 						ctx, rsName,
-						10*time.Minute,
 					)
 					waitForRDSyncTime(
 						ctx, rdName,
-						10*time.Minute,
 					)
 					setRSPaused(
 						ctx, rsName, true,
@@ -168,17 +166,14 @@ func scheduleSnapshotTest(drv driverConfig) {
 					waitForSnapshot(
 						ctx, rsName,
 						waitTill,
-						10*time.Minute,
 					)
 					waitForNextSync(
 						ctx, rsName,
 						waitTill,
-						10*time.Minute,
 					)
 					waitForRDNextSync(
 						ctx, rdName,
 						waitTill,
-						10*time.Minute,
 					)
 				},
 			)
@@ -276,11 +271,9 @@ func scheduleSnapshotNoRDTriggerTest(drv driverConfig) {
 				func() {
 					waitForSyncTime(
 						ctx, rsName,
-						10*time.Minute,
 					)
 					waitForRDSyncTime(
 						ctx, rdName,
-						10*time.Minute,
 					)
 					setRSPaused(
 						ctx, rsName, true,
@@ -319,17 +312,14 @@ func scheduleSnapshotNoRDTriggerTest(drv driverConfig) {
 					waitForSnapshot(
 						ctx, rsName,
 						waitTill,
-						10*time.Minute,
 					)
 					waitForNextSync(
 						ctx, rsName,
 						waitTill,
-						10*time.Minute,
 					)
 					waitForRDNextSync(
 						ctx, rdName,
 						waitTill,
-						10*time.Minute,
 					)
 				},
 			)
@@ -436,11 +426,9 @@ func scheduleDirectTest(drv driverConfig) {
 				func() {
 					waitForSyncTime(
 						ctx, rsName,
-						10*time.Minute,
 					)
 					waitForRDSyncTime(
 						ctx, rdName,
-						10*time.Minute,
 					)
 					setRSPaused(
 						ctx, rsName, true,
@@ -479,17 +467,14 @@ func scheduleDirectTest(drv driverConfig) {
 					waitForSnapshot(
 						ctx, rsName,
 						waitTill,
-						10*time.Minute,
 					)
 					waitForNextSync(
 						ctx, rsName,
 						waitTill,
-						10*time.Minute,
 					)
 					waitForRDNextSync(
 						ctx, rdName,
 						waitTill,
-						10*time.Minute,
 					)
 				},
 			)
@@ -595,11 +580,9 @@ func scheduleDirectNoRDTriggerTest(
 				func() {
 					waitForSyncTime(
 						ctx, rsName,
-						10*time.Minute,
 					)
 					waitForRDSyncTime(
 						ctx, rdName,
-						10*time.Minute,
 					)
 					setRSPaused(
 						ctx, rsName, true,
@@ -640,17 +623,14 @@ func scheduleDirectNoRDTriggerTest(
 					waitForSnapshot(
 						ctx, rsName,
 						waitTill,
-						10*time.Minute,
 					)
 					waitForNextSync(
 						ctx, rsName,
 						waitTill,
-						10*time.Minute,
 					)
 					waitForRDNextSync(
 						ctx, rdName,
 						waitTill,
-						10*time.Minute,
 					)
 				},
 			)

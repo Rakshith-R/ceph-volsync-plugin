@@ -474,7 +474,6 @@ func manualDirectNoRDTriggerTest(
 					)
 					waitForRDSyncTime(
 						ctx, rdName,
-						10*time.Minute,
 					)
 				},
 			)
@@ -555,7 +554,6 @@ func manualDirectNoRDTriggerTest(
 					waitForRDNextSync(
 						ctx, rdName,
 						firstSync,
-						10*time.Minute,
 					)
 				},
 			)
@@ -657,7 +655,6 @@ func manualSnapshotNoRDTriggerTest(
 					)
 					waitForRDSyncTime(
 						ctx, rdName,
-						10*time.Minute,
 					)
 				},
 			)
@@ -698,7 +695,6 @@ func manualSnapshotNoRDTriggerTest(
 					waitForRDNextSync(
 						ctx, rdName,
 						firstSync,
-						10*time.Minute,
 					)
 				},
 			)
