@@ -1,31 +1,78 @@
-# Build the mover binary
-FROM golang:1.25 AS builder
+#-- Build the mover binary with go-ceph support
+ARG CEPH_BASE_IMAGE=quay.io/ceph/ceph:v20
+
+FROM ${CEPH_BASE_IMAGE} AS updated_base
+ARG CEPH_VERSION=tentacle
+
+# TODO: remove the reinstall, when issues
+# https://github.com/ceph/ceph-container/issues/2034
+# https://github.com/ceph/ceph-container/issues/2141
+# are fixed.
+RUN echo ${CEPH_VERSION} \
+    && dnf -y reinstall \
+       https://download.ceph.com/rpm-${CEPH_VERSION}/el9/noarch/ceph-release-1-1.el9.noarch.rpm \
+    && dnf -y update --nobest --nodocs \
+    && dnf clean all 
+
+FROM updated_base AS builder
+
+ARG GOLANG_VERSION=1.25.8
 ARG TARGETOS
 ARG TARGETARCH
 
+# Install Go and build dependencies
+RUN dnf -y install --nodocs \
+    librados-devel librbd-devel libcephfs-devel \
+    /usr/bin/cc \
+    && mkdir -p /usr/local/go \
+    && curl -L \
+      https://go.dev/dl/go${GOLANG_VERSION}.linux-${TARGETARCH}.tar.gz \
+      | tar xzf - -C /usr/local/go \
+        --strip-components=1
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOROOT="/usr/local/go"
+
 WORKDIR /workspace
+
 # Copy the Go Modules manifests
-COPY go.mod go.mod
-COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
+COPY go.mod go.sum ./
+
+# Cache deps before building and copying source
+# so that we don't need to re-download as much
+# and so that source changes don't invalidate
+# our downloaded layer
 RUN go mod download
 
 # Copy the go source
 COPY cmd/mover/main.go cmd/mover/main.go
+COPY internal/ internal/
 
-# Build
-# the GOARCH has not a default value to allow the binary be built according to the host where the command
-# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o mover cmd/mover/main.go
+# Build with go-ceph support (CGO enabled)
+RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
+    GOARCH=${TARGETARCH} \
+    go build -tags=ceph_preview -o mover \
+    cmd/mover/main.go
 
-# Use distroless as minimal base image to package the mover binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+#-- Final container with Ceph runtime libraries
+#   (required for go-ceph CGO bindings)
+FROM updated_base
+
+# Allow specifying rsync & stunnel version
+ARG RSYNC_VERSION=""
+ARG STUNNEL_VERSION=""
+
+# Install runtime dependencies
+RUN dnf -y install --nodocs \
+    stunnel${STUNNEL_VERSION:+-$STUNNEL_VERSION} \
+    rsync${RSYNC_VERSION:+-$RSYNC_VERSION} \
+    bash \
+    && dnf clean all
+
 WORKDIR /
 COPY --from=builder /workspace/mover .
-USER 65532:65532
+
+# verify that all dynamically linked libraries are available
+RUN [ $(ldd /mover | grep -c '=> not found') = '0' ]
 
 ENTRYPOINT ["/mover"]
