@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,11 +18,8 @@ package e2e
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
@@ -658,82 +655,6 @@ func cleanupSnapshots(
 	}
 }
 
-// serviceAccountToken returns a token for the
-// specified service account using the Kubernetes
-// TokenRequest API.
-func serviceAccountToken() (string, error) {
-	const tokenRequestRawString = `{
-		"apiVersion": "authentication.k8s.io/v1",
-		"kind": "TokenRequest"
-	}`
-
-	secretName := fmt.Sprintf(
-		"%s-token-request", serviceAccountName,
-	)
-	tokenRequestFile := filepath.Join(
-		"/tmp", secretName,
-	)
-	err := os.WriteFile(
-		tokenRequestFile,
-		[]byte(tokenRequestRawString),
-		os.FileMode(0o644),
-	)
-	if err != nil {
-		return "", err
-	}
-
-	var out string
-
-	verifyTokenCreation := func(g Gomega) {
-		cmd := exec.Command(
-			"kubectl", "create", "--raw",
-			fmt.Sprintf(
-				"/api/v1/namespaces/%s"+
-					"/serviceaccounts/%s/token",
-				namespace,
-				serviceAccountName,
-			),
-			"-f", tokenRequestFile,
-		)
-
-		output, err := cmd.CombinedOutput()
-		g.Expect(err).NotTo(HaveOccurred())
-
-		var token tokenRequest
-		err = json.Unmarshal(output, &token)
-		g.Expect(err).NotTo(HaveOccurred())
-
-		out = token.Status.Token
-	}
-	Eventually(verifyTokenCreation).Should(
-		Succeed(),
-	)
-
-	return out, err
-}
-
-// getMetricsOutput retrieves and returns the logs
-// from the curl pod used to access the metrics
-// endpoint.
-func getMetricsOutput() string {
-	By("getting the curl-metrics logs")
-
-	cmd := exec.Command(
-		"kubectl", "logs",
-		"curl-metrics", "-n", namespace,
-	)
-	metricsOutput, err := utils.Run(cmd)
-	Expect(err).NotTo(
-		HaveOccurred(),
-		"Failed to retrieve logs from curl pod",
-	)
-	Expect(metricsOutput).To(
-		ContainSubstring("< HTTP/1.1 200 OK"),
-	)
-
-	return metricsOutput
-}
-
 // debugAfterEach collects controller pod logs,
 // Kubernetes events, and pod description when a
 // spec fails.
@@ -870,14 +791,6 @@ func debugAfterEach() {
 			err,
 		)
 	}
-}
-
-// tokenRequest is a simplified representation of
-// the Kubernetes TokenRequest API response.
-type tokenRequest struct {
-	Status struct {
-		Token string `json:"token"`
-	} `json:"status"`
 }
 
 // runPodWithPVC creates a pod that mounts a PVC
