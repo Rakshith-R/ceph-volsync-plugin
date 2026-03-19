@@ -32,27 +32,25 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
-// DestinationConfig holds configuration for the
-// CephFS destination worker.
-type DestinationConfig struct {
-	ServerPort string
-}
-
 // DestinationWorker represents a CephFS destination
 // worker instance.
 type DestinationWorker struct {
-	logger logr.Logger
-	config DestinationConfig
+	common.BaseDestinationWorker
 }
 
-// NewDestinationWorker creates a new CephFS destination
-// worker.
+// NewDestinationWorker creates a new CephFS
+// destination worker.
 func NewDestinationWorker(
-	logger logr.Logger, config DestinationConfig,
+	logger logr.Logger,
+	config common.DestinationConfig,
 ) *DestinationWorker {
 	return &DestinationWorker{
-		logger: logger.WithName("destination-worker"),
-		config: config,
+		BaseDestinationWorker: common.BaseDestinationWorker{
+			Logger: logger.WithName(
+				"cephfs-destination-worker",
+			),
+			Config: config,
+		},
 	}
 }
 
@@ -60,12 +58,12 @@ func NewDestinationWorker(
 func (w *DestinationWorker) Run(
 	ctx context.Context,
 ) error {
-	w.logger.Info("Starting destination worker")
+	dataServer := &DataServer{
+		logger: w.Logger,
+	}
 
-	dataServer := &DataServer{logger: w.logger}
-
-	return common.RunDestinationServer(
-		ctx, w.logger, w.config.ServerPort, dataServer,
+	return w.BaseDestinationWorker.Run(
+		ctx, dataServer,
 	)
 }
 

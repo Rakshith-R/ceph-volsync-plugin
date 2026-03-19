@@ -208,14 +208,14 @@ func newCephFSWorker(
 	case workerTypeSource:
 		return wcephfs.NewSourceWorker(
 			logger,
-			wcephfs.SourceConfig{
+			common.SourceConfig{
 				DestinationAddress: config.DestinationAddress,
 			},
 		), nil
 	case workerTypeDestination:
 		return wcephfs.NewDestinationWorker(
 			logger,
-			wcephfs.DestinationConfig{
+			common.DestinationConfig{
 				ServerPort: config.ServerPort,
 			},
 		), nil
