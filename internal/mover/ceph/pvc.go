@@ -27,6 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ensureSourcePVC returns the source PVC. For Snapshot copy method, it creates
+// a ReadOnlyMany PVC from a snapshot. For Direct, it returns the source PVC as-is.
 func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
 	srcPVC := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -58,6 +60,7 @@ func (m *Mover) ensureSourcePVC(ctx context.Context) (*corev1.PersistentVolumeCl
 	return pvc, nil
 }
 
+// ensureDestinationPVC returns the destination PVC, either user-provided or newly allocated.
 func (m *Mover) ensureDestinationPVC(ctx context.Context) (*corev1.PersistentVolumeClaim, error) {
 	if m.destPVCIsProvided {
 		return m.vh.UseProvidedPVC(ctx, m.destPVCName)

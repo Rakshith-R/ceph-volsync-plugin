@@ -63,6 +63,8 @@ const (
 	optTargetSnapshotName = "targetSnapshotName"
 )
 
+// Builder implements mover.Builder for the Ceph data mover.
+// It detects the CSI provider from the CR and constructs Mover instances.
 type Builder struct {
 	viper *viper.Viper  // For unit tests to be able to override - global viper will be used by default in Register()
 	flags *flag.FlagSet // For unit tests to be able to override - global flags will be used by default in Register()
@@ -70,6 +72,7 @@ type Builder struct {
 
 var _ mover.Builder = &Builder{}
 
+// Register creates a Builder with global viper/flags and adds it to the mover catalog.
 func Register() error {
 	// Use global viper & command line flags
 	b, err := newBuilder(viper.GetViper(), flag.CommandLine)
@@ -81,6 +84,8 @@ func Register() error {
 	return nil
 }
 
+// newBuilder initializes a Builder with the given viper and flag set,
+// registering the container image flag and env var binding.
 func newBuilder(v *viper.Viper, flags *flag.FlagSet) (*Builder, error) {
 	b := &Builder{
 		viper: v,
@@ -99,8 +104,10 @@ func newBuilder(v *viper.Viper, flags *flag.FlagSet) (*Builder, error) {
 	return b, err
 }
 
+// Name returns the builder's registered name ("ceph").
 func (rb *Builder) Name() string { return cephMoverName }
 
+// VersionInfo returns a human-readable string with the configured container image.
 func (rb *Builder) VersionInfo() string {
 	return fmt.Sprintf("Ceph container: %s", rb.getCephContainerImage())
 }
@@ -110,6 +117,8 @@ func (rb *Builder) getCephContainerImage() string {
 	return rb.viper.GetString(cephContainerImageFlag)
 }
 
+// FromSource constructs a Mover for a ReplicationSource CR.
+// Returns (nil, nil) if the CR does not belong to a supported Ceph CSI provider.
 func (rb *Builder) FromSource(cl client.Client, logger logr.Logger,
 	eventRecorder events.EventRecorder,
 	source *volsyncv1alpha1.ReplicationSource, privileged bool) (mover.Mover, error) {
@@ -214,6 +223,9 @@ func (rb *Builder) FromSource(cl client.Client, logger logr.Logger,
 	return m, nil
 }
 
+// FromDestination constructs a Mover for a ReplicationDestination CR.
+// Returns (nil, nil) if the CR does not belong to a supported Ceph CSI provider.
+//
 //nolint:funlen
 func (rb *Builder) FromDestination(cl client.Client, logger logr.Logger,
 	eventRecorder events.EventRecorder,

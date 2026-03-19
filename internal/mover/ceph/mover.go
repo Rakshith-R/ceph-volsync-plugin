@@ -109,8 +109,11 @@ var cleanupTypes = []client.Object{
 	&batchv1.Job{},
 }
 
+// Name returns the mover's registered name ("ceph").
 func (m *Mover) Name() string { return cephMoverName }
 
+// initCached computes derived fields from immutable
+// Mover properties. Must be called once after construction.
 func (m *Mover) initCached() {
 	if m.isSource {
 		m.direction = "src"
@@ -141,6 +144,8 @@ func (m *Mover) initCached() {
 	}
 }
 
+// Synchronize runs one reconciliation iteration: ensures PVC, Service,
+// Secrets, ServiceAccount, CSI config, and Job, returning Complete on success.
 func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	var err error
 
@@ -215,6 +220,8 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	return mover.Complete(), nil
 }
 
+// Cleanup transitions snapshot statuses, removes snapshot annotations,
+// and deletes temporary resources marked for cleanup.
 func (m *Mover) Cleanup(ctx context.Context) (mover.Result, error) {
 	m.logger.V(1).Info("Starting cleanup", "m.mainPVCName", m.mainPVCName, "m.isSource", m.isSource)
 

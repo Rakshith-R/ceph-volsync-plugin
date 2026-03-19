@@ -27,6 +27,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ensureServiceAndPublishAddress creates a Service for destination movers
+// without an explicit address, then publishes the assigned address in status.
 func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context) (bool, error) {
 	if m.address != nil || m.isSource {
 		// Connection will be outbound. Don't need a Service
@@ -58,6 +60,8 @@ func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context) (bool, error
 	return m.publishSvcAddress(service)
 }
 
+// publishSvcAddress extracts the Service address and updates the mover status.
+// Returns false if the address is not yet available.
 func (m *Mover) publishSvcAddress(service *corev1.Service) (bool, error) {
 	address := utils.GetServiceAddress(service)
 	if address == "" {
@@ -77,6 +81,8 @@ func (m *Mover) publishSvcAddress(service *corev1.Service) (bool, error) {
 	return true, nil
 }
 
+// updateStatusAddress sets the destination status address and emits
+// an event when the address changes.
 func (m *Mover) updateStatusAddress(address *string) {
 	publishEvent := false
 	if !m.isSource {

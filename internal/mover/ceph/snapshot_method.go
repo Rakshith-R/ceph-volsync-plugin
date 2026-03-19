@@ -42,11 +42,14 @@ const (
 	snapshotStatusPrevious = "previous"
 )
 
+// isSnapshotReady returns true if the snapshot exists and its ReadyToUse status is true.
 func isSnapshotReady(snap *snapv1.VolumeSnapshot) bool {
 	return snap != nil && snap.Status != nil &&
 		snap.Status.ReadyToUse != nil && *snap.Status.ReadyToUse
 }
 
+// findSnapshotWithStatus returns the first snapshot matching the given status label,
+// or nil if none found.
 func (m *Mover) findSnapshotWithStatus(
 	ctx context.Context, status string,
 ) (*snapv1.VolumeSnapshot, error) {
@@ -57,6 +60,7 @@ func (m *Mover) findSnapshotWithStatus(
 	return &snapshots[0], nil
 }
 
+// listSnapshotsWithStatus lists all snapshots in the owner's namespace with the given status label.
 func (m *Mover) listSnapshotsWithStatus(ctx context.Context, status string) ([]snapv1.VolumeSnapshot, error) {
 	selector, err := labels.Parse(m.snapStatusLabelKey + "=" + status)
 	if err != nil {
@@ -76,6 +80,8 @@ func (m *Mover) listSnapshotsWithStatus(ctx context.Context, status string) ([]s
 	return snapList.Items, nil
 }
 
+// setSnapshotStatus adds or updates the snapshot status label. No-op if snap is nil
+// or the label already has the desired value.
 func (m *Mover) setSnapshotStatus(
 	ctx context.Context, snap *snapv1.VolumeSnapshot, status string,
 ) error {
@@ -91,6 +97,8 @@ func (m *Mover) setSnapshotStatus(
 	return m.client.Update(ctx, snap)
 }
 
+// ensureSnapshotWithStatusLabel creates or updates a VolumeSnapshot with
+// status=current label and waits for it to become ready.
 func (m *Mover) ensureSnapshotWithStatusLabel(
 	ctx context.Context, logger logr.Logger,
 	src *corev1.PersistentVolumeClaim, name string,
@@ -135,6 +143,8 @@ func (m *Mover) ensureSnapshotWithStatusLabel(
 	return snapshot, nil
 }
 
+// createPVCFromSnapshot creates a ReadOnlyMany PVC from a snapshot and
+// waits for it to become Bound.
 func (m *Mover) createPVCFromSnapshot(
 	ctx context.Context, logger logr.Logger,
 	snap *snapv1.VolumeSnapshot, src *corev1.PersistentVolumeClaim,
@@ -186,6 +196,8 @@ func (m *Mover) createPVCFromSnapshot(
 	return pvc, nil
 }
 
+// ensurePVCFromSrcWithStatusLabels reuses an existing current snapshot or creates
+// a new one with a timestamp suffix, then creates a PVC from it.
 func (m *Mover) ensurePVCFromSrcWithStatusLabels(
 	ctx context.Context, logger logr.Logger,
 	src *corev1.PersistentVolumeClaim,
@@ -222,6 +234,9 @@ func (m *Mover) ensurePVCFromSrcWithStatusLabels(
 	return m.createPVCFromSnapshot(ctx, logger, snap, src)
 }
 
+// getVolumeEnvVars extracts volume and snapshot handles for the worker container.
+// For source movers with previous snapshots, it computes base/target snapshot handles
+// for incremental sync.
 func (m *Mover) getVolumeEnvVars(
 	ctx context.Context,
 	dataPVC *corev1.PersistentVolumeClaim,
@@ -374,6 +389,7 @@ func (m *Mover) getVolumeEnvVars(
 	return envVars, nil
 }
 
+// getVolumeHandle fetches the PV by name and returns its CSI VolumeHandle.
 func (m *Mover) getVolumeHandle(
 	ctx context.Context, volumeName string,
 ) (string, error) {
@@ -393,6 +409,8 @@ func (m *Mover) getVolumeHandle(
 	return pv.Spec.CSI.VolumeHandle, nil
 }
 
+// getSnapshotHandle fetches a VolumeSnapshot, retrieves its BoundVolumeSnapshotContent,
+// and returns the underlying SnapshotHandle.
 func (m *Mover) getSnapshotHandle(
 	ctx context.Context, snapshotName string,
 ) (string, error) {
@@ -430,6 +448,8 @@ func (m *Mover) getSnapshotHandle(
 	return *content.Status.SnapshotHandle, nil
 }
 
+// transitionSnapshotStatuses rotates snapshot lifecycle labels: marks old previous
+// snapshots for cleanup (keeping the most recent), then transitions current to previous.
 func (m *Mover) transitionSnapshotStatuses(
 	ctx context.Context,
 ) error {

@@ -36,6 +36,7 @@ import (
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+// updateStatusPSK sets the PSK secret name in the source or destination status.
 func (m *Mover) updateStatusPSK(pskSecretName *string) {
 	if m.isSource {
 		m.sourceStatus.KeySecret = pskSecretName

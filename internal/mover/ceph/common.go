@@ -31,6 +31,8 @@ import (
 	wcommon "github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
+// rsyncSvcDescription holds parameters for reconciling
+// a dual-port Service (TLS + protocol-specific port).
 type rsyncSvcDescription struct {
 	Context     context.Context
 	Client      client.Client
@@ -43,6 +45,7 @@ type rsyncSvcDescription struct {
 	MoverType   MoverType
 }
 
+// Reconcile creates or updates the Service with TLS and protocol-specific ports.
 func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 	logger := l.WithValues("service", client.ObjectKeyFromObject(d.Service))
 

@@ -35,6 +35,9 @@ import (
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+// ensureJob creates or updates the mover Job with all required env vars,
+// volume mounts, and security context. Returns the Job on successful completion.
+//
 //nolint:funlen
 func (m *Mover) ensureJob(
 	ctx context.Context,
