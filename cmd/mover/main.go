@@ -26,6 +26,7 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/tunnel"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
 	wcephfs "github.com/RamenDR/ceph-volsync-plugin/internal/worker/cephfs"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 	wrbd "github.com/RamenDR/ceph-volsync-plugin/internal/worker/rbd"
 	"github.com/backube/volsync/controllers/utils"
 	"github.com/go-logr/logr"
@@ -233,14 +234,14 @@ func newRBDWorker(
 	case workerTypeSource:
 		return wrbd.NewSourceWorker(
 			logger,
-			wrbd.SourceConfig{
+			common.SourceConfig{
 				DestinationAddress: config.DestinationAddress,
 			},
 		), nil
 	case workerTypeDestination:
 		return wrbd.NewDestinationWorker(
 			logger,
-			wrbd.DestinationConfig{
+			common.DestinationConfig{
 				ServerPort: config.ServerPort,
 			},
 		), nil

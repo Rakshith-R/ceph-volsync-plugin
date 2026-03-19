@@ -40,7 +40,7 @@ func TestBaseDestWorker_ListensOnPort(
 		t.Fatal(err)
 	}
 	port := lis.Addr().(*net.TCPAddr).Port
-	lis.Close()
+	_ = lis.Close()
 
 	w := common.BaseDestinationWorker{
 		Logger: logr.Discard(),
