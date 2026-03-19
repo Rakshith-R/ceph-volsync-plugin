@@ -161,30 +161,15 @@ func scheduleSnapshotTest(drv driverConfig) {
 				},
 			)
 
-			It("should complete second sync",
+			It("should complete second sync"+
+				" and match data",
 				func() {
-					waitForSnapshot(
-						ctx, rsName,
-						waitTill,
-					)
-					waitForNextSync(
-						ctx, rsName,
-						waitTill,
-					)
-					waitForRDNextSync(
-						ctx, rdName,
-						waitTill,
-					)
-				},
-			)
-
-			It("should validate second sync",
-				func() {
-					validateSyncedData(
+					waitForDataMatch(
 						ctx, srcPVC,
 						destPVC, drv,
 						"Snapshot", rdName,
 						drv.name+"-ss-v2",
+						waitTill,
 					)
 				},
 			)
@@ -307,30 +292,15 @@ func scheduleSnapshotNoRDTriggerTest(drv driverConfig) {
 				},
 			)
 
-			It("should complete second sync",
+			It("should complete second sync"+
+				" and match data",
 				func() {
-					waitForSnapshot(
-						ctx, rsName,
-						waitTill,
-					)
-					waitForNextSync(
-						ctx, rsName,
-						waitTill,
-					)
-					waitForRDNextSync(
-						ctx, rdName,
-						waitTill,
-					)
-				},
-			)
-
-			It("should validate second sync",
-				func() {
-					validateSyncedData(
+					waitForDataMatch(
 						ctx, srcPVC,
 						destPVC, drv,
 						"Snapshot", rdName,
 						drv.name+"-ssn-v2",
+						waitTill,
 					)
 				},
 			)
@@ -462,30 +432,15 @@ func scheduleDirectTest(drv driverConfig) {
 				},
 			)
 
-			It("should complete second sync",
+			It("should complete second sync"+
+				" and match data",
 				func() {
-					waitForSnapshot(
-						ctx, rsName,
-						waitTill,
-					)
-					waitForNextSync(
-						ctx, rsName,
-						waitTill,
-					)
-					waitForRDNextSync(
-						ctx, rdName,
-						waitTill,
-					)
-				},
-			)
-
-			It("should validate second sync",
-				func() {
-					validateSyncedData(
+					waitForDataMatch(
 						ctx, srcPVC,
 						destPVC, drv,
 						"Direct", rdName,
 						drv.name+"-sd-v2",
+						waitTill,
 					)
 				},
 			)
@@ -618,30 +573,15 @@ func scheduleDirectNoRDTriggerTest(
 				},
 			)
 
-			It("should complete second sync",
+			It("should complete second sync"+
+				" and match data",
 				func() {
-					waitForSnapshot(
-						ctx, rsName,
-						waitTill,
-					)
-					waitForNextSync(
-						ctx, rsName,
-						waitTill,
-					)
-					waitForRDNextSync(
-						ctx, rdName,
-						waitTill,
-					)
-				},
-			)
-
-			It("should validate second sync",
-				func() {
-					validateSyncedData(
+					waitForDataMatch(
 						ctx, srcPVC,
 						destPVC, drv,
 						"Direct", rdName,
 						drv.name+"-sdn-v2",
+						waitTill,
 					)
 				},
 			)

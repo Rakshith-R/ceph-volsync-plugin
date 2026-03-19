@@ -40,6 +40,15 @@ import (
 // on sync operations in e2e tests.
 const syncTimeout = 10 * time.Minute
 
+// dataMatchPollInterval is how often we retry the
+// full validate flow when polling for data match.
+const dataMatchPollInterval = 30 * time.Second
+
+// innerPollInterval is the poll interval for
+// sub-waits inside tryValidateSyncedData (PVC bound,
+// snapshot ready, pod completion).
+const innerPollInterval = 5 * time.Second
+
 // driverConfig holds driver-specific parameters
 // for parameterized e2e tests.
 type driverConfig struct {
@@ -311,52 +320,6 @@ func waitForRDManualSync(
 	).Should(Succeed())
 }
 
-// waitForSnapshot waits for a VolumeSnapshot with
-// the volsync status label for the given RS name.
-func waitForSnapshot(
-	ctx context.Context,
-	rsName string,
-	after *metav1.Time,
-) {
-	By("waiting for VolumeSnapshot for " + rsName)
-
-	labelKey := "volsync.backube/" +
-		"snapshot-status-" + rsName
-
-	Eventually(func(g Gomega) {
-		snapList := &snapv1.VolumeSnapshotList{}
-		g.Expect(k8sClient.List(
-			ctx, snapList,
-			client.InNamespace(namespace),
-			client.MatchingLabels{
-				labelKey: "current",
-			},
-		)).To(Succeed())
-		g.Expect(
-			snapList.Items,
-		).NotTo(BeEmpty())
-		snap := &snapList.Items[0]
-		if after != nil {
-			g.Expect(
-				snap.CreationTimestamp.
-					After(after.Time),
-			).To(BeTrue(),
-				"snapshot created at %v,"+
-					" expected after %v",
-				snap.CreationTimestamp.Time,
-				after.Time,
-			)
-		}
-		g.Expect(snap.Status).NotTo(BeNil())
-		g.Expect(
-			snap.Status.ReadyToUse,
-		).NotTo(BeNil())
-		g.Expect(
-			*snap.Status.ReadyToUse,
-		).To(BeTrue())
-	}).WithTimeout(syncTimeout).Should(Succeed())
-}
-
 // createVolumeSnapshot creates a VolumeSnapshot
 // from the given PVC and waits for ReadyToUse.
 func createVolumeSnapshot(
@@ -517,42 +480,6 @@ func waitForSyncTime(
 			rs.Status.LastSyncTime,
 		).NotTo(BeNil())
 	}).WithTimeout(syncTimeout).Should(Succeed())
-}
-
-// waitForNextSync waits for
-// RS.Status.LastSyncTime to be strictly after
-// prevTime.
-func waitForNextSync(
-	ctx context.Context,
-	rsName string,
-	prevTime *metav1.Time,
-) {
-	By("waiting for next sync after " +
-		prevTime.String())
-
-	Eventually(func(g Gomega) {
-		rs := &volsyncv1alpha1.
-			ReplicationSource{}
-		g.Expect(k8sClient.Get(
-			ctx,
-			types.NamespacedName{
-				Name:      rsName,
-				Namespace: namespace,
-			},
-			rs,
-		)).To(Succeed())
-		g.Expect(rs.Status).NotTo(BeNil())
-		g.Expect(
-			rs.Status.LastSyncTime,
-		).NotTo(BeNil())
-		g.Expect(
-			rs.Status.LastSyncTime.Time.After(
-				prevTime.Time,
-			),
-		).To(BeTrue())
-	}).WithTimeout(syncTimeout).WithPolling(
-		15 * time.Second,
-	).Should(Succeed())
 }
 
 // waitForRDSyncTime waits for
@@ -1262,4 +1189,418 @@ func validateSyncedData(
 			k8sClient.Delete(ctx, snap),
 		)
 	}
+}
+
+// pollForSnapshotReady polls until the named
+// VolumeSnapshot reports ReadyToUse == true or the
+// timeout expires.
+func pollForSnapshotReady(
+	ctx context.Context,
+	snapName string,
+	timeout time.Duration,
+) error {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		got := &snapv1.VolumeSnapshot{}
+
+		err := k8sClient.Get(
+			ctx,
+			types.NamespacedName{
+				Name:      snapName,
+				Namespace: namespace,
+			},
+			got,
+		)
+		if err == nil &&
+			got.Status != nil &&
+			got.Status.ReadyToUse != nil &&
+			*got.Status.ReadyToUse {
+			return nil
+		}
+
+		time.Sleep(innerPollInterval)
+	}
+
+	return fmt.Errorf(
+		"snapshot %s not ready within %v",
+		snapName, timeout,
+	)
+}
+
+// pollForPVCBound polls until the named PVC reaches
+// the Bound phase or the timeout expires.
+func pollForPVCBound(
+	ctx context.Context,
+	pvcName string,
+	timeout time.Duration,
+) error {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		got, err := k8sClientSet.CoreV1().
+			PersistentVolumeClaims(namespace).
+			Get(ctx, pvcName, metav1.GetOptions{})
+		if err == nil &&
+			got.Status.Phase == corev1.ClaimBound {
+			return nil
+		}
+
+		time.Sleep(innerPollInterval)
+	}
+
+	return fmt.Errorf(
+		"PVC %s not bound within %v",
+		pvcName, timeout,
+	)
+}
+
+// pollForPodDone polls until the named pod reaches
+// Succeeded or Failed phase or the timeout expires.
+func pollForPodDone(
+	ctx context.Context,
+	podName string,
+	timeout time.Duration,
+) (corev1.PodPhase, error) {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		got, err := k8sClientSet.CoreV1().
+			Pods(namespace).
+			Get(ctx, podName, metav1.GetOptions{})
+		if err == nil {
+			phase := got.Status.Phase
+			if phase == corev1.PodSucceeded ||
+				phase == corev1.PodFailed {
+				return phase, nil
+			}
+		}
+
+		time.Sleep(innerPollInterval)
+	}
+
+	return "", fmt.Errorf(
+		"pod %s did not complete within %v",
+		podName, timeout,
+	)
+}
+
+// cleanupTryResources deletes temp resources left
+// over from a previous polling iteration. All errors
+// are ignored.
+func cleanupTryResources(
+	ctx context.Context,
+	snapPrefix, copyMethod string,
+) {
+	_ = k8sClientSet.CoreV1().
+		Pods(namespace).
+		Delete(
+			ctx, snapPrefix+"-compare",
+			metav1.DeleteOptions{},
+		)
+
+	_ = k8sClientSet.CoreV1().
+		PersistentVolumeClaims(namespace).
+		Delete(
+			ctx, snapPrefix+"-temp",
+			metav1.DeleteOptions{},
+		)
+
+	if copyMethod == "Direct" {
+		snap := &snapv1.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      snapPrefix + "-validate",
+				Namespace: namespace,
+			},
+		}
+		_ = client.IgnoreNotFound(
+			k8sClient.Delete(ctx, snap),
+		)
+	}
+}
+
+// tryCompareDataInPod creates a comparison pod and
+// returns an error if data does not match, instead of
+// calling Fail().
+func tryCompareDataInPod(
+	ctx context.Context,
+	podName, srcPVC, dstPVC string,
+	drv driverConfig,
+) error {
+	isBlock := drv.volumeMode != nil &&
+		*drv.volumeMode == corev1.PersistentVolumeBlock
+
+	var command string
+	if isBlock {
+		command = "cmp /dev/src-block /dev/dst-block"
+	} else {
+		command = "diff -r /src /dst"
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:  "compare",
+					Image: "busybox",
+					Command: []string{
+						"/bin/sh", "-c", command,
+					},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "src-vol",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: srcPVC,
+							ReadOnly:  true,
+						},
+					},
+				},
+				{
+					Name: "dst-vol",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: dstPVC,
+							ReadOnly:  true,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if isBlock {
+		pod.Spec.Containers[0].VolumeDevices =
+			[]corev1.VolumeDevice{
+				{
+					Name:       "src-vol",
+					DevicePath: "/dev/src-block",
+				},
+				{
+					Name:       "dst-vol",
+					DevicePath: "/dev/dst-block",
+				},
+			}
+	} else {
+		pod.Spec.Containers[0].VolumeMounts =
+			[]corev1.VolumeMount{
+				{
+					Name:      "src-vol",
+					MountPath: "/src",
+					ReadOnly:  true,
+				},
+				{
+					Name:      "dst-vol",
+					MountPath: "/dst",
+					ReadOnly:  true,
+				},
+			}
+	}
+
+	_, err := k8sClientSet.CoreV1().
+		Pods(namespace).
+		Create(ctx, pod, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf(
+			"creating compare pod: %w", err,
+		)
+	}
+
+	phase, err := pollForPodDone(
+		ctx, podName, 2*time.Minute,
+	)
+	if err != nil {
+		return err
+	}
+
+	if phase == corev1.PodFailed {
+		cmd := exec.Command(
+			"kubectl", "logs",
+			podName, "-n", namespace,
+		)
+		output, _ := utils.Run(cmd)
+
+		_ = k8sClientSet.CoreV1().
+			Pods(namespace).
+			Delete(
+				ctx, podName,
+				metav1.DeleteOptions{},
+			)
+
+		return fmt.Errorf(
+			"data mismatch:\n%s", output,
+		)
+	}
+
+	_ = k8sClientSet.CoreV1().
+		Pods(namespace).
+		Delete(ctx, podName, metav1.DeleteOptions{})
+
+	return nil
+}
+
+// tryValidateSyncedData performs the full validate
+// flow (snapshot restore + comparison) but returns an
+// error instead of calling Expect/Fail. This allows
+// it to be used inside Eventually for polling.
+func tryValidateSyncedData(
+	ctx context.Context,
+	srcPVC, destPVC string,
+	drv driverConfig,
+	copyMethod, rdName, snapPrefix string,
+) error {
+	cleanupTryResources(ctx, snapPrefix, copyMethod)
+
+	var snapName string
+
+	if copyMethod == "Snapshot" {
+		rd := &volsyncv1alpha1.ReplicationDestination{}
+
+		err := k8sClient.Get(
+			ctx, types.NamespacedName{
+				Name:      rdName,
+				Namespace: namespace,
+			}, rd,
+		)
+		if err != nil {
+			return fmt.Errorf("getting RD: %w", err)
+		}
+
+		if rd.Status == nil ||
+			rd.Status.LatestImage == nil {
+			return fmt.Errorf(
+				"RD %s has no latestImage", rdName,
+			)
+		}
+
+		snapName = rd.Status.LatestImage.Name
+	} else {
+		snapName = snapPrefix + "-validate"
+		snap := &snapv1.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      snapName,
+				Namespace: namespace,
+			},
+			Spec: snapv1.VolumeSnapshotSpec{
+				VolumeSnapshotClassName: ptr.To(
+					drv.vsClass,
+				),
+				Source: snapv1.VolumeSnapshotSource{
+					PersistentVolumeClaimName: ptr.To(
+						destPVC,
+					),
+				},
+			},
+		}
+
+		if err := k8sClient.Create(
+			ctx, snap,
+		); err != nil {
+			return fmt.Errorf(
+				"creating snapshot: %w", err,
+			)
+		}
+
+		if err := pollForSnapshotReady(
+			ctx, snapName, 5*time.Minute,
+		); err != nil {
+			return err
+		}
+	}
+
+	tempPVC := snapPrefix + "-temp"
+	accessMode := corev1.ReadOnlyMany
+
+	if drv.accessMode != "" {
+		accessMode = drv.accessMode
+	}
+
+	snapAPIGroup := "snapshot.storage.k8s.io"
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      tempPVC,
+			Namespace: namespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{
+				accessMode,
+			},
+			StorageClassName: ptr.To(drv.sc),
+			VolumeMode:       drv.volumeMode,
+			DataSource: &corev1.TypedLocalObjectReference{
+				APIGroup: &snapAPIGroup,
+				Kind:     "VolumeSnapshot",
+				Name:     snapName,
+			},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(
+						"1Gi",
+					),
+				},
+			},
+		},
+	}
+
+	_, err := k8sClientSet.CoreV1().
+		PersistentVolumeClaims(namespace).
+		Create(ctx, pvc, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf(
+			"creating temp PVC: %w", err,
+		)
+	}
+
+	if err := pollForPVCBound(
+		ctx, tempPVC, 2*time.Minute,
+	); err != nil {
+		return err
+	}
+
+	if err := tryCompareDataInPod(
+		ctx, snapPrefix+"-compare",
+		srcPVC, tempPVC, drv,
+	); err != nil {
+		return err
+	}
+
+	cleanupTryResources(ctx, snapPrefix, copyMethod)
+
+	return nil
+}
+
+// waitForDataMatch polls every 30 seconds until the
+// deadline, running the full validate flow each
+// iteration. Replaces the separate "should validate"
+// step with integrated polling.
+func waitForDataMatch(
+	ctx context.Context,
+	srcPVC, destPVC string,
+	drv driverConfig,
+	copyMethod, rdName, snapPrefix string,
+	deadline *metav1.Time,
+) {
+	By("polling for data match every 30s")
+
+	timeout := time.Until(deadline.Time)
+	if timeout <= 0 {
+		timeout = dataMatchPollInterval
+	}
+
+	Eventually(func() error {
+		return tryValidateSyncedData(
+			ctx, srcPVC, destPVC,
+			drv, copyMethod, rdName,
+			snapPrefix,
+		)
+	}).WithPolling(
+		dataMatchPollInterval,
+	).WithTimeout(timeout).Should(Succeed())
 }
