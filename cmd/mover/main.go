@@ -208,8 +208,7 @@ func newWorker(
 		logger,
 		config.WorkerType,
 		common.SourceConfig{
-			DestinationAddress:
-				config.DestinationAddress,
+			DestinationAddress: config.DestinationAddress,
 		},
 		common.DestinationConfig{
 			ServerPort: config.ServerPort,
