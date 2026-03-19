@@ -109,23 +109,21 @@ func ptrTo[T any](v T) *T {
 	return &v
 }
 
-// newSnapshot creates a VolumeSnapshot with the given name, namespace, and labels.
+// newSnapshot creates a ready VolumeSnapshot in
+// "test-ns" with the given name and labels.
 func newSnapshot(
-	name, namespace string,
+	name string,
 	labels map[string]string,
-	ready bool,
 ) *snapv1.VolumeSnapshot {
 	snap := &snapv1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "test-ns",
 			Labels:    labels,
 		},
-	}
-	if ready {
-		snap.Status = &snapv1.VolumeSnapshotStatus{
+		Status: &snapv1.VolumeSnapshotStatus{
 			ReadyToUse: ptrTo(true),
-		}
+		},
 	}
 	return snap
 }

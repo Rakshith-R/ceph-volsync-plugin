@@ -63,9 +63,9 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 		}
 
 		if d.MoverType == MoverTypeRBD {
-			d.Service.Spec.Ports[0].Name = "rbd-mover"
+			d.Service.Spec.Ports[0].Name = containerNameRBD
 		} else {
-			d.Service.Spec.Ports[0].Name = "cephfs-mover"
+			d.Service.Spec.Ports[0].Name = containerNameCephFS
 		}
 		d.Service.Spec.Ports[0].Port = wcommon.TLSPort
 		d.Service.Spec.Ports[0].Protocol = corev1.ProtocolTCP

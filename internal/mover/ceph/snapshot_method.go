@@ -48,12 +48,14 @@ func isSnapshotReady(snap *snapv1.VolumeSnapshot) bool {
 		snap.Status.ReadyToUse != nil && *snap.Status.ReadyToUse
 }
 
-// findSnapshotWithStatus returns the first snapshot matching the given status label,
-// or nil if none found.
-func (m *Mover) findSnapshotWithStatus(
-	ctx context.Context, status string,
+// findCurrentSnapshot returns the first snapshot with
+// "current" status label, or nil if none found.
+func (m *Mover) findCurrentSnapshot(
+	ctx context.Context,
 ) (*snapv1.VolumeSnapshot, error) {
-	snapshots, err := m.listSnapshotsWithStatus(ctx, status)
+	snapshots, err := m.listSnapshotsWithStatus(
+		ctx, snapshotStatusCurrent,
+	)
 	if err != nil || len(snapshots) == 0 {
 		return nil, err
 	}
@@ -203,7 +205,7 @@ func (m *Mover) ensurePVCFromSrcWithStatusLabels(
 	src *corev1.PersistentVolumeClaim,
 ) (*corev1.PersistentVolumeClaim, error) {
 	// Look for snapshot with status=current
-	currentSnap, err := m.findSnapshotWithStatus(ctx, snapshotStatusCurrent)
+	currentSnap, err := m.findCurrentSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +357,7 @@ func (m *Mover) getVolumeEnvVars(
 	if err != nil {
 		return envVars, err
 	}
-	targetSnapshot, err := m.findSnapshotWithStatus(ctx, snapshotStatusCurrent)
+	targetSnapshot, err := m.findCurrentSnapshot(ctx)
 	if err != nil {
 		return envVars, err
 	}
@@ -488,7 +490,7 @@ func (m *Mover) transitionSnapshotStatuses(
 	}
 
 	// Step 2: Transition status=current to status=previous
-	currentSnap, err := m.findSnapshotWithStatus(ctx, snapshotStatusCurrent)
+	currentSnap, err := m.findCurrentSnapshot(ctx)
 	if err != nil {
 		m.logger.Error(err, "failed to find current snapshot")
 		return err

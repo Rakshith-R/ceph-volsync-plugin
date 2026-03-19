@@ -44,12 +44,12 @@ func TestInitCached_Source_CephFS(t *testing.T) {
 	if m.namePrefix != wantPrefix {
 		t.Errorf("namePrefix = %q, want %q", m.namePrefix, wantPrefix)
 	}
-	if m.containerName != "cephfs-mover" {
-		t.Errorf("containerName = %q, want %q", m.containerName, "cephfs-mover")
+	if m.containerName != containerNameCephFS {
+		t.Errorf("containerName = %q, want %q", m.containerName, containerNameCephFS)
 	}
-	if m.serviceSelector["app.kubernetes.io/component"] != "cephfs-mover" {
+	if m.serviceSelector["app.kubernetes.io/component"] != containerNameCephFS {
 		t.Errorf("serviceSelector component = %q, want %q",
-			m.serviceSelector["app.kubernetes.io/component"], "cephfs-mover")
+			m.serviceSelector["app.kubernetes.io/component"], containerNameCephFS)
 	}
 	if m.serviceSelector["app.kubernetes.io/name"] != "src-test-rs" {
 		t.Errorf("serviceSelector name = %q, want %q",
@@ -72,8 +72,8 @@ func TestInitCached_Dest_RBD(t *testing.T) {
 	if m.namePrefix != wantPrefix {
 		t.Errorf("namePrefix = %q, want %q", m.namePrefix, wantPrefix)
 	}
-	if m.containerName != "rbd-mover" {
-		t.Errorf("containerName = %q, want %q", m.containerName, "rbd-mover")
+	if m.containerName != containerNameRBD {
+		t.Errorf("containerName = %q, want %q", m.containerName, containerNameRBD)
 	}
 	if m.serviceSelector["app.kubernetes.io/name"] != "dst-test-rs" {
 		t.Errorf("serviceSelector name = %q, want %q",

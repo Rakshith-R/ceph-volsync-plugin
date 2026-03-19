@@ -88,7 +88,7 @@ func TestSetSnapshotStatus_Nil(t *testing.T) {
 
 func TestSetSnapshotStatus_Updates(t *testing.T) {
 	t.Parallel()
-	snap := newSnapshot("snap-1", "test-ns", nil, true)
+	snap := newSnapshot("snap-1", nil)
 	m := newTestMover(t, true, MoverTypeCephFS, snap)
 	ctx := t.Context()
 
@@ -111,7 +111,7 @@ func TestSetSnapshotStatus_AlreadySet(t *testing.T) {
 	t.Parallel()
 	m := newTestMover(t, true, MoverTypeCephFS)
 	labels := map[string]string{m.snapStatusLabelKey: "current"}
-	snap := newSnapshot("snap-1", "test-ns", labels, true)
+	snap := newSnapshot("snap-1", labels)
 
 	// Re-create mover with the pre-labeled snapshot
 	m = newTestMover(t, true, MoverTypeCephFS, snap)
@@ -128,12 +128,12 @@ func TestListSnapshotsWithStatus(t *testing.T) {
 	m := newTestMover(t, true, MoverTypeCephFS)
 	labelKey := m.snapStatusLabelKey
 
-	snap1 := newSnapshot("snap-1", "test-ns",
-		map[string]string{labelKey: "current"}, true)
-	snap2 := newSnapshot("snap-2", "test-ns",
-		map[string]string{labelKey: "previous"}, true)
-	snap3 := newSnapshot("snap-3", "test-ns",
-		map[string]string{labelKey: "current"}, true)
+	snap1 := newSnapshot("snap-1",
+		map[string]string{labelKey: "current"})
+	snap2 := newSnapshot("snap-2",
+		map[string]string{labelKey: "previous"})
+	snap3 := newSnapshot("snap-3",
+		map[string]string{labelKey: "current"})
 
 	m = newTestMover(t, true, MoverTypeCephFS, snap1, snap2, snap3)
 	ctx := t.Context()
@@ -173,22 +173,22 @@ func TestFindSnapshotWithStatus(t *testing.T) {
 	ctx := t.Context()
 
 	// No snapshots — should return nil
-	found, err := m.findSnapshotWithStatus(ctx, "current")
+	found, err := m.findCurrentSnapshot(ctx)
 	if err != nil {
-		t.Fatalf("findSnapshotWithStatus() error: %v", err)
+		t.Fatalf("findCurrentSnapshot() error: %v", err)
 	}
 	if found != nil {
 		t.Error("expected nil, got snapshot")
 	}
 
 	// With a matching snapshot
-	snap := newSnapshot("snap-1", "test-ns",
-		map[string]string{labelKey: "current"}, true)
+	snap := newSnapshot("snap-1",
+		map[string]string{labelKey: "current"})
 	m = newTestMover(t, true, MoverTypeCephFS, snap)
 
-	found, err = m.findSnapshotWithStatus(ctx, "current")
+	found, err = m.findCurrentSnapshot(ctx)
 	if err != nil {
-		t.Fatalf("findSnapshotWithStatus() error: %v", err)
+		t.Fatalf("findCurrentSnapshot() error: %v", err)
 	}
 	if found == nil {
 		t.Fatal("expected snapshot, got nil")
@@ -203,10 +203,10 @@ func TestTransitionSnapshotStatuses(t *testing.T) {
 	m := newTestMover(t, true, MoverTypeCephFS)
 	labelKey := m.snapStatusLabelKey
 
-	current := newSnapshot("snap-current", "test-ns",
-		map[string]string{labelKey: "current"}, true)
-	prev := newSnapshot("snap-prev", "test-ns",
-		map[string]string{labelKey: "previous"}, true)
+	current := newSnapshot("snap-current",
+		map[string]string{labelKey: "current"})
+	prev := newSnapshot("snap-prev",
+		map[string]string{labelKey: "previous"})
 
 	m = newTestMover(t, true, MoverTypeCephFS, current, prev)
 	ctx := t.Context()

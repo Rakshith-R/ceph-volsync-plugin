@@ -37,6 +37,9 @@ const (
 
 	volSyncCephFSPrefix = mover.VolSyncPrefix + "cephfs-"
 
+	containerNameRBD    = "rbd-mover"
+	containerNameCephFS = "cephfs-mover"
+
 	// Paths for ceph-csi config mounted in the operator
 	csiConfigMountPath = "/etc/ceph-csi-config"
 
@@ -122,10 +125,10 @@ func (m *Mover) initCached() {
 	}
 	if m.moverType == MoverTypeRBD {
 		m.namePrefix = mover.VolSyncPrefix + "rbd-"
-		m.containerName = "rbd-mover"
+		m.containerName = containerNameRBD
 	} else {
 		m.namePrefix = volSyncCephFSPrefix
-		m.containerName = "cephfs-mover"
+		m.containerName = containerNameCephFS
 	}
 	m.serviceSelector = map[string]string{
 		"app.kubernetes.io/name":      m.direction + "-" + m.owner.GetName(),

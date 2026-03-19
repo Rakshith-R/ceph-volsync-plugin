@@ -66,8 +66,8 @@ func TestReconcile_CephFS(t *testing.T) {
 	if created.Spec.Ports[1].Port != wcommon.RsyncStunnelPort {
 		t.Errorf("port[1] = %d, want %d", created.Spec.Ports[1].Port, wcommon.RsyncStunnelPort)
 	}
-	if created.Spec.Ports[0].Name != "cephfs-mover" {
-		t.Errorf("port[0].Name = %q, want %q", created.Spec.Ports[0].Name, "cephfs-mover")
+	if created.Spec.Ports[0].Name != containerNameCephFS {
+		t.Errorf("port[0].Name = %q, want %q", created.Spec.Ports[0].Name, containerNameCephFS)
 	}
 }
 
@@ -100,8 +100,8 @@ func TestReconcile_RBD(t *testing.T) {
 	if err := cl.Get(ctx, client.ObjectKeyFromObject(svc), created); err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
-	if created.Spec.Ports[0].Name != "rbd-mover" {
-		t.Errorf("port[0].Name = %q, want %q", created.Spec.Ports[0].Name, "rbd-mover")
+	if created.Spec.Ports[0].Name != containerNameRBD {
+		t.Errorf("port[0].Name = %q, want %q", created.Spec.Ports[0].Name, containerNameRBD)
 	}
 	if created.Spec.Ports[1].Port != wcommon.RBDGRPCPort {
 		t.Errorf("port[1] = %d, want %d", created.Spec.Ports[1].Port, wcommon.RBDGRPCPort)
