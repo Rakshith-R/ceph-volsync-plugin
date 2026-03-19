@@ -77,26 +77,24 @@ type syncState struct {
 	rsyncTarget string
 }
 
-// SourceConfig holds configuration for the CephFS
-// source worker.
-type SourceConfig struct {
-	DestinationAddress string
-}
-
 // SourceWorker represents a CephFS source worker
 // instance.
 type SourceWorker struct {
-	logger logr.Logger
-	config SourceConfig
+	common.BaseSourceWorker
 }
 
-// NewSourceWorker creates a new CephFS source worker.
+// NewSourceWorker creates a new CephFS source
+// worker.
 func NewSourceWorker(
-	logger logr.Logger, cfg SourceConfig,
+	logger logr.Logger, cfg common.SourceConfig,
 ) *SourceWorker {
 	return &SourceWorker{
-		logger: logger.WithName("source-worker"),
-		config: cfg,
+		BaseSourceWorker: common.BaseSourceWorker{
+			Logger: logger.WithName(
+				"cephfs-source-worker",
+			),
+			Config: cfg,
+		},
 	}
 }
 
@@ -104,43 +102,29 @@ func NewSourceWorker(
 func (w *SourceWorker) Run(
 	ctx context.Context,
 ) error {
-	w.logger.Info("Starting source worker")
+	return w.BaseSourceWorker.Run(ctx, w)
+}
 
-	if w.config.DestinationAddress == "" {
-		w.logger.Info(
-			"No destination address provided, " +
-				"running without version checks",
-		)
-		<-ctx.Done()
-		w.logger.Info("Source worker shutting down")
-		return ctx.Err()
-	}
-
-	w.logger.Info(
-		"Connecting to destination",
-		"address", w.config.DestinationAddress,
-	)
-
-	conn, err := common.ConnectToDestination(
-		ctx, w.logger,
-		w.config.DestinationAddress,
-	)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Close() }()
-
+// Sync implements common.Syncer. It performs CephFS
+// snapdiff sync or falls back to rsync.
+func (w *SourceWorker) Sync(
+	ctx context.Context,
+	conn *grpc.ClientConn,
+) error {
 	baseSnapshotHandle := os.Getenv(
 		worker.EnvBaseSnapshotHandle,
 	)
 	targetSnapshotHandle := os.Getenv(
 		worker.EnvTargetSnapshotHandle,
 	)
-	volumeHandle := os.Getenv(worker.EnvVolumeHandle)
+	volumeHandle := os.Getenv(
+		worker.EnvVolumeHandle,
+	)
+
 	if baseSnapshotHandle == "" ||
 		targetSnapshotHandle == "" ||
 		volumeHandle == "" {
-		w.logger.Info(
+		w.Logger.Info(
 			"Snapshot handles not set, " +
 				"using rsync on /data",
 		)
@@ -149,7 +133,8 @@ func (w *SourceWorker) Run(
 
 	return w.runSnapdiffSync(
 		ctx, conn,
-		baseSnapshotHandle, targetSnapshotHandle,
+		baseSnapshotHandle,
+		targetSnapshotHandle,
 		volumeHandle,
 	)
 }
@@ -161,11 +146,11 @@ func (w *SourceWorker) runRsyncFallback(
 ) error {
 	err := w.rsync()
 	if err != nil {
-		w.logger.Error(err, "rsync failed")
+		w.Logger.Error(err, "rsync failed")
 		return fmt.Errorf("rsync failed: %w", err)
 	}
 
-	return common.SignalDone(ctx, w.logger, conn)
+	return common.SignalDone(ctx, w.Logger, conn)
 }
 
 // runSnapdiffSync decodes snapshot handles, creates a
@@ -180,7 +165,7 @@ func (w *SourceWorker) runSnapdiffSync(
 		baseSnapshotHandle,
 	)
 	if err != nil {
-		w.logger.Error(
+		w.Logger.Error(
 			err,
 			"Failed to decompose BASE_SNAPSHOT_HANDLE",
 		)
@@ -195,7 +180,7 @@ func (w *SourceWorker) runSnapdiffSync(
 		targetSnapshotHandle,
 	)
 	if err != nil {
-		w.logger.Error(
+		w.Logger.Error(
 			err,
 			"Failed to decompose "+
 				"TARGET_SNAPSHOT_HANDLE",
@@ -210,7 +195,7 @@ func (w *SourceWorker) runSnapdiffSync(
 	volumeID := &volid.CSIIdentifier{}
 	err = volumeID.DecomposeCSIID(volumeHandle)
 	if err != nil {
-		w.logger.Error(
+		w.Logger.Error(
 			err,
 			"Failed to decompose VOLUME_HANDLE",
 		)
@@ -223,7 +208,7 @@ func (w *SourceWorker) runSnapdiffSync(
 		config.CsiConfigFile, volumeID.ClusterID,
 	)
 	if err != nil {
-		w.logger.Error(
+		w.Logger.Error(
 			err, "Failed to get subvolume group",
 		)
 		return fmt.Errorf(
@@ -278,7 +263,7 @@ func (w *SourceWorker) runSnapdiffSync(
 		)
 	}
 
-	return common.SignalDone(ctx, w.logger, conn)
+	return common.SignalDone(ctx, w.Logger, conn)
 }
 
 // rsync performs the rsync synchronization with retry
@@ -292,7 +277,7 @@ func (w *SourceWorker) rsync() error {
 		"rsync://127.0.0.1:%s/data", rsyncDaemonPort,
 	)
 
-	w.logger.Info(
+	w.Logger.Info(
 		"Starting rsync synchronization",
 		"target", rsyncTarget,
 	)
@@ -303,7 +288,7 @@ func (w *SourceWorker) rsync() error {
 
 	for rc != 0 && retry < maxRetries {
 		retry++
-		w.logger.Info(
+		w.Logger.Info(
 			"Rsync attempt",
 			"retry", retry,
 			"maxRetries", maxRetries,
@@ -311,7 +296,7 @@ func (w *SourceWorker) rsync() error {
 
 		rcA, err := w.createFileListAndSync(rsyncTarget)
 		if err != nil {
-			w.logger.Error(
+			w.Logger.Error(
 				err,
 				"Failed to create file list or sync",
 				"retry", retry,
@@ -328,7 +313,7 @@ func (w *SourceWorker) rsync() error {
 
 		if rc != 0 {
 			if retry < maxRetries {
-				w.logger.Info(
+				w.Logger.Info(
 					"Synchronization failed, retrying",
 					"delay", delay,
 					"retry", retry,
@@ -338,7 +323,7 @@ func (w *SourceWorker) rsync() error {
 				time.Sleep(delay)
 				delay = delay * backoffFactor
 			} else {
-				w.logger.Error(
+				w.Logger.Error(
 					fmt.Errorf(
 						"rsync failed with code %d",
 						rc,
@@ -351,7 +336,7 @@ func (w *SourceWorker) rsync() error {
 	}
 
 	duration := time.Since(startTime)
-	w.logger.Info(
+	w.Logger.Info(
 		"Rsync completed",
 		"durationSeconds", duration.Seconds(),
 		"returnCode", rc,
@@ -365,7 +350,7 @@ func (w *SourceWorker) rsync() error {
 		)
 	}
 
-	w.logger.Info("Synchronization successful")
+	w.Logger.Info("Synchronization successful")
 	return nil
 }
 
@@ -406,7 +391,7 @@ func (w *SourceWorker) createFileListAndSync(
 	}
 
 	if fileInfo.Size() == 0 {
-		w.logger.Info(
+		w.Logger.Info(
 			"Skipping sync of empty source directory",
 		)
 		return 0, nil
@@ -423,7 +408,7 @@ func (w *SourceWorker) createFileListAndSync(
 		rsyncTarget,
 	}
 
-	w.logger.Info(
+	w.Logger.Info(
 		"Running first rsync pass (file preservation)",
 		"args", strings.Join(rsyncArgs, " "),
 	)
@@ -434,20 +419,20 @@ func (w *SourceWorker) createFileListAndSync(
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			w.logger.Info(
+			w.Logger.Info(
 				"First rsync pass failed",
 				"exitCode", exitErr.ExitCode(),
 			)
 			return exitErr.ExitCode(), nil
 		}
-		w.logger.Error(
+		w.Logger.Error(
 			err,
 			"Failed to execute first rsync pass",
 		)
 		return 1, err
 	}
 
-	w.logger.Info(
+	w.Logger.Info(
 		"First rsync pass completed successfully",
 	)
 	return 0, nil
@@ -470,7 +455,7 @@ func (w *SourceWorker) syncForDeletion(
 		rsyncTarget,
 	}
 
-	w.logger.Info(
+	w.Logger.Info(
 		"Running second rsync pass (deletion)",
 		"args", strings.Join(rsyncArgs, " "),
 	)
@@ -481,20 +466,20 @@ func (w *SourceWorker) syncForDeletion(
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			w.logger.Info(
+			w.Logger.Info(
 				"Second rsync pass failed",
 				"exitCode", exitErr.ExitCode(),
 			)
 			return exitErr.ExitCode()
 		}
-		w.logger.Error(
+		w.Logger.Error(
 			err,
 			"Failed to execute second rsync pass",
 		)
 		return 1
 	}
 
-	w.logger.Info(
+	w.Logger.Info(
 		"Second rsync pass completed successfully",
 	)
 	return 0
@@ -507,7 +492,7 @@ func (w *SourceWorker) runStatelessSync(
 	differ *ceph.SnapshotDiffer,
 	dataClient apiv1.DataServiceClient,
 ) error {
-	w.logger.Info("Starting stateless snapshot sync")
+	w.Logger.Info("Starting stateless snapshot sync")
 
 	stream, err := dataClient.Sync(ctx)
 	if err != nil {
@@ -582,7 +567,7 @@ func (w *SourceWorker) runStatelessSync(
 		)
 	}
 
-	w.logger.Info(
+	w.Logger.Info(
 		"Stateless sync completed successfully",
 	)
 	return nil
@@ -600,7 +585,7 @@ func (w *SourceWorker) walkAndStreamDirectories() (
 	go func() {
 		defer close(dirChan)
 
-		w.logger.Info(
+		w.Logger.Info(
 			"Starting directory walk",
 			"sourceDir", common.DataMountPath,
 		)
@@ -613,7 +598,7 @@ func (w *SourceWorker) walkAndStreamDirectories() (
 				walkErr error,
 			) error {
 				if walkErr != nil {
-					w.logger.Error(
+					w.Logger.Error(
 						walkErr,
 						"Error accessing path "+
 							"during directory walk",
@@ -657,7 +642,7 @@ func (w *SourceWorker) walkAndStreamDirectories() (
 			return
 		}
 
-		w.logger.Info(
+		w.Logger.Info(
 			"Directory walk completed", "count", count,
 		)
 		errChan <- nil
@@ -682,7 +667,7 @@ func (w *SourceWorker) initSyncState(
 	return &syncState{
 		differ:      differ,
 		dataClient:  dataClient,
-		logger:      w.logger,
+		logger:      w.Logger,
 		deleteChan:  make(chan string, 1000),
 		smallChan:   make(chan string, 1000),
 		metaChan:    make(chan string, 1000),
@@ -696,7 +681,7 @@ func (w *SourceWorker) processDirectorySnapdiff(
 	ctx context.Context, state *syncState,
 	dirPath string,
 ) error {
-	w.logger.V(1).Info(
+	w.Logger.V(1).Info(
 		"Processing directory snapdiff",
 		"path", dirPath,
 	)
@@ -780,7 +765,7 @@ func (w *SourceWorker) processFile(
 
 	fileInfo, err := os.Stat(fullPath)
 	if os.IsNotExist(err) {
-		w.logger.Info(
+		w.Logger.Info(
 			"File deleted, queuing for batch delete",
 			"path", entryPath,
 		)
@@ -805,7 +790,7 @@ func (w *SourceWorker) processFile(
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		w.logger.V(1).Info(
+		w.Logger.V(1).Info(
 			"Queued small file for rsync",
 			"path", entryPath, "size", fileSize,
 		)
@@ -941,7 +926,7 @@ func (w *SourceWorker) streamBlockDiff(
 		)
 	}
 
-	w.logger.V(1).Info(
+	w.Logger.V(1).Info(
 		"Streamed block diff", "path", relPath,
 	)
 	return nil
@@ -976,7 +961,7 @@ func (w *SourceWorker) deleteWorker(
 		}
 	}
 
-	w.logger.Info("Delete worker finished")
+	w.Logger.Info("Delete worker finished")
 	return nil
 }
 
@@ -1028,7 +1013,7 @@ func (w *SourceWorker) smallRsyncWorker(
 		}
 	}
 
-	w.logger.Info("Small file rsync worker finished")
+	w.Logger.Info("Small file rsync worker finished")
 	return nil
 }
 
@@ -1060,7 +1045,7 @@ func (w *SourceWorker) metaRsyncWorker(
 		}
 	}
 
-	w.logger.Info("Metadata rsync worker finished")
+	w.Logger.Info("Metadata rsync worker finished")
 	return nil
 }
 
@@ -1104,7 +1089,7 @@ func (w *SourceWorker) rsyncBatch(
 func (w *SourceWorker) rsyncConvergence(
 	state *syncState,
 ) error {
-	w.logger.Info(
+	w.Logger.Info(
 		"Rsync convergence: syncing directory metadata",
 	)
 	rsyncDirArgs := []string{
@@ -1133,7 +1118,7 @@ func (w *SourceWorker) rsyncFromList(
 ) error {
 	info, err := os.Stat(listPath)
 	if err != nil || info.Size() == 0 {
-		w.logger.Info(
+		w.Logger.Info(
 			"Skipping rsync, empty list",
 			"list", listPath,
 		)
