@@ -179,76 +179,86 @@ func runMover(config Config) error {
 	return w.Run(ctx)
 }
 
-// Runner is an interface for mover workers.
-type Runner interface {
-	Run(ctx context.Context) error
+// workerFactory creates a Worker for a given worker
+// type and config.
+type workerFactory func(
+	logger logr.Logger,
+	workerType string,
+	srcCfg common.SourceConfig,
+	dstCfg common.DestinationConfig,
+) (common.Worker, error)
+
+var factories = map[string]workerFactory{
+	"cephfs": newCephFSWorker,
+	"rbd":    newRBDWorker,
 }
 
 func newWorker(
 	logger logr.Logger, config Config,
-) (Runner, error) {
-	switch config.MoverType {
-	case "cephfs":
-		return newCephFSWorker(logger, config)
-	case "rbd":
-		return newRBDWorker(logger, config)
-	default:
+) (common.Worker, error) {
+	factory, ok := factories[config.MoverType]
+	if !ok {
 		return nil, fmt.Errorf(
-			"invalid MOVER_TYPE '%s':"+
-				" must be 'cephfs' or 'rbd'",
+			"unsupported MOVER_TYPE '%s'",
 			config.MoverType,
 		)
 	}
+
+	return factory(
+		logger,
+		config.WorkerType,
+		common.SourceConfig{
+			DestinationAddress:
+				config.DestinationAddress,
+		},
+		common.DestinationConfig{
+			ServerPort: config.ServerPort,
+		},
+	)
 }
 
 func newCephFSWorker(
-	logger logr.Logger, config Config,
-) (Runner, error) {
-	switch config.WorkerType {
+	logger logr.Logger,
+	workerType string,
+	srcCfg common.SourceConfig,
+	dstCfg common.DestinationConfig,
+) (common.Worker, error) {
+	switch workerType {
 	case workerTypeSource:
 		return wcephfs.NewSourceWorker(
-			logger,
-			common.SourceConfig{
-				DestinationAddress: config.DestinationAddress,
-			},
+			logger, srcCfg,
 		), nil
 	case workerTypeDestination:
 		return wcephfs.NewDestinationWorker(
-			logger,
-			common.DestinationConfig{
-				ServerPort: config.ServerPort,
-			},
+			logger, dstCfg,
 		), nil
 	default:
 		return nil, fmt.Errorf(
 			"invalid worker type: %s",
-			config.WorkerType,
+			workerType,
 		)
 	}
 }
 
 func newRBDWorker(
-	logger logr.Logger, config Config,
-) (Runner, error) {
-	switch config.WorkerType {
+	logger logr.Logger,
+	workerType string,
+	srcCfg common.SourceConfig,
+	dstCfg common.DestinationConfig,
+) (common.Worker, error) {
+	switch workerType {
 	case workerTypeSource:
 		return wrbd.NewSourceWorker(
-			logger,
-			common.SourceConfig{
-				DestinationAddress: config.DestinationAddress,
-			},
+			logger, srcCfg,
 		), nil
 	case workerTypeDestination:
 		return wrbd.NewDestinationWorker(
-			logger,
-			common.DestinationConfig{
-				ServerPort: config.ServerPort,
-			},
+			logger, dstCfg,
 		), nil
 	default:
 		return nil, fmt.Errorf(
 			"invalid worker type: %s",
-			config.WorkerType,
+			workerType,
 		)
 	}
 }
