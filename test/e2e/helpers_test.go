@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -48,6 +49,10 @@ const dataMatchPollInterval = 30 * time.Second
 // sub-waits inside tryValidateSyncedData (PVC bound,
 // snapshot ready, pod completion).
 const innerPollInterval = 5 * time.Second
+
+// deleteTimeout is the timeout for waiting on
+// resource deletion in cleanup helpers.
+const deleteTimeout = 2 * time.Minute
 
 // driverConfig holds driver-specific parameters
 // for parameterized e2e tests.
@@ -1292,31 +1297,48 @@ func cleanupTryResources(
 	ctx context.Context,
 	snapPrefix, copyMethod string,
 ) {
-	_ = k8sClientSet.CoreV1().
-		Pods(namespace).
-		Delete(
-			ctx, snapPrefix+"-compare",
-			metav1.DeleteOptions{},
-		)
+	deleteAndWaitFor(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      snapPrefix + "-compare",
+			Namespace: namespace,
+		},
+	})
 
-	_ = k8sClientSet.CoreV1().
-		PersistentVolumeClaims(namespace).
-		Delete(
-			ctx, snapPrefix+"-temp",
-			metav1.DeleteOptions{},
-		)
+	deleteAndWaitFor(ctx, &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      snapPrefix + "-temp",
+			Namespace: namespace,
+		},
+	})
 
 	if copyMethod == "Direct" {
-		snap := &snapv1.VolumeSnapshot{
+		deleteAndWaitFor(ctx, &snapv1.VolumeSnapshot{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      snapPrefix + "-validate",
 				Namespace: namespace,
 			},
-		}
-		_ = client.IgnoreNotFound(
-			k8sClient.Delete(ctx, snap),
-		)
+		})
 	}
+}
+
+func deleteAndWaitFor(
+	ctx context.Context, obj client.Object,
+) {
+	_ = client.IgnoreNotFound(
+		k8sClient.Delete(ctx, obj),
+	)
+	key := types.NamespacedName{
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+	}
+	Eventually(func() bool {
+		err := k8sClient.Get(
+			ctx, key, obj,
+		)
+		return apierrors.IsNotFound(err)
+	}).WithPolling(
+		innerPollInterval,
+	).WithTimeout(deleteTimeout).Should(BeTrue())
 }
 
 // tryCompareDataInPod creates a comparison pod and
