@@ -32,26 +32,21 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
-// SourceConfig holds configuration for the RBD source
-// worker.
-type SourceConfig struct {
-	DestinationAddress string
-}
-
 // SourceWorker represents an RBD source worker
 // instance.
 type SourceWorker struct {
-	logger logr.Logger
-	config SourceConfig
+	common.BaseSourceWorker
 }
 
 // NewSourceWorker creates a new RBD source worker.
 func NewSourceWorker(
-	logger logr.Logger, cfg SourceConfig,
+	logger logr.Logger, cfg common.SourceConfig,
 ) *SourceWorker {
 	return &SourceWorker{
-		logger: logger.WithName("rbd-source-worker"),
-		config: cfg,
+		BaseSourceWorker: common.BaseSourceWorker{
+			Logger: logger.WithName("rbd-source-worker"),
+			Config: cfg,
+		},
 	}
 }
 
@@ -72,33 +67,17 @@ type sourceContext struct {
 }
 
 // Run starts the RBD source worker.
+func (w *SourceWorker) Run(ctx context.Context) error {
+	return w.BaseSourceWorker.Run(ctx, w)
+}
+
+// Sync performs the RBD source sync operation.
 //
 //nolint:funlen // sequential orchestration steps
-func (w *SourceWorker) Run(
-	ctx context.Context,
+func (w *SourceWorker) Sync(
+	ctx context.Context, conn *grpc.ClientConn,
 ) (err error) {
-	w.logger.Info("Starting RBD source worker")
-
-	conn, err := common.ConnectToDestination(
-		ctx, w.logger,
-		w.config.DestinationAddress,
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallSendMsgSize(
-				common.MaxGRPCMessageSize,
-			),
-		),
-	)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if cerr := conn.Close(); cerr != nil && err == nil {
-			err = fmt.Errorf(
-				"failed to close gRPC connection: %w",
-				cerr,
-			)
-		}
-	}()
+	w.Logger.Info("Starting RBD source sync")
 
 	sc, cc, err := w.resolveSourceConfig()
 	if err != nil {
@@ -291,7 +270,7 @@ func (w *SourceWorker) resolveFullDiffFromVolume(
 	}
 	sc.parentPoolName = poolName
 
-	w.logger.Info(
+	w.Logger.Info(
 		"Using full diff (no snapshots)",
 		"image", sc.parentImageName,
 	)
@@ -419,14 +398,14 @@ func (w *SourceWorker) resolveSnapshotDiff(
 		sc.fromSnapID = bParentInfo.Snap.ID
 		_ = baseImage.Close()
 
-		w.logger.Info(
+		w.Logger.Info(
 			"Using incremental diff",
 			"baseSnap", baseSnapName,
 			"targetSnap", targetSnapName,
 			"fromSnapID", sc.fromSnapID,
 		)
 	} else {
-		w.logger.Info(
+		w.Logger.Info(
 			"Using full diff (no base snapshot)",
 			"targetSnap", targetSnapName,
 		)
@@ -555,7 +534,7 @@ func (w *SourceWorker) commitAndSignalDone(
 		)
 	}
 
-	w.logger.Info("Block diff sync completed")
+	w.Logger.Info("Block diff sync completed")
 
-	return common.SignalDone(ctx, w.logger, conn)
+	return common.SignalDone(ctx, w.Logger, conn)
 }
