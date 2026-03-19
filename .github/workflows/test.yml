@@ -67,7 +67,7 @@ jobs:
       - name: Build and load container images
         run: |
           go mod tidy
-          make manifests generate fmt vet check-uncommitted
+          make manifests generate test check-uncommitted
           make docker-build IMG=$IMG
           make docker-build-mover MOVER_IMG=$MOVER_IMG
           make install
