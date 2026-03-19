@@ -29,29 +29,24 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
-// DestinationConfig holds configuration for the RBD
-// destination worker.
-type DestinationConfig struct {
-	ServerPort string
-}
-
 // DestinationWorker represents an RBD destination
 // worker instance.
 type DestinationWorker struct {
-	logger logr.Logger
-	config DestinationConfig
+	common.BaseDestinationWorker
 }
 
 // NewDestinationWorker creates a new RBD destination
 // worker.
 func NewDestinationWorker(
-	logger logr.Logger, config DestinationConfig,
+	logger logr.Logger, config common.DestinationConfig,
 ) *DestinationWorker {
 	return &DestinationWorker{
-		logger: logger.WithName(
-			"rbd-destination-worker",
-		),
-		config: config,
+		BaseDestinationWorker: common.BaseDestinationWorker{
+			Logger: logger.WithName(
+				"rbd-destination-worker",
+			),
+			Config: config,
+		},
 	}
 }
 
@@ -59,17 +54,11 @@ func NewDestinationWorker(
 func (w *DestinationWorker) Run(
 	ctx context.Context,
 ) error {
-	w.logger.Info("Starting RBD destination worker")
-
 	dataServer := &RBDDataServer{
-		logger:     w.logger,
+		logger:     w.Logger,
 		devicePath: common.DevicePath,
 	}
-
-	return common.RunDestinationServer(
-		ctx, w.logger, w.config.ServerPort, dataServer,
-		grpc.MaxRecvMsgSize(common.MaxGRPCMessageSize),
-	)
+	return w.BaseDestinationWorker.Run(ctx, dataServer)
 }
 
 // RBDDataServer implements DataService for block
