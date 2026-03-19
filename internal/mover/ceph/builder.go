@@ -189,7 +189,7 @@ func (rb *Builder) FromSource(cl client.Client, logger logr.Logger,
 	saHandler := utils.NewSAHandler(cl, source, isSource, privileged,
 		nil)
 
-	return &Mover{
+	m := &Mover{
 		client:            cl,
 		logger:            logger.WithValues("method", "Ceph"),
 		eventRecorder:     eventRecorder,
@@ -208,7 +208,10 @@ func (rb *Builder) FromSource(cl client.Client, logger logr.Logger,
 		latestMoverStatus: source.Status.LatestMoverStatus,
 		moverConfig:       volsyncv1alpha1.MoverConfig{},
 		options:           source.Spec.External.Parameters,
-	}, nil
+	}
+	m.initCached()
+
+	return m, nil
 }
 
 //nolint:funlen
@@ -289,7 +292,7 @@ func (rb *Builder) FromDestination(cl client.Client, logger logr.Logger,
 
 	var destPVC = options[optDestinationPVC]
 
-	return &Mover{
+	m := &Mover{
 		client:            cl,
 		logger:            logger.WithValues("method", "Ceph"),
 		eventRecorder:     eventRecorder,
@@ -302,11 +305,14 @@ func (rb *Builder) FromDestination(cl client.Client, logger logr.Logger,
 		isSource:          isSource,
 		paused:            destination.Spec.Paused,
 		mainPVCName:       &destPVC,
-		cleanupTempPVC:    false, // Not applicable for ceph
+		cleanupTempPVC:    false,
 		privileged:        privileged,
 		destStatus:        destination.Status.RsyncTLS,
 		latestMoverStatus: destination.Status.LatestMoverStatus,
 		moverConfig:       volsyncv1alpha1.MoverConfig{},
 		options:           options,
-	}, nil
+	}
+	m.initCached()
+
+	return m, nil
 }

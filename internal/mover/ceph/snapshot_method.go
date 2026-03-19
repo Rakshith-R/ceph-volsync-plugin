@@ -42,21 +42,14 @@ const (
 	snapshotStatusPrevious = "previous"
 )
 
-// snapshotStatusLabelKey returns the label key for snapshot status, including owner name for easier identification
-func (m *Mover) snapshotStatusLabelKey() string {
-	return utils.VolsyncLabelPrefix + "/snapshot-status-" + m.owner.GetName()
-}
-
-// isSnapshotReady checks if a snapshot is ready to use
 func isSnapshotReady(snap *snapv1.VolumeSnapshot) bool {
-	if snap == nil {
-		return false
-	}
-	return snap.Status != nil && snap.Status.ReadyToUse != nil && *snap.Status.ReadyToUse
+	return snap != nil && snap.Status != nil &&
+		snap.Status.ReadyToUse != nil && *snap.Status.ReadyToUse
 }
 
-// findSnapshotWithStatus finds a snapshot with specific status label
-func (m *Mover) findSnapshotWithStatus(ctx context.Context, status string) (*snapv1.VolumeSnapshot, error) {
+func (m *Mover) findSnapshotWithStatus(
+	ctx context.Context, status string,
+) (*snapv1.VolumeSnapshot, error) {
 	snapshots, err := m.listSnapshotsWithStatus(ctx, status)
 	if err != nil || len(snapshots) == 0 {
 		return nil, err
@@ -64,9 +57,8 @@ func (m *Mover) findSnapshotWithStatus(ctx context.Context, status string) (*sna
 	return &snapshots[0], nil
 }
 
-// listSnapshotsWithStatus lists all snapshots with specific status label
 func (m *Mover) listSnapshotsWithStatus(ctx context.Context, status string) ([]snapv1.VolumeSnapshot, error) {
-	selector, err := labels.Parse(m.snapshotStatusLabelKey() + "=" + status)
+	selector, err := labels.Parse(m.snapStatusLabelKey + "=" + status)
 	if err != nil {
 		return nil, err
 	}
@@ -84,13 +76,14 @@ func (m *Mover) listSnapshotsWithStatus(ctx context.Context, status string) ([]s
 	return snapList.Items, nil
 }
 
-// setSnapshotStatus updates the snapshot status label
-func (m *Mover) setSnapshotStatus(ctx context.Context, snap *snapv1.VolumeSnapshot, status string) error {
+func (m *Mover) setSnapshotStatus(
+	ctx context.Context, snap *snapv1.VolumeSnapshot, status string,
+) error {
 	if snap == nil {
 		return nil
 	}
 
-	updated := utils.AddLabel(snap, m.snapshotStatusLabelKey(), status)
+	updated := utils.AddLabel(snap, m.snapStatusLabelKey, status)
 	if !updated {
 		return nil // Label already set to desired value
 	}
@@ -98,9 +91,10 @@ func (m *Mover) setSnapshotStatus(ctx context.Context, snap *snapv1.VolumeSnapsh
 	return m.client.Update(ctx, snap)
 }
 
-// ensureSnapshotWithStatusLabel creates or gets a snapshot with status=current label
-func (m *Mover) ensureSnapshotWithStatusLabel(ctx context.Context, logger logr.Logger,
-	src *corev1.PersistentVolumeClaim, name string) (*snapv1.VolumeSnapshot, error) {
+func (m *Mover) ensureSnapshotWithStatusLabel(
+	ctx context.Context, logger logr.Logger,
+	src *corev1.PersistentVolumeClaim, name string,
+) (*snapv1.VolumeSnapshot, error) {
 	snapshot := &snapv1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -114,7 +108,7 @@ func (m *Mover) ensureSnapshotWithStatusLabel(ctx context.Context, logger logr.L
 		}
 		utils.SetOwnedByVolSync(snapshot)
 		// utils.MarkForCleanup(m.owner, snapshot)
-		utils.AddLabel(snapshot, m.snapshotStatusLabelKey(), snapshotStatusCurrent)
+		utils.AddLabel(snapshot, m.snapStatusLabelKey, snapshotStatusCurrent)
 
 		vsClassName := m.options[optVolumeSnapshotClassName]
 		// Set snapshot spec if creating
@@ -141,9 +135,10 @@ func (m *Mover) ensureSnapshotWithStatusLabel(ctx context.Context, logger logr.L
 	return snapshot, nil
 }
 
-// createPVCFromSnapshot creates or gets a PVC from a snapshot
-func (m *Mover) createPVCFromSnapshot(ctx context.Context, logger logr.Logger,
-	snap *snapv1.VolumeSnapshot, src *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+func (m *Mover) createPVCFromSnapshot(
+	ctx context.Context, logger logr.Logger,
+	snap *snapv1.VolumeSnapshot, src *corev1.PersistentVolumeClaim,
+) (*corev1.PersistentVolumeClaim, error) {
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      snap.Name,
@@ -191,9 +186,10 @@ func (m *Mover) createPVCFromSnapshot(ctx context.Context, logger logr.Logger,
 	return pvc, nil
 }
 
-// ensurePVCFromSrcWithStatusLabels creates a PVC from source using status-labeled snapshots
-func (m *Mover) ensurePVCFromSrcWithStatusLabels(ctx context.Context, logger logr.Logger,
-	src *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+func (m *Mover) ensurePVCFromSrcWithStatusLabels(
+	ctx context.Context, logger logr.Logger,
+	src *corev1.PersistentVolumeClaim,
+) (*corev1.PersistentVolumeClaim, error) {
 	// Look for snapshot with status=current
 	currentSnap, err := m.findSnapshotWithStatus(ctx, snapshotStatusCurrent)
 	if err != nil {
@@ -214,7 +210,7 @@ func (m *Mover) ensurePVCFromSrcWithStatusLabels(ctx context.Context, logger log
 	} else {
 		// Create new snapshot with status=current
 		suffix := strconv.FormatInt(time.Now().Unix(), 10)
-		dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction() + "-" + suffix
+		dataName := mover.VolSyncPrefix + m.owner.GetName() + "-" + m.direction + "-" + suffix
 
 		logger.V(1).Info("Creating new snapshot with status=current", "name", dataName)
 		snap, err = m.ensureSnapshotWithStatusLabel(ctx, logger, src, dataName)
@@ -226,11 +222,10 @@ func (m *Mover) ensurePVCFromSrcWithStatusLabels(ctx context.Context, logger log
 	return m.createPVCFromSnapshot(ctx, logger, snap, src)
 }
 
-// getVolumeEnvVars returns environment variables needed for volume operations
-// mainly VOLUME_HANDLE, BASE_SNAPSHOT_HANDLE and TARGET_SNAPSHOT_HANDLE.
 func (m *Mover) getVolumeEnvVars(
 	ctx context.Context,
-	dataPVC *corev1.PersistentVolumeClaim) ([]corev1.EnvVar, error) {
+	dataPVC *corev1.PersistentVolumeClaim,
+) ([]corev1.EnvVar, error) {
 	srcPVC := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      *m.mainPVCName,
@@ -379,8 +374,9 @@ func (m *Mover) getVolumeEnvVars(
 	return envVars, nil
 }
 
-// getVolumeHandle fetches the volume handle for a given volume name.
-func (m *Mover) getVolumeHandle(ctx context.Context, volumeName string) (string, error) {
+func (m *Mover) getVolumeHandle(
+	ctx context.Context, volumeName string,
+) (string, error) {
 	pv := &corev1.PersistentVolume{}
 	err := m.client.Get(ctx, client.ObjectKey{
 		Name: volumeName,
@@ -397,8 +393,9 @@ func (m *Mover) getVolumeHandle(ctx context.Context, volumeName string) (string,
 	return pv.Spec.CSI.VolumeHandle, nil
 }
 
-// getSnapshotHandle fetches the snapshot handle for a given snapshot name.
-func (m *Mover) getSnapshotHandle(ctx context.Context, snapshotName string) (string, error) {
+func (m *Mover) getSnapshotHandle(
+	ctx context.Context, snapshotName string,
+) (string, error) {
 	snapshot := &snapv1.VolumeSnapshot{}
 	err := m.client.Get(ctx, client.ObjectKey{
 		Name:      snapshotName,
@@ -433,10 +430,9 @@ func (m *Mover) getSnapshotHandle(ctx context.Context, snapshotName string) (str
 	return *content.Status.SnapshotHandle, nil
 }
 
-// transitionSnapshotStatuses handles the snapshot lifecycle transitions during cleanup:
-// 1. Marks all but the most recent previous snapshots for cleanup
-// 2. Transitions the current snapshot to previous status
-func (m *Mover) transitionSnapshotStatuses(ctx context.Context) error {
+func (m *Mover) transitionSnapshotStatuses(
+	ctx context.Context,
+) error {
 	// Step 1: Mark all snapshots with status=previous for deletion, preserving the most recent
 	previousSnaps, err := m.listSnapshotsWithStatus(ctx, snapshotStatusPrevious)
 	if err != nil {
@@ -460,7 +456,7 @@ func (m *Mover) transitionSnapshotStatuses(ctx context.Context) error {
 			}
 			snap := &previousSnaps[i]
 			updated := utils.MarkForCleanup(m.owner, snap)
-			updated = updated || utils.RemoveLabel(snap, m.snapshotStatusLabelKey())
+			updated = updated || utils.RemoveLabel(snap, m.snapStatusLabelKey)
 			if updated {
 				if err := m.client.Update(ctx, snap); err != nil {
 					m.logger.Error(err, "failed to mark previous snapshot for cleanup", "snapshot", snap.Name)
