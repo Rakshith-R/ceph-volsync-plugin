@@ -283,7 +283,13 @@ func (m *Mover) ensureJob(
 		// Run mover in debug mode if required
 		podSpec.Containers[0].Env = utils.AppendDebugMoverEnvVar(m.owner, podSpec.Containers[0].Env)
 
-		logger.V(1).Info("Job has PVC", "PVC", dataPVC, "DS", dataPVC.Spec.DataSource)
+		var dsName string
+		if ds := dataPVC.Spec.DataSource; ds != nil {
+			dsName = ds.Kind + "/" + ds.Name
+		}
+		logger.V(1).Info("Job has PVC",
+			"PVC", client.ObjectKeyFromObject(dataPVC),
+			"DS", dsName)
 		return nil
 	})
 	// If Job had failed, delete it so it can be recreated
