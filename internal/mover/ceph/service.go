@@ -41,7 +41,7 @@ func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context) (bool, error
 			Namespace: m.owner.GetNamespace(),
 		},
 	}
-	svcDesc := rsyncSvcDescription{
+	svcDesc := svcDescription{
 		Context:     ctx,
 		Client:      m.client,
 		Service:     service,

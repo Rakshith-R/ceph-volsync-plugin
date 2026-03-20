@@ -26,9 +26,7 @@ type SourceConfig struct {
 
 // DestinationConfig holds shared configuration for
 // all destination workers.
-type DestinationConfig struct {
-	ServerPort string
-}
+type DestinationConfig struct{}
 
 // Worker is implemented by all mover workers.
 type Worker interface {

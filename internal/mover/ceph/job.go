@@ -101,11 +101,6 @@ func (m *Mover) ensureJob(
 		})
 
 		containerEnv = append(containerEnv, corev1.EnvVar{
-			Name:  worker.EnvServerPort,
-			Value: wcommon.DefaultServerPort,
-		})
-
-		containerEnv = append(containerEnv, corev1.EnvVar{
 			Name:  worker.EnvLogLevel,
 			Value: "info",
 		})

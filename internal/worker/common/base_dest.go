@@ -42,7 +42,7 @@ func (w *BaseDestinationWorker) Run(
 
 	return RunDestinationServer(
 		ctx, w.Logger,
-		w.Config.ServerPort, dataServer,
+		DefaultServerPort, dataServer,
 		grpc.MaxRecvMsgSize(MaxGRPCMessageSize),
 	)
 }

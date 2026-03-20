@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+
+	wcommon "github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
 const (
@@ -54,7 +56,6 @@ type StunnelConfig struct {
 	WorkerType         string
 	DestinationAddress string
 	DestinationPort    string
-	ServerPort         string
 	EnableRsyncTunnel  bool
 	RsyncPort          string
 	RsyncDaemonPort    string
@@ -200,12 +201,12 @@ func (s *Stunnel) writeDestinationConfig(
 	fmt.Fprintf(b, "[grpc-tls]\n")
 	fmt.Fprintf(b, "accept = %s\n", s.config.DestinationPort)
 	fmt.Fprintf(
-		b, "connect = 127.0.0.1:%s\n", s.config.ServerPort,
+		b, "connect = 127.0.0.1:%s\n", wcommon.DefaultServerPort,
 	)
 
 	s.logger.Info("gRPC tunnel configured",
 		"accept", s.config.DestinationPort,
-		"connect", "127.0.0.1:"+s.config.ServerPort,
+		"connect", "127.0.0.1:"+wcommon.DefaultServerPort,
 	)
 
 	if s.config.EnableRsyncTunnel {

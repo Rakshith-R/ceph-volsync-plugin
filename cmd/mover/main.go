@@ -47,7 +47,6 @@ type Config struct {
 	MoverType          string
 	DestinationAddress string
 	LogLevel           string
-	ServerPort         string
 	DestinationPort    string
 	EnableRsyncTunnel  bool
 	RsyncPort          string
@@ -81,9 +80,6 @@ func loadConfig() Config {
 		),
 		LogLevel: envOrDefault(
 			worker.EnvLogLevel, "info",
-		),
-		ServerPort: envOrDefault(
-			worker.EnvServerPort, "8080",
 		),
 		DestinationPort: envOrDefault(
 			worker.EnvDestinationPort, "8000",
@@ -136,7 +132,6 @@ func runMover(config Config) error {
 			WorkerType:         config.WorkerType,
 			DestinationAddress: config.DestinationAddress,
 			DestinationPort:    config.DestinationPort,
-			ServerPort:         config.ServerPort,
 			EnableRsyncTunnel:  config.EnableRsyncTunnel,
 			RsyncPort:          config.RsyncPort,
 			RsyncDaemonPort:    config.RsyncDaemonPort,
@@ -210,9 +205,7 @@ func newWorker(
 		common.SourceConfig{
 			DestinationAddress: config.DestinationAddress,
 		},
-		common.DestinationConfig{
-			ServerPort: config.ServerPort,
-		},
+		common.DestinationConfig{},
 	)
 }
 

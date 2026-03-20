@@ -18,8 +18,6 @@ package common_test
 
 import (
 	"context"
-	"fmt"
-	"net"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -35,18 +33,8 @@ type mockDataServer struct {
 func TestBaseDestWorker_ListensOnPort(
 	t *testing.T,
 ) {
-	lis, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := lis.Addr().(*net.TCPAddr).Port
-	_ = lis.Close()
-
 	w := common.BaseDestinationWorker{
 		Logger: logr.Discard(),
-		Config: common.DestinationConfig{
-			ServerPort: fmt.Sprintf("%d", port),
-		},
 	}
 
 	ctx, cancel := context.WithCancel(

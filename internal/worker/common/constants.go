@@ -54,10 +54,6 @@ const (
 	// TLSPort is the stunnel TLS proxy port.
 	TLSPort int32 = 8000
 
-	// RBDGRPCPort is the gRPC server port for RBD
-	// mover workers.
-	RBDGRPCPort int32 = 8080
-
 	// RsyncStunnelPort is the rsync stunnel port for
 	// CephFS mover workers.
 	RsyncStunnelPort int32 = 8873
@@ -70,8 +66,8 @@ const (
 	// TLSPort for env var configuration.
 	DefaultServerStunnelPort = "8000"
 
-	// DefaultServerPort is the string form of
-	// RBDGRPCPort for env var configuration.
+	// DefaultServerPort is the gRPC server listen
+	// port inside the mover container.
 	DefaultServerPort = "8080"
 
 	// DefaultRsyncStunnelPort is the string form of

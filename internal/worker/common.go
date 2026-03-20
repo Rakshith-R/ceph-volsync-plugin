@@ -22,7 +22,6 @@ package worker
 const (
 	EnvWorkerType           = "WORKER_TYPE"
 	EnvDestinationPort      = "DESTINATION_PORT"
-	EnvServerPort           = "SERVER_PORT"
 	EnvLogLevel             = "LOG_LEVEL"
 	EnvRsyncPort            = "RSYNC_PORT"
 	EnvRsyncDaemonPort      = "RSYNC_DAEMON_PORT"

@@ -31,9 +31,11 @@ import (
 	wcommon "github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
-// rsyncSvcDescription holds parameters for reconciling
-// a dual-port Service (TLS + protocol-specific port).
-type rsyncSvcDescription struct {
+const grpcServerPortName = "grpc-server"
+
+// svcDescription holds parameters for reconciling
+// the mover Service (TLS port + optional rsync port).
+type svcDescription struct {
 	Context     context.Context
 	Client      client.Client
 	Service     *corev1.Service
@@ -46,7 +48,7 @@ type rsyncSvcDescription struct {
 }
 
 // Reconcile creates or updates the Service with TLS and protocol-specific ports.
-func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
+func (d *svcDescription) Reconcile(l logr.Logger) error {
 	logger := l.WithValues("service", client.ObjectKeyFromObject(d.Service))
 
 	op, err := ctrlutil.CreateOrUpdate(d.Context, d.Client, d.Service, func() error {
@@ -58,26 +60,22 @@ func (d *rsyncSvcDescription) Reconcile(l logr.Logger) error {
 
 		d.Service.Spec.Type = corev1.ServiceTypeClusterIP
 		d.Service.Spec.Selector = d.Selector
-		if len(d.Service.Spec.Ports) != 2 {
-			d.Service.Spec.Ports = []corev1.ServicePort{{}, {}}
+
+		portCount := 1
+		if d.MoverType == MoverTypeCephFS {
+			portCount = 2
+		}
+		if len(d.Service.Spec.Ports) != portCount {
+			d.Service.Spec.Ports = make([]corev1.ServicePort, portCount)
 		}
 
-		if d.MoverType == MoverTypeRBD {
-			d.Service.Spec.Ports[0].Name = containerNameRBD
-		} else {
-			d.Service.Spec.Ports[0].Name = containerNameCephFS
-		}
+		d.Service.Spec.Ports[0].Name = grpcServerPortName
 		d.Service.Spec.Ports[0].Port = wcommon.TLSPort
 		d.Service.Spec.Ports[0].Protocol = corev1.ProtocolTCP
 		d.Service.Spec.Ports[0].TargetPort = intstr.FromInt32(wcommon.TLSPort)
 		d.Service.Spec.Ports[0].NodePort = 0
 
-		if d.MoverType == MoverTypeRBD {
-			d.Service.Spec.Ports[1].Name = "rbd-grpc-server"
-			d.Service.Spec.Ports[1].Port = wcommon.RBDGRPCPort
-			d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP
-			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(wcommon.RBDGRPCPort)
-		} else {
+		if d.MoverType == MoverTypeCephFS {
 			d.Service.Spec.Ports[1].Name = "rsync-server"
 			d.Service.Spec.Ports[1].Port = wcommon.RsyncStunnelPort
 			d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP

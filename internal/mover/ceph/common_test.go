@@ -40,7 +40,7 @@ func TestReconcile_CephFS(t *testing.T) {
 			Namespace: "test-ns",
 		},
 	}
-	desc := rsyncSvcDescription{
+	desc := svcDescription{
 		Context:   ctx,
 		Client:    cl,
 		Service:   svc,
@@ -66,8 +66,8 @@ func TestReconcile_CephFS(t *testing.T) {
 	if created.Spec.Ports[1].Port != wcommon.RsyncStunnelPort {
 		t.Errorf("port[1] = %d, want %d", created.Spec.Ports[1].Port, wcommon.RsyncStunnelPort)
 	}
-	if created.Spec.Ports[0].Name != containerNameCephFS {
-		t.Errorf("port[0].Name = %q, want %q", created.Spec.Ports[0].Name, containerNameCephFS)
+	if created.Spec.Ports[0].Name != grpcServerPortName {
+		t.Errorf("port[0].Name = %q, want %q", created.Spec.Ports[0].Name, grpcServerPortName)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestReconcile_RBD(t *testing.T) {
 			Namespace: "test-ns",
 		},
 	}
-	desc := rsyncSvcDescription{
+	desc := svcDescription{
 		Context:   ctx,
 		Client:    cl,
 		Service:   svc,
@@ -100,10 +100,10 @@ func TestReconcile_RBD(t *testing.T) {
 	if err := cl.Get(ctx, client.ObjectKeyFromObject(svc), created); err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
-	if created.Spec.Ports[0].Name != containerNameRBD {
-		t.Errorf("port[0].Name = %q, want %q", created.Spec.Ports[0].Name, containerNameRBD)
+	if len(created.Spec.Ports) != 1 {
+		t.Fatalf("len(ports) = %d, want 1", len(created.Spec.Ports))
 	}
-	if created.Spec.Ports[1].Port != wcommon.RBDGRPCPort {
-		t.Errorf("port[1] = %d, want %d", created.Spec.Ports[1].Port, wcommon.RBDGRPCPort)
+	if created.Spec.Ports[0].Name != grpcServerPortName {
+		t.Errorf("port[0].Name = %q, want %q", created.Spec.Ports[0].Name, grpcServerPortName)
 	}
 }
