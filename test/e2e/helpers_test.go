@@ -68,12 +68,13 @@ type driverConfig struct {
 // drivers is the list of storage drivers to test.
 var drivers = []driverConfig{
 	{
-		name: "nfs",
-		provider: "rook-ceph." +
-			"nfs.csi.ceph.com",
-		sc:      "rook-nfs",
-		vsClass: "csi-nfsplugin-snapclass",
-	}, {
+		// TODO: uncomment after nfs support shallow volume
+		// 	name: "nfs",
+		// 	provider: "rook-ceph." +
+		// 		"nfs.csi.ceph.com",
+		// 	sc:      "rook-nfs",
+		// 	vsClass: "csi-nfsplugin-snapclass",
+		// }, {
 		name: "cephfs",
 		provider: "rook-ceph." +
 			"cephfs.csi.ceph.com",
