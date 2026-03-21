@@ -10,6 +10,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+type noopReader struct{}
+
+func (noopReader) ReadAt(_ string, _, _ int64) ([]byte, error) { return nil, nil }
+func (noopReader) CloseFile(_ string) error                    { return nil }
+
 type mockSyncStream struct {
 	grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse]
 	mu   sync.Mutex
@@ -52,7 +57,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 
 	stream := &mockSyncStream{}
 
-	err := StageSendData(ctx, cfg, mem, win, stream, inCh)
+	err := StageSendData(ctx, cfg, mem, win, stream, inCh, noopReader{})
 	if err != nil {
 		t.Fatal(err)
 	}

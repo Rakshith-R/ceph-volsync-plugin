@@ -92,7 +92,7 @@ func (p *Pipeline) Run(
 
 	// Stage 5: SendData - batched gRPC sends
 	g.Go(func() error {
-		return StageSendData(gctx, cfg, memRaw, win, stream, compressedCh)
+		return StageSendData(gctx, cfg, memRaw, win, stream, compressedCh, reader)
 	})
 
 	return g.Wait()

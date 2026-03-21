@@ -2,11 +2,30 @@ package pipeline
 
 import (
 	"context"
+	"runtime"
 
 	"google.golang.org/grpc"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 )
+
+type pendingCommit struct {
+	path      string
+	lastReqID uint64
+}
+
+func sendCommit(
+	stream grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse],
+	path string,
+) error {
+	return stream.Send(&apiv1.SyncRequest{
+		Operation: &apiv1.SyncRequest_Commit{
+			Commit: &apiv1.CommitRequest{
+				Path: path,
+			},
+		},
+	})
+}
 
 func StageSendData(
 	ctx context.Context,
@@ -15,8 +34,9 @@ func StageSendData(
 	win *WindowSemaphore,
 	stream grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse],
 	inCh <-chan CompressedChunk,
+	reader DataReader,
 ) error {
-	return dataSendWorker(ctx, cfg, memRaw, win, stream, inCh)
+	return dataSendWorker(ctx, cfg, memRaw, win, stream, inCh, reader)
 }
 
 func dataSendWorker(
@@ -26,12 +46,15 @@ func dataSendWorker(
 	win *WindowSemaphore,
 	stream grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse],
 	inCh <-chan CompressedChunk,
+	reader DataReader,
 ) error {
 	var (
-		blocks  []*apiv1.ChangedBlock
-		pending []held
-		accum   int
-		curPath string
+		blocks     []*apiv1.ChangedBlock
+		pending    []held
+		accum      int
+		curPath    string
+		prevReqID  uint64
+		commits    []pendingCommit
 	)
 
 	flush := func() error {
@@ -65,13 +88,59 @@ func dataSendWorker(
 		return nil
 	}
 
+	drainPending := func(currentReqID uint64) error {
+		for len(commits) > 0 {
+			head := commits[0]
+			if currentReqID < head.lastReqID+uint64(cfg.MaxWindow)+2 {
+				break
+			}
+			if err := sendCommit(stream, head.path); err != nil {
+				return err
+			}
+			if err := reader.CloseFile(head.path); err != nil {
+				return err
+			}
+			commits = commits[1:]
+		}
+		return nil
+	}
+
 	for {
 		var cc CompressedChunk
 		var ok bool
 		select {
 		case cc, ok = <-inCh:
 			if !ok {
-				return flush()
+				if err := flush(); err != nil {
+					return err
+				}
+
+				// Drain remaining commits using IsReleased
+				for len(commits) > 0 {
+					head := commits[0]
+					for !win.IsReleased(head.lastReqID) {
+						runtime.Gosched()
+					}
+					if err := sendCommit(stream, head.path); err != nil {
+						return err
+					}
+					if err := reader.CloseFile(head.path); err != nil {
+						return err
+					}
+					commits = commits[1:]
+				}
+
+				// Send commit for final file
+				if curPath != "" {
+					if err := sendCommit(stream, curPath); err != nil {
+						return err
+					}
+					if err := reader.CloseFile(curPath); err != nil {
+						return err
+					}
+				}
+
+				return nil
 			}
 		case <-ctx.Done():
 			for i := range pending {
@@ -80,7 +149,22 @@ func dataSendWorker(
 			return ctx.Err()
 		}
 
+		// File boundary detected
+		if curPath != "" && cc.FilePath != curPath {
+			if err := flush(); err != nil {
+				return err
+			}
+			commits = append(commits, pendingCommit{
+				path:      curPath,
+				lastReqID: prevReqID,
+			})
+			if err := drainPending(cc.ReqID); err != nil {
+				return err
+			}
+		}
+
 		curPath = cc.FilePath
+		prevReqID = cc.ReqID
 
 		algo := apiv1.CompressionAlgo_COMPRESSION_LZ4
 		if cc.IsRaw {
