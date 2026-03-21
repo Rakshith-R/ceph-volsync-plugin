@@ -29,7 +29,7 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/rbd/pipeline"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/pipeline"
 )
 
 // SourceWorker represents an RBD source worker

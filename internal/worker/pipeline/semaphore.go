@@ -148,7 +148,7 @@ func (w *WindowSemaphore) Release(reqID uint64) {
 
 	// Use absolute (ring-buffer) indexing, consistent
 	// with the advance loop below.
-	idx := int(reqID%uint64(w.limit)) //nolint:gosec // G115: result in [0, limit)
+	idx := int(reqID % uint64(w.limit)) //nolint:gosec // G115: result in [0, limit)
 	w.released[idx] = true
 	w.inFlight--
 
