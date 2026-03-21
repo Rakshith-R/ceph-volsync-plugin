@@ -58,10 +58,17 @@ func NewDestinationWorker(
 func (w *DestinationWorker) Run(
 	ctx context.Context,
 ) error {
+	cache := NewWriteCache(common.DataMountPath)
+	defer func() { _ = cache.Close() }()
+
 	dataServer := &DataServer{
 		logger: w.Logger,
+		cache:  cache,
 	}
-	hashServer := NewCephFSHashServer(w.Logger)
+	hashServer := &CephFSHashServer{
+		logger: w.Logger,
+		cache:  cache,
+	}
 
 	return w.RunWithHash(
 		ctx, dataServer, hashServer,
@@ -73,6 +80,7 @@ func (w *DestinationWorker) Run(
 type DataServer struct {
 	apiv1.UnimplementedDataServiceServer
 	logger logr.Logger
+	cache  *FileCache
 }
 
 // Sync handles a client-streaming RPC that processes
@@ -85,19 +93,14 @@ func (s *DataServer) Sync(
 	],
 ) (err error) {
 	var file *os.File
-	var fullPath string
+	var curPath string
 
 	defer func() {
-		if file != nil {
-			if serr := file.Sync(); serr != nil && err == nil {
-				err = fmt.Errorf(
-					"failed to sync file: %w", serr,
-				)
-			}
-			if cerr := file.Close(); cerr != nil && err == nil {
-				err = fmt.Errorf(
-					"failed to close file: %w", cerr,
-				)
+		if curPath != "" {
+			if serr := s.cache.SyncAndRelease(
+				curPath,
+			); serr != nil && err == nil {
+				err = serr
 			}
 		}
 	}()
@@ -116,64 +119,36 @@ func (s *DataServer) Sync(
 		switch op := req.Operation.(type) {
 		case *apiv1.SyncRequest_Write:
 			if file == nil {
-				fullPath, err = sanitizePath(
-					op.Write.Path,
-				)
+				curPath = op.Write.Path
+				file, err = s.cache.Acquire(curPath)
 				if err != nil {
 					return err
-				}
-
-				dir := filepath.Dir(fullPath)
-				if err := os.MkdirAll(dir, 0755); err != nil { //nolint:gosec // G301: rsync daemon needs world-readable dirs
-					return fmt.Errorf(
-						"failed to create parent "+
-							"directory %s: %w",
-						dir, err,
-					)
-				}
-
-				file, err = os.OpenFile( //nolint:gosec // G304: path constructed from validated input
-					fullPath,
-					os.O_RDWR|os.O_CREATE, 0644,
-				)
-				if err != nil {
-					return fmt.Errorf(
-						"failed to open file %s: %w",
-						fullPath, err,
-					)
 				}
 			}
 
 			if err := s.writeBlocks(
-				file, fullPath, op.Write,
+				file, curPath, op.Write,
 			); err != nil {
 				return err
 			}
 
 		case *apiv1.SyncRequest_Commit:
-			if file != nil {
+			if curPath != "" {
 				s.logger.Info(
 					"Committing file",
-					"path", fullPath,
+					"path", curPath,
 				)
-				if err := file.Sync(); err != nil {
-					return fmt.Errorf(
-						"failed to sync file %s: %w",
-						fullPath, err,
-					)
-				}
-				if err := file.Close(); err != nil {
-					return fmt.Errorf(
-						"failed to close file %s: %w",
-						fullPath, err,
-					)
+				if err := s.cache.SyncAndRelease(
+					curPath,
+				); err != nil {
+					return err
 				}
 				s.logger.Info(
 					"Successfully committed file",
-					"path", fullPath,
+					"path", curPath,
 				)
 				file = nil
-				fullPath = ""
+				curPath = ""
 			}
 
 		default:
@@ -204,7 +179,7 @@ func sanitizePath(relPath string) (string, error) {
 }
 
 // writeBlocks writes a batch of changed blocks to
-// the file.
+// the file using WriteAt for concurrent safety.
 func (s *DataServer) writeBlocks(
 	file *os.File, fullPath string,
 	req *apiv1.WriteRequest,
@@ -256,23 +231,12 @@ func (s *DataServer) writeBlocks(
 	}
 
 	for i, block := range req.Blocks {
-		if _, err := file.Seek(int64(block.Offset), 0); err != nil { //nolint:gosec // G115: value within safe range
-			s.logger.Error(
-				err, "Failed to seek",
-				"path", fullPath,
-				"offset", block.Offset,
-				"block_index", i,
-			)
-			return fmt.Errorf(
-				"failed to seek to offset %d "+
-					"in %s: %w",
-				block.Offset, fullPath, err,
-			)
-		}
-
+		offset := int64(block.Offset) //nolint:gosec // G115: value within safe range
 		if block.IsZero {
 			zeros := make([]byte, block.Length)
-			if _, err := file.Write(zeros); err != nil {
+			if _, err := file.WriteAt(
+				zeros, offset,
+			); err != nil {
 				s.logger.Error(
 					err, "Failed to write zeros",
 					"path", fullPath,
@@ -293,7 +257,9 @@ func (s *DataServer) writeBlocks(
 				"length", block.Length,
 			)
 		} else {
-			if _, err := file.Write(block.Data); err != nil {
+			if _, err := file.WriteAt(
+				block.Data, offset,
+			); err != nil {
 				s.logger.Error(
 					err, "Failed to write data",
 					"path", fullPath,

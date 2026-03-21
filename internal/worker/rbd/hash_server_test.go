@@ -17,14 +17,45 @@ limitations under the License.
 package rbd
 
 import (
-	"context"
 	"crypto/sha256"
+	"io"
 	"os"
 	"testing"
 
-	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/go-logr/logr"
+	"google.golang.org/grpc"
+
+	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 )
+
+// mockHashBidiStream implements a single-exchange
+// bidi stream for testing.
+type mockHashBidiStream struct {
+	grpc.BidiStreamingServer[
+		apiv1.HashBatchRequest,
+		apiv1.HashBatchResponse,
+	]
+	req  *apiv1.HashBatchRequest
+	resp *apiv1.HashBatchResponse
+	done bool
+}
+
+func (m *mockHashBidiStream) Recv() (
+	*apiv1.HashBatchRequest, error,
+) {
+	if m.done {
+		return nil, io.EOF
+	}
+	m.done = true
+	return m.req, nil
+}
+
+func (m *mockHashBidiStream) Send(
+	resp *apiv1.HashBatchResponse,
+) error {
+	m.resp = resp
+	return nil
+}
 
 func TestHashServer_AllMatch(t *testing.T) {
 	f, err := os.CreateTemp("", "hashtest")
@@ -38,16 +69,32 @@ func TestHashServer_AllMatch(t *testing.T) {
 	_ = f.Close()
 
 	hash := sha256.Sum256(data)
-	srv := &HashServer{logger: logr.Discard(), devicePath: f.Name()}
+	srv := &HashServer{
+		logger:     logr.Discard(),
+		devicePath: f.Name(),
+	}
 
-	resp, err := srv.CompareHashes(context.Background(), &apiv1.HashBatchRequest{
-		Hashes: []*apiv1.BlockHash{{RequestId: 0, Offset: 0, Length: 16, Sha256: hash[:]}},
-	})
-	if err != nil {
+	stream := &mockHashBidiStream{
+		req: &apiv1.HashBatchRequest{
+			Hashes: []*apiv1.BlockHash{
+				{
+					RequestId: 0,
+					Offset:    0,
+					Length:    16,
+					Sha256:    hash[:],
+				},
+			},
+		},
+	}
+
+	if err := srv.CompareHashes(stream); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.MismatchedIds) != 0 {
-		t.Fatalf("expected 0 mismatches, got %d", len(resp.MismatchedIds))
+	if len(stream.resp.MismatchedIds) != 0 {
+		t.Fatalf(
+			"expected 0 mismatches, got %d",
+			len(stream.resp.MismatchedIds),
+		)
 	}
 }
 
@@ -63,15 +110,31 @@ func TestHashServer_Mismatch(t *testing.T) {
 	_ = f.Close()
 
 	wrongHash := sha256.Sum256([]byte("wrong"))
-	srv := &HashServer{logger: logr.Discard(), devicePath: f.Name()}
+	srv := &HashServer{
+		logger:     logr.Discard(),
+		devicePath: f.Name(),
+	}
 
-	resp, err := srv.CompareHashes(context.Background(), &apiv1.HashBatchRequest{
-		Hashes: []*apiv1.BlockHash{{RequestId: 0, Offset: 0, Length: 16, Sha256: wrongHash[:]}},
-	})
-	if err != nil {
+	stream := &mockHashBidiStream{
+		req: &apiv1.HashBatchRequest{
+			Hashes: []*apiv1.BlockHash{
+				{
+					RequestId: 0,
+					Offset:    0,
+					Length:    16,
+					Sha256:    wrongHash[:],
+				},
+			},
+		},
+	}
+
+	if err := srv.CompareHashes(stream); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.MismatchedIds) != 1 {
-		t.Fatalf("expected 1 mismatch, got %d", len(resp.MismatchedIds))
+	if len(stream.resp.MismatchedIds) != 1 {
+		t.Fatalf(
+			"expected 1 mismatch, got %d",
+			len(stream.resp.MismatchedIds),
+		)
 	}
 }

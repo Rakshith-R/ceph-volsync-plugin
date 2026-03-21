@@ -17,52 +17,83 @@ limitations under the License.
 package rbd
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/go-logr/logr"
+	"google.golang.org/grpc"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 )
 
-// HashServer implements HashServiceServer for RBD block device hash comparison.
+// HashServer implements HashServiceServer for RBD
+// block device hash comparison.
 type HashServer struct {
 	apiv1.UnimplementedHashServiceServer
 	logger     logr.Logger
 	devicePath string
 }
 
-// CompareHashes reads blocks from the local device, computes SHA-256, and returns mismatched IDs.
+// CompareHashes handles a bidi stream of hash
+// comparison requests. For each batch it reads
+// blocks from the local device, computes SHA-256,
+// and returns mismatched request IDs.
 func (s *HashServer) CompareHashes(
-	_ context.Context, req *apiv1.HashBatchRequest,
-) (*apiv1.HashBatchResponse, error) {
+	stream grpc.BidiStreamingServer[
+		apiv1.HashBatchRequest,
+		apiv1.HashBatchResponse,
+	],
+) error {
 	file, err := os.Open(s.devicePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open device %s: %w", s.devicePath, err)
+		return fmt.Errorf(
+			"failed to open device %s: %w",
+			s.devicePath, err,
+		)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
-	resp := &apiv1.HashBatchResponse{}
-
-	for _, bh := range req.Hashes {
-		data := make([]byte, bh.Length)
-		n, err := file.ReadAt(data, int64(bh.Offset))
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
 		if err != nil {
-			return nil, fmt.Errorf("pread at offset %d: %w", bh.Offset, err)
+			return err
 		}
-		data = data[:n]
 
-		localHash := sha256.Sum256(data)
+		resp := &apiv1.HashBatchResponse{}
+		for _, bh := range req.Hashes {
+			data := make([]byte, bh.Length)
+			n, readErr := file.ReadAt(
+				data, int64(bh.Offset), //nolint:gosec // G115
+			)
+			if readErr != nil && readErr != io.EOF {
+				return fmt.Errorf(
+					"pread at offset %d: %w",
+					bh.Offset, readErr,
+				)
+			}
 
-		if len(bh.Sha256) != 32 || localHash != [32]byte(bh.Sha256) {
-			resp.MismatchedIds = append(resp.MismatchedIds, bh.RequestId)
+			localHash := sha256.Sum256(data[:n])
+			if len(bh.Sha256) != 32 ||
+				localHash != [32]byte(bh.Sha256) {
+				resp.MismatchedIds = append(
+					resp.MismatchedIds,
+					bh.RequestId,
+				)
+			}
+		}
+
+		s.logger.V(1).Info(
+			"Hash comparison complete",
+			"total", len(req.Hashes),
+			"mismatched", len(resp.MismatchedIds),
+		)
+		if err := stream.Send(resp); err != nil {
+			return err
 		}
 	}
-
-	s.logger.V(1).Info("Hash comparison complete",
-		"total", len(req.Hashes), "mismatched", len(resp.MismatchedIds))
-
-	return resp, nil
 }
