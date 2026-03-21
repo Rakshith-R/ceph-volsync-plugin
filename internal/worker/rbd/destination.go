@@ -23,6 +23,7 @@ import (
 	"os"
 
 	"github.com/go-logr/logr"
+	"github.com/pierrec/lz4/v4"
 	"google.golang.org/grpc"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
@@ -58,7 +59,11 @@ func (w *DestinationWorker) Run(
 		logger:     w.Logger,
 		devicePath: common.DevicePath,
 	}
-	return w.BaseDestinationWorker.Run(ctx, dataServer)
+	hashServer := &HashServer{
+		logger:     w.Logger,
+		devicePath: common.DevicePath,
+	}
+	return w.BaseDestinationWorker.RunWithHash(ctx, dataServer, hashServer)
 }
 
 // RBDDataServer implements DataService for block
@@ -195,13 +200,25 @@ func (s *RBDDataServer) writeBlocks(
 				"length", block.Length,
 			)
 		} else {
+			writeData := block.Data
+			if block.Compression == apiv1.CompressionAlgo_COMPRESSION_LZ4 {
+				decompressed := make([]byte, block.Length)
+				n, err := lz4.UncompressBlock(block.Data, decompressed)
+				if err != nil {
+					s.logger.Error(err, "Failed to decompress LZ4",
+						"offset", block.Offset, "block_index", i)
+					return fmt.Errorf("lz4 decompress at offset %d: %w", block.Offset, err)
+				}
+				writeData = decompressed[:n]
+			}
+
 			if _, err := file.WriteAt(
-				block.Data, int64(block.Offset), //nolint:gosec // G115: value within safe range
+				writeData, int64(block.Offset), //nolint:gosec // G115: value within safe range
 			); err != nil {
 				s.logger.Error(
 					err, "Failed to write data",
 					"offset", block.Offset,
-					"length", len(block.Data),
+					"length", len(writeData),
 					"block_index", i,
 				)
 				return fmt.Errorf(
@@ -213,7 +230,8 @@ func (s *RBDDataServer) writeBlocks(
 			s.logger.V(1).Info(
 				"Wrote data block",
 				"offset", block.Offset,
-				"length", len(block.Data),
+				"length", len(writeData),
+				"compressed", block.Compression != apiv1.CompressionAlgo_COMPRESSION_NONE,
 			)
 		}
 	}

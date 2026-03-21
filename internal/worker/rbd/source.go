@@ -22,7 +22,6 @@ import (
 	"os"
 
 	"github.com/go-logr/logr"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
@@ -30,6 +29,7 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/rbd/pipeline"
 )
 
 // SourceWorker represents an RBD source worker
@@ -133,6 +133,7 @@ func (w *SourceWorker) Sync(
 	}
 	defer func() { _ = device.Close() }()
 
+	hashClient := apiv1.NewHashServiceClient(conn)
 	dataClient := apiv1.NewDataServiceClient(conn)
 	stream, err := dataClient.Sync(ctx)
 	if err != nil {
@@ -141,22 +142,9 @@ func (w *SourceWorker) Sync(
 		)
 	}
 
-	blockChan := make(chan common.BlockEntry, 64)
-	g, gctx := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		defer close(blockChan)
-		return w.produceBlocks(
-			gctx, iter, device, blockChan,
-		)
-	})
-	g.Go(func() error {
-		return common.StreamBlocks(
-			stream, blockChan, w.Logger,
-		)
-	})
-
-	if err := g.Wait(); err != nil {
+	cfg := pipeline.Config{}
+	p := pipeline.New(cfg)
+	if err := p.Run(ctx, &rbdIterAdapter{iter: iter}, device, stream, hashClient); err != nil {
 		return err
 	}
 
@@ -427,37 +415,25 @@ func (w *SourceWorker) resolveSnapshotDiff(
 	return nil
 }
 
-// produceBlocks iterates over changed blocks from the
-// diff iterator, reads data from the device, and sends
-// BlockEntry items to blockChan.
-func (w *SourceWorker) produceBlocks(
-	ctx context.Context,
-	iter *ceph.RBDBlockDiffIterator,
-	device *os.File,
-	blockChan chan<- common.BlockEntry,
-) error {
-	for {
-		block, ok := iter.Next()
-		if !ok {
-			break
-		}
+// rbdIterAdapter adapts ceph.RBDBlockDiffIterator to pipeline.BlockIterator.
+type rbdIterAdapter struct {
+	iter *ceph.RBDBlockDiffIterator
+}
 
-		entry, err := common.ReadBlockEntry(
-			device, 0, common.DevicePath,
-			block.Offset, block.Len,
-		)
-		if err != nil {
-			return err
-		}
-
-		select {
-		case blockChan <- entry:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+func (a *rbdIterAdapter) Next() (*pipeline.ChangeBlock, bool) {
+	cb, ok := a.iter.Next()
+	if !ok {
+		return nil, false
 	}
+	return &pipeline.ChangeBlock{
+		FilePath: common.DevicePath,
+		Offset:   cb.Offset,
+		Len:      cb.Len,
+	}, true
+}
 
-	return nil
+func (a *rbdIterAdapter) Close() error {
+	return a.iter.Close()
 }
 
 // closeAndSignalDone closes the sync stream and

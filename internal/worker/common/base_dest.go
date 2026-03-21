@@ -46,3 +46,17 @@ func (w *BaseDestinationWorker) Run(
 		grpc.MaxRecvMsgSize(MaxGRPCMessageSize),
 	)
 }
+
+// RunWithHash starts the destination server with an additional HashServiceServer.
+func (w *BaseDestinationWorker) RunWithHash(
+	ctx context.Context,
+	dataServer apiv1.DataServiceServer,
+	hashServer apiv1.HashServiceServer,
+) error {
+	w.Logger.Info("Starting destination worker")
+
+	return RunDestinationServerWithHash(
+		ctx, w.Logger, DefaultServerPort, dataServer, hashServer,
+		grpc.MaxRecvMsgSize(MaxGRPCMessageSize),
+	)
+}
