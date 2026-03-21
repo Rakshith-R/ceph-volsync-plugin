@@ -153,7 +153,7 @@ func forwardReadToMismatch(
 				Held:     rc.Held,
 			}:
 			case <-ctx.Done():
-				rc.Held.release(memRaw, nil, win)
+				rc.Held.release(memRaw, win)
 				return ctx.Err()
 			}
 		case zc, ok := <-zeroCh:

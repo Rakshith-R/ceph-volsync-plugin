@@ -151,8 +151,8 @@ func hashSender(
 			req.Hashes[i] = &apiv1.BlockHash{
 				RequestId: hc.ReqID,
 				FilePath:  hc.FilePath,
-				Offset:    uint64(hc.Offset),
-				Length:    uint64(hc.Length),
+				Offset:    uint64(hc.Offset), //nolint:gosec // G115: non-negative offset
+				Length:    uint64(hc.Length), //nolint:gosec // G115: non-negative length
 				Sha256:    hc.Hash[:],
 			}
 		}
@@ -179,7 +179,7 @@ func hashSender(
 					return ctx.Err()
 				}
 			} else {
-				hc.Held.release(memRaw, nil, win)
+				hc.Held.release(memRaw, win)
 			}
 		}
 	}

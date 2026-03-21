@@ -63,7 +63,7 @@ func (w *DestinationWorker) Run(
 		logger:     w.Logger,
 		devicePath: common.DevicePath,
 	}
-	return w.BaseDestinationWorker.RunWithHash(ctx, dataServer, hashServer)
+	return w.RunWithHash(ctx, dataServer, hashServer)
 }
 
 // RBDDataServer implements DataService for block

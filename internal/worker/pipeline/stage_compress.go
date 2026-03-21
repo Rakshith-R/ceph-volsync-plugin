@@ -75,7 +75,7 @@ func compressWorker(
 			Held:               hc.Held,
 		}:
 		case <-ctx.Done():
-			hc.Held.release(memRaw, nil, nil)
+			hc.Held.release(memRaw, nil)
 			return ctx.Err()
 		}
 	}

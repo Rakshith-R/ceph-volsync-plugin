@@ -12,7 +12,7 @@ func TestHeld_ReleaseAll(t *testing.T) {
 	_ = mem.Acquire(ctx, 100)
 	_ = win.Acquire(ctx, 0)
 	h := held{reqID: 0, memRawN: 100, hasWin: true, hasMem: true}
-	h.release(mem, nil, win)
+	h.release(mem, win)
 	if h.hasMem || h.hasWin {
 		t.Fatal("flags not cleared")
 	}
@@ -29,8 +29,8 @@ func TestHeld_DoubleRelease(t *testing.T) {
 	_ = mem.Acquire(ctx, 50)
 	_ = win.Acquire(ctx, 0)
 	h := held{reqID: 0, memRawN: 50, hasWin: true, hasMem: true}
-	h.release(mem, nil, win)
-	h.release(mem, nil, win) // should be safe no-op
+	h.release(mem, win)
+	h.release(mem, win) // should be safe no-op
 }
 
 func TestHeld_PartialReleaseMemRaw(t *testing.T) {

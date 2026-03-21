@@ -56,6 +56,28 @@ func StageSendData(
 	return g.Wait()
 }
 
+// drainRemainingCommits waits for all pending commits
+// to be released and sends commit + close for each.
+func drainRemainingCommits(
+	stream grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse],
+	commits []pendingCommit,
+	win *WindowSemaphore,
+	reader DataReader,
+) error {
+	for _, head := range commits {
+		for !win.IsReleased(head.lastReqID) {
+			runtime.Gosched()
+		}
+		if err := sendCommit(stream, head.path); err != nil {
+			return err
+		}
+		if err := reader.CloseFile(head.path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func dataSendWorker(
 	ctx context.Context,
 	cfg *Config,
@@ -90,13 +112,13 @@ func dataSendWorker(
 
 		if err := stream.Send(req); err != nil {
 			for i := range pending {
-				pending[i].release(memRaw, nil, win)
+				pending[i].release(memRaw, win)
 			}
 			return err
 		}
 
 		for i := range pending {
-			pending[i].release(memRaw, nil, win)
+			pending[i].release(memRaw, win)
 		}
 
 		blocks = nil
@@ -108,7 +130,7 @@ func dataSendWorker(
 	drainPending := func(currentReqID uint64) error {
 		for len(commits) > 0 {
 			head := commits[0]
-			if currentReqID < head.lastReqID+uint64(cfg.MaxWindow)+2 {
+			if currentReqID < head.lastReqID+uint64(cfg.MaxWindow)+2 { //nolint:gosec // G115: positive window
 				break
 			}
 			if err := sendCommit(stream, head.path); err != nil {
@@ -132,19 +154,10 @@ func dataSendWorker(
 					return err
 				}
 
-				// Drain remaining commits using IsReleased
-				for len(commits) > 0 {
-					head := commits[0]
-					for !win.IsReleased(head.lastReqID) {
-						runtime.Gosched()
-					}
-					if err := sendCommit(stream, head.path); err != nil {
-						return err
-					}
-					if err := reader.CloseFile(head.path); err != nil {
-						return err
-					}
-					commits = commits[1:]
+				if err := drainRemainingCommits(
+					stream, commits, win, reader,
+				); err != nil {
+					return err
 				}
 
 				// Send commit for final file
@@ -166,7 +179,7 @@ func dataSendWorker(
 			}
 		case <-ctx.Done():
 			for i := range pending {
-				pending[i].release(memRaw, nil, win)
+				pending[i].release(memRaw, win)
 			}
 			return ctx.Err()
 		}
@@ -194,8 +207,8 @@ func dataSendWorker(
 		}
 
 		block := &apiv1.ChangedBlock{
-			Offset:      uint64(cc.Offset),
-			Length:      uint64(cc.UncompressedLength),
+			Offset:      uint64(cc.Offset),             //nolint:gosec // G115: non-negative offset
+			Length:      uint64(cc.UncompressedLength), //nolint:gosec // G115: non-negative length
 			Data:        cc.Data,
 			RequestId:   cc.ReqID,
 			Compression: algo,

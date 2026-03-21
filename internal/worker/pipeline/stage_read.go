@@ -77,12 +77,7 @@ func readWorker(
 			win.Release(chunk.ReqID)
 
 			select {
-			case zeroCh <- ZeroChunk{
-				ReqID:    chunk.ReqID,
-				FilePath: chunk.FilePath,
-				Offset:   chunk.Offset,
-				Length:   chunk.Length,
-			}:
+			case zeroCh <- ZeroChunk(chunk):
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -105,7 +100,7 @@ func readWorker(
 			Held:     h,
 		}:
 		case <-ctx.Done():
-			h.release(memRaw, nil, win)
+			h.release(memRaw, win)
 			return ctx.Err()
 		}
 	}

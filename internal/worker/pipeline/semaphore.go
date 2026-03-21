@@ -114,7 +114,7 @@ func NewWindowSemaphore(maxWindow int) *WindowSemaphore {
 
 func (w *WindowSemaphore) Acquire(ctx context.Context, reqID uint64) error {
 	w.mu.Lock()
-	if reqID-w.base < uint64(w.limit) {
+	if reqID-w.base < uint64(w.limit) { //nolint:gosec // G115: limit is positive
 		w.inFlight++
 		w.checkPressure()
 		w.mu.Unlock()
@@ -152,8 +152,8 @@ func (w *WindowSemaphore) Release(reqID uint64) {
 	w.released[idx] = true
 	w.inFlight--
 
-	for w.released[int(w.base%uint64(w.limit))] {
-		w.released[int(w.base%uint64(w.limit))] = false
+	for w.released[int(w.base%uint64(w.limit))] { //nolint:gosec // G115: bounded by modulo
+		w.released[int(w.base%uint64(w.limit))] = false //nolint:gosec // G115: bounded by modulo
 		w.base++
 	}
 
@@ -207,7 +207,7 @@ func (w *WindowSemaphore) removeWaiter(waiter *winWaiter) {
 func (w *WindowSemaphore) wakeWinWaiters() {
 	for len(w.waiters) > 0 {
 		front := w.waiters[0]
-		if front.reqID-w.base >= uint64(w.limit) {
+		if front.reqID-w.base >= uint64(w.limit) { //nolint:gosec // G115: limit is positive
 			break
 		}
 		w.waiters = w.waiters[1:]
