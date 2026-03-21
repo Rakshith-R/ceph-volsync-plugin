@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"io"
 	"sync"
 	"testing"
 
@@ -43,33 +44,119 @@ func (m *mockIterator) Next() (*ChangeBlock, bool) {
 
 func (m *mockIterator) Close() error { return nil }
 
-type mockHashClientForPipeline struct {
-	apiv1.HashServiceClient
+// mockHashBidiStreamForPipeline returns all chunks
+// as mismatched (forces full send).
+type mockHashBidiStreamForPipeline struct {
+	grpc.BidiStreamingClient[
+		apiv1.HashBatchRequest,
+		apiv1.HashBatchResponse,
+	]
 }
 
-func (m *mockHashClientForPipeline) CompareHashes(
-	_ context.Context,
-	req *apiv1.HashBatchRequest,
-	_ ...grpc.CallOption,
-) (*apiv1.HashBatchResponse, error) {
-	resp := &apiv1.HashBatchResponse{}
-	for _, h := range req.Hashes {
-		resp.MismatchedIds = append(resp.MismatchedIds, h.RequestId)
-	}
-	return resp, nil
+func (m *mockHashBidiStreamForPipeline) Send(
+	_ *apiv1.HashBatchRequest,
+) error {
+	return nil
+}
+
+func (m *mockHashBidiStreamForPipeline) Recv() (
+	*apiv1.HashBatchResponse, error,
+) {
+	// Empty response = all mismatched (no IDs excluded)
+	return &apiv1.HashBatchResponse{}, nil
+}
+
+func (m *mockHashBidiStreamForPipeline) CloseSend() error {
+	return nil
 }
 
 type pipelineMockStream struct {
-	grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse]
+	grpc.ClientStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	]
 	mu   sync.Mutex
 	sent []*apiv1.SyncRequest
 }
 
-func (m *pipelineMockStream) Send(req *apiv1.SyncRequest) error {
+func (m *pipelineMockStream) Send(
+	req *apiv1.SyncRequest,
+) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sent = append(m.sent, req)
 	return nil
+}
+
+func (m *pipelineMockStream) CloseAndRecv() (
+	*apiv1.SyncResponse, error,
+) {
+	return &apiv1.SyncResponse{}, nil
+}
+
+// allMismatchHashStream returns all request IDs
+// as mismatched, forcing the full pipeline path.
+type allMismatchHashStream struct {
+	grpc.BidiStreamingClient[
+		apiv1.HashBatchRequest,
+		apiv1.HashBatchResponse,
+	]
+	mu      sync.Mutex
+	pending []*apiv1.HashBatchRequest
+}
+
+func (m *allMismatchHashStream) Send(
+	req *apiv1.HashBatchRequest,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pending = append(m.pending, req)
+	return nil
+}
+
+func (m *allMismatchHashStream) Recv() (
+	*apiv1.HashBatchResponse, error,
+) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.pending) == 0 {
+		return nil, io.EOF
+	}
+	req := m.pending[0]
+	m.pending = m.pending[1:]
+	resp := &apiv1.HashBatchResponse{}
+	for _, h := range req.Hashes {
+		resp.MismatchedIds = append(
+			resp.MismatchedIds, h.RequestId,
+		)
+	}
+	return resp, nil
+}
+
+func (m *allMismatchHashStream) CloseSend() error {
+	return nil
+}
+
+func newStreamFactory(
+	stream *pipelineMockStream,
+) StreamFactory {
+	return func(_ context.Context) (
+		grpc.ClientStreamingClient[
+			apiv1.SyncRequest, apiv1.SyncResponse,
+		], error,
+	) {
+		return stream, nil
+	}
+}
+
+func newHashStreamFactory() HashStreamFactory {
+	return func(_ context.Context) (
+		grpc.BidiStreamingClient[
+			apiv1.HashBatchRequest,
+			apiv1.HashBatchResponse,
+		], error,
+	) {
+		return &allMismatchHashStream{}, nil
+	}
 }
 
 func TestPipeline_EndToEnd(t *testing.T) {
@@ -92,7 +179,6 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 
 	stream := &pipelineMockStream{}
-	hashClient := &mockHashClientForPipeline{}
 
 	cfg := Config{
 		ChunkSize:         chunkSize,
@@ -102,7 +188,11 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 
 	p := New(cfg)
-	err := p.Run(ctx, iter, reader, stream, hashClient)
+	err := p.Run(
+		ctx, iter, reader,
+		newStreamFactory(stream),
+		newHashStreamFactory(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,11 +208,14 @@ func TestPipeline_EmptyIterator(t *testing.T) {
 	reader := &mockDataReaderForPipeline{data: nil}
 	iter := &mockIterator{}
 	stream := &pipelineMockStream{}
-	hashClient := &mockHashClientForPipeline{}
 
 	cfg := Config{}
 	p := New(cfg)
-	err := p.Run(ctx, iter, reader, stream, hashClient)
+	err := p.Run(
+		ctx, iter, reader,
+		newStreamFactory(stream),
+		newHashStreamFactory(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +236,6 @@ func TestPipeline_ZeroBlocks(t *testing.T) {
 	}
 
 	stream := &pipelineMockStream{}
-	hashClient := &mockHashClientForPipeline{}
 
 	cfg := Config{
 		ChunkSize:         chunkSize,
@@ -153,7 +245,11 @@ func TestPipeline_ZeroBlocks(t *testing.T) {
 	}
 
 	p := New(cfg)
-	err := p.Run(ctx, iter, reader, stream, hashClient)
+	err := p.Run(
+		ctx, iter, reader,
+		newStreamFactory(stream),
+		newHashStreamFactory(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +283,6 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 
 	iter := &mockIterator{blocks: blocks}
 	stream := &pipelineMockStream{}
-	hashClient := &mockHashClientForPipeline{}
 
 	cfg := Config{
 		ChunkSize:         chunkSize,
@@ -197,7 +292,11 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 	}
 
 	p := New(cfg)
-	err := p.Run(ctx, iter, reader, stream, hashClient)
+	err := p.Run(
+		ctx, iter, reader,
+		newStreamFactory(stream),
+		newHashStreamFactory(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +306,7 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 	}
 }
 
-func TestPipeline_NilHashClient(t *testing.T) {
+func TestPipeline_NilHashStream(t *testing.T) {
 	ctx := context.Background()
 
 	chunkSize := int64(64 * 1024)
@@ -235,12 +334,15 @@ func TestPipeline_NilHashClient(t *testing.T) {
 	}
 
 	p := New(cfg)
-	err := p.Run(ctx, iter, reader, stream, nil)
+	err := p.Run(
+		ctx, iter, reader,
+		newStreamFactory(stream), nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(stream.sent) == 0 {
-		t.Fatal("expected data to be sent with nil hashClient")
+		t.Fatal("expected data to be sent with nil hash stream")
 	}
 }
 
@@ -250,7 +352,6 @@ func TestPipeline_ConfigValidation(t *testing.T) {
 	reader := &mockDataReaderForPipeline{data: nil}
 	iter := &mockIterator{}
 	stream := &pipelineMockStream{}
-	hashClient := &mockHashClientForPipeline{}
 
 	// Invalid ChunkSize
 	cfg := Config{
@@ -258,7 +359,11 @@ func TestPipeline_ConfigValidation(t *testing.T) {
 	}
 
 	p := New(cfg)
-	err := p.Run(ctx, iter, reader, stream, hashClient)
+	err := p.Run(
+		ctx, iter, reader,
+		newStreamFactory(stream),
+		newHashStreamFactory(),
+	)
 	if err == nil {
 		t.Fatal("expected validation error for invalid ChunkSize")
 	}

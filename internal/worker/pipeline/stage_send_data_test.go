@@ -28,6 +28,12 @@ func (m *mockSyncStream) Send(req *apiv1.SyncRequest) error {
 	return nil
 }
 
+func (m *mockSyncStream) CloseAndRecv() (
+	*apiv1.SyncResponse, error,
+) {
+	return &apiv1.SyncResponse{}, nil
+}
+
 func TestStageSendData_SendsAll(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{}
@@ -55,14 +61,68 @@ func TestStageSendData_SendsAll(t *testing.T) {
 	}
 	close(inCh)
 
-	stream := &mockSyncStream{}
+	var mu sync.Mutex
+	totalSent := 0
 
-	err := StageSendData(ctx, cfg, mem, win, stream, inCh, noopReader{})
+	factory := StreamFactory(func(
+		_ context.Context,
+	) (grpc.ClientStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	], error) {
+		return &mockSyncStream{
+			sent: nil,
+		}, nil
+	})
+
+	// Track sends across all workers via wrapper.
+	wrappedFactory := StreamFactory(func(
+		ctx context.Context,
+	) (grpc.ClientStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	], error) {
+		stream, err := factory(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &countingSyncStream{
+			ClientStreamingClient: stream,
+			mu:                    &mu,
+			count:                 &totalSent,
+		}, nil
+	})
+
+	err := StageSendData(
+		ctx, cfg, mem, win, wrappedFactory,
+		inCh, noopReader{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(stream.sent) == 0 {
+	if totalSent == 0 {
 		t.Fatal("no requests sent")
 	}
+}
+
+type countingSyncStream struct {
+	grpc.ClientStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	]
+	mu    *sync.Mutex
+	count *int
+}
+
+func (c *countingSyncStream) Send(
+	req *apiv1.SyncRequest,
+) error {
+	c.mu.Lock()
+	*c.count++
+	c.mu.Unlock()
+	return c.ClientStreamingClient.Send(req)
+}
+
+func (c *countingSyncStream) CloseAndRecv() (
+	*apiv1.SyncResponse, error,
+) {
+	return &apiv1.SyncResponse{}, nil
 }
