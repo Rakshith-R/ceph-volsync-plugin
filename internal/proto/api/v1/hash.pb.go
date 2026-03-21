@@ -202,9 +202,9 @@ const file_api_v1_hash_proto_rawDesc = "" +
 	"\x10HashBatchRequest\x12)\n" +
 	"\x06hashes\x18\x01 \x03(\v2\x11.api.v1.BlockHashR\x06hashes\":\n" +
 	"\x11HashBatchResponse\x12%\n" +
-	"\x0emismatched_ids\x18\x01 \x03(\x04R\rmismatchedIds2S\n" +
-	"\vHashService\x12D\n" +
-	"\rCompareHashes\x12\x18.api.v1.HashBatchRequest\x1a\x19.api.v1.HashBatchResponseB>Z<github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1b\x06proto3"
+	"\x0emismatched_ids\x18\x01 \x03(\x04R\rmismatchedIds2W\n" +
+	"\vHashService\x12H\n" +
+	"\rCompareHashes\x12\x18.api.v1.HashBatchRequest\x1a\x19.api.v1.HashBatchResponse(\x010\x01B>Z<github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1b\x06proto3"
 
 var (
 	file_api_v1_hash_proto_rawDescOnce sync.Once

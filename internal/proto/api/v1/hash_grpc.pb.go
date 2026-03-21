@@ -29,7 +29,7 @@ const (
 // HashService allows the source to check which chunks the destination
 // already has, avoiding redundant data transfer.
 type HashServiceClient interface {
-	CompareHashes(ctx context.Context, in *HashBatchRequest, opts ...grpc.CallOption) (*HashBatchResponse, error)
+	CompareHashes(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HashBatchRequest, HashBatchResponse], error)
 }
 
 type hashServiceClient struct {
@@ -40,15 +40,18 @@ func NewHashServiceClient(cc grpc.ClientConnInterface) HashServiceClient {
 	return &hashServiceClient{cc}
 }
 
-func (c *hashServiceClient) CompareHashes(ctx context.Context, in *HashBatchRequest, opts ...grpc.CallOption) (*HashBatchResponse, error) {
+func (c *hashServiceClient) CompareHashes(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HashBatchRequest, HashBatchResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HashBatchResponse)
-	err := c.cc.Invoke(ctx, HashService_CompareHashes_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HashService_ServiceDesc.Streams[0], HashService_CompareHashes_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[HashBatchRequest, HashBatchResponse]{ClientStream: stream}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HashService_CompareHashesClient = grpc.BidiStreamingClient[HashBatchRequest, HashBatchResponse]
 
 // HashServiceServer is the server API for HashService service.
 // All implementations must embed UnimplementedHashServiceServer
@@ -57,7 +60,7 @@ func (c *hashServiceClient) CompareHashes(ctx context.Context, in *HashBatchRequ
 // HashService allows the source to check which chunks the destination
 // already has, avoiding redundant data transfer.
 type HashServiceServer interface {
-	CompareHashes(context.Context, *HashBatchRequest) (*HashBatchResponse, error)
+	CompareHashes(grpc.BidiStreamingServer[HashBatchRequest, HashBatchResponse]) error
 	mustEmbedUnimplementedHashServiceServer()
 }
 
@@ -68,8 +71,8 @@ type HashServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedHashServiceServer struct{}
 
-func (UnimplementedHashServiceServer) CompareHashes(context.Context, *HashBatchRequest) (*HashBatchResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CompareHashes not implemented")
+func (UnimplementedHashServiceServer) CompareHashes(grpc.BidiStreamingServer[HashBatchRequest, HashBatchResponse]) error {
+	return status.Error(codes.Unimplemented, "method CompareHashes not implemented")
 }
 func (UnimplementedHashServiceServer) mustEmbedUnimplementedHashServiceServer() {}
 func (UnimplementedHashServiceServer) testEmbeddedByValue()                     {}
@@ -92,23 +95,12 @@ func RegisterHashServiceServer(s grpc.ServiceRegistrar, srv HashServiceServer) {
 	s.RegisterService(&HashService_ServiceDesc, srv)
 }
 
-func _HashService_CompareHashes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HashBatchRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(HashServiceServer).CompareHashes(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: HashService_CompareHashes_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HashServiceServer).CompareHashes(ctx, req.(*HashBatchRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+func _HashService_CompareHashes_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(HashServiceServer).CompareHashes(&grpc.GenericServerStream[HashBatchRequest, HashBatchResponse]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HashService_CompareHashesServer = grpc.BidiStreamingServer[HashBatchRequest, HashBatchResponse]
 
 // HashService_ServiceDesc is the grpc.ServiceDesc for HashService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -116,12 +108,14 @@ func _HashService_CompareHashes_Handler(srv interface{}, ctx context.Context, de
 var HashService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "api.v1.HashService",
 	HandlerType: (*HashServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
 		{
-			MethodName: "CompareHashes",
-			Handler:    _HashService_CompareHashes_Handler,
+			StreamName:    "CompareHashes",
+			Handler:       _HashService_CompareHashes_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
 	Metadata: "api/v1/hash.proto",
 }

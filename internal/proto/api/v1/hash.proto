@@ -7,7 +7,7 @@ option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v
 // HashService allows the source to check which chunks the destination
 // already has, avoiding redundant data transfer.
 service HashService {
-  rpc CompareHashes(HashBatchRequest) returns (HashBatchResponse);
+  rpc CompareHashes(stream HashBatchRequest) returns (stream HashBatchResponse);
 }
 
 message BlockHash {
