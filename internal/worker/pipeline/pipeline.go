@@ -53,7 +53,6 @@ func (p *Pipeline) Run(
 	chunkCh := make(chan Chunk, cfg.ReadChanBuf)
 	readCh := make(chan ReadChunk, cfg.ReadChanBuf)
 	zeroCh := make(chan ZeroChunk, cfg.ZeroChanBuf)
-	hashedCh := make(chan HashedChunk, cfg.HashChanBuf)
 	mismatchCh := make(chan HashedChunk, cfg.MismatchChanBuf)
 	compressedCh := make(chan CompressedChunk, cfg.CompressChanBuf)
 
@@ -72,17 +71,25 @@ func (p *Pipeline) Run(
 		return StageRead(gctx, cfg, memRaw, win, reader, chunkCh, readCh, zeroCh)
 	})
 
-	// Stage 2: Hash - SHA-256 computation
-	g.Go(func() error {
-		defer close(hashedCh)
-		return StageHash(gctx, cfg, readCh, hashedCh)
-	})
-
-	// Stage 3: SendHash - hash comparison + dedup
-	g.Go(func() error {
-		defer close(mismatchCh)
-		return StageSendHash(gctx, cfg, memRaw, win, hashClient, hashedCh, zeroCh, mismatchCh)
-	})
+	if hashClient == nil {
+		// Skip hash stages: forward all to mismatchCh
+		g.Go(func() error {
+			defer close(mismatchCh)
+			return forwardReadToMismatch(gctx, memRaw, win, readCh, zeroCh, mismatchCh)
+		})
+	} else {
+		hashedCh := make(chan HashedChunk, cfg.HashChanBuf)
+		// Stage 2: Hash - SHA-256 computation
+		g.Go(func() error {
+			defer close(hashedCh)
+			return StageHash(gctx, cfg, readCh, hashedCh)
+		})
+		// Stage 3: SendHash - hash comparison + dedup
+		g.Go(func() error {
+			defer close(mismatchCh)
+			return StageSendHash(gctx, cfg, memRaw, win, hashClient, hashedCh, zeroCh, mismatchCh)
+		})
+	}
 
 	// Stage 4: Compress - LZ4 compression
 	g.Go(func() error {
@@ -96,6 +103,60 @@ func (p *Pipeline) Run(
 	})
 
 	return g.Wait()
+}
+
+// forwardReadToMismatch is used when hashClient is nil.
+// It forwards all ReadChunks and ZeroChunks directly
+// to mismatchCh, treating every block as a mismatch.
+func forwardReadToMismatch(
+	ctx context.Context,
+	memRaw *MemSemaphore,
+	win *WindowSemaphore,
+	readCh <-chan ReadChunk,
+	zeroCh <-chan ZeroChunk,
+	mismatchCh chan<- HashedChunk,
+) error {
+	for readCh != nil || zeroCh != nil {
+		select {
+		case rc, ok := <-readCh:
+			if !ok {
+				readCh = nil
+				continue
+			}
+			select {
+			case mismatchCh <- HashedChunk{
+				ReqID:    rc.ReqID,
+				FilePath: rc.FilePath,
+				Offset:   rc.Offset,
+				Length:   int64(len(rc.Data)),
+				Data:     rc.Data,
+				Held:     rc.Held,
+			}:
+			case <-ctx.Done():
+				rc.Held.release(memRaw, nil, win)
+				return ctx.Err()
+			}
+		case zc, ok := <-zeroCh:
+			if !ok {
+				zeroCh = nil
+				continue
+			}
+			select {
+			case mismatchCh <- HashedChunk{
+				ReqID:    zc.ReqID,
+				FilePath: zc.FilePath,
+				Offset:   zc.Offset,
+				Length:   zc.Length,
+				Data:     nil,
+			}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func feeder(ctx context.Context, iter BlockIterator, chunkCh chan<- Chunk) error {

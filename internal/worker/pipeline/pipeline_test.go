@@ -207,6 +207,43 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 	}
 }
 
+func TestPipeline_NilHashClient(t *testing.T) {
+	ctx := context.Background()
+
+	chunkSize := int64(64 * 1024)
+	data := make([]byte, chunkSize*4)
+	for i := range data {
+		data[i] = 0xCC
+	}
+	reader := &mockDataReaderForPipeline{data: data}
+
+	iter := &mockIterator{
+		blocks: []ChangeBlock{
+			{FilePath: "/dev/block", Offset: 0, Len: chunkSize},
+			{FilePath: "/dev/block", Offset: chunkSize, Len: chunkSize},
+			{FilePath: "/dev/block", Offset: chunkSize * 2, Len: chunkSize},
+			{FilePath: "/dev/block", Offset: chunkSize * 3, Len: chunkSize},
+		},
+	}
+
+	stream := &pipelineMockStream{}
+	cfg := Config{
+		ChunkSize:         chunkSize,
+		ReadWorkers:       2,
+		MaxWindow:         16,
+		MaxRawMemoryBytes: 2 * 1024 * 1024,
+	}
+
+	p := New(cfg)
+	err := p.Run(ctx, iter, reader, stream, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stream.sent) == 0 {
+		t.Fatal("expected data to be sent with nil hashClient")
+	}
+}
+
 func TestPipeline_ConfigValidation(t *testing.T) {
 	ctx := context.Background()
 
