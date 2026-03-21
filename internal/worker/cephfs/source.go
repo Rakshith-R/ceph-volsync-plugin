@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/ceph/go-ceph/cephfs"
@@ -38,6 +37,7 @@ import (
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/pipeline"
 )
 
 const (
@@ -66,13 +66,37 @@ type syncState struct {
 	dataClient apiv1.DataServiceClient
 	logger     logr.Logger
 
-	deleteChan chan string
-	smallChan  chan string
-	metaChan   chan string
-	blockChan  chan common.BlockEntry
-
-	nextReqID   uint64
 	rsyncTarget string
+}
+
+// cephBlockDiffAdapter bridges *ceph.BlockDiffIterator
+// to the cephfs-package fileDiffIterator interface.
+type cephBlockDiffAdapter struct {
+	inner *ceph.BlockDiffIterator
+}
+
+func (a *cephBlockDiffAdapter) More() bool {
+	return a.inner.More()
+}
+
+func (a *cephBlockDiffAdapter) Read() (
+	[]changedBlock, error,
+) {
+	cbs, err := a.inner.Read()
+	if err != nil || cbs == nil {
+		return nil, err
+	}
+	result := make([]changedBlock, len(cbs.ChangedBlocks))
+	for i, b := range cbs.ChangedBlocks {
+		result[i] = changedBlock{
+			Offset: b.Offset, Len: b.Len,
+		}
+	}
+	return result, nil
+}
+
+func (a *cephBlockDiffAdapter) Close() error {
+	return a.inner.Close()
 }
 
 // SourceWorker represents a CephFS source worker
@@ -254,7 +278,7 @@ func (w *SourceWorker) runSnapdiffSync(
 	defer differ.Destroy()
 
 	if err := w.runStatelessSync(
-		ctx, differ, dataClient,
+		ctx, conn, differ, dataClient,
 	); err != nil {
 		return fmt.Errorf(
 			"stateless sync failed: %w", err,
@@ -487,11 +511,195 @@ func (w *SourceWorker) syncForDeletion(
 // algorithm with directory pre-scan.
 func (w *SourceWorker) runStatelessSync(
 	ctx context.Context,
+	conn *grpc.ClientConn,
 	differ *ceph.SnapshotDiffer,
 	dataClient apiv1.DataServiceClient,
 ) error {
 	w.Logger.Info("Starting stateless snapshot sync")
 
+	state := w.initSyncState(differ, dataClient)
+
+	large, small, deleted, err :=
+		w.collectChangedEntries(ctx, state)
+	if err != nil {
+		return fmt.Errorf(
+			"collecting changed entries: %w", err,
+		)
+	}
+
+	w.Logger.Info("Collected changed entries",
+		"large", len(large),
+		"small", len(small),
+		"deleted", len(deleted),
+	)
+
+	// Phase 1: block diff via pipeline (large files)
+	if err := w.runSnapdiffBlockPipeline(
+		ctx, differ, conn, large,
+	); err != nil {
+		return fmt.Errorf(
+			"block pipeline failed: %w", err,
+		)
+	}
+
+	// Phase 2: rsync small files (content+metadata)
+	if len(small) > 0 {
+		if err := w.rsyncBatch(
+			small, state.rsyncTarget, true,
+		); err != nil {
+			return fmt.Errorf(
+				"small file rsync: %w", err,
+			)
+		}
+	}
+
+	// Phase 3: rsync large file metadata only
+	if len(large) > 0 {
+		if err := w.rsyncBatch(
+			large, state.rsyncTarget, false,
+		); err != nil {
+			return fmt.Errorf(
+				"large file meta rsync: %w", err,
+			)
+		}
+	}
+
+	// Phase 4: delete removed files/dirs
+	for i := 0; i < len(deleted); i += deleteBatchSize {
+		end := min(i+deleteBatchSize, len(deleted))
+		if err := w.sendDeleteBatch(
+			ctx, state, deleted[i:end],
+		); err != nil {
+			return err
+		}
+	}
+
+	// Phase 5: convergence rsync
+	if err := w.rsyncConvergence(state); err != nil {
+		return fmt.Errorf(
+			"convergence rsync: %w", err,
+		)
+	}
+
+	w.Logger.Info(
+		"Stateless sync completed successfully",
+	)
+	return nil
+}
+
+// collectChangedEntries walks the snapdiff and returns
+// three slices: large files (for pipeline), small
+// files (for rsync), and deleted paths.
+func (w *SourceWorker) collectChangedEntries(
+	ctx context.Context,
+	state *syncState,
+) (large, small, deleted []string, err error) {
+	dirChan, errChan := w.walkAndStreamDirectories()
+
+	for dirPath := range dirChan {
+		select {
+		case <-ctx.Done():
+			return nil, nil, nil, ctx.Err()
+		default:
+		}
+
+		iterator, iterErr :=
+			state.differ.NewSnapDiffIterator(dirPath)
+		if iterErr != nil {
+			return nil, nil, nil, fmt.Errorf(
+				"snap diff iterator %s: %w",
+				dirPath, iterErr,
+			)
+		}
+
+		for {
+			entry, readErr := iterator.Read()
+			if readErr != nil {
+				_ = iterator.Close()
+				return nil, nil, nil, readErr
+			}
+			if entry == nil {
+				break
+			}
+			entryName := entry.DirEntry.Name()
+			entryPath := filepath.Join(
+				dirPath, entryName,
+			)
+
+			if entry.DirEntry.DType() != cephfs.DTypeReg {
+				fullP := filepath.Join(
+					common.DataMountPath, entryPath,
+				)
+				if _, statErr := os.Stat(fullP); os.IsNotExist(statErr) {
+					deleted = append(
+						deleted, entryPath,
+					)
+				} else if entry.DirEntry.DType() !=
+					cephfs.DTypeDir {
+					small = append(small, entryPath)
+				}
+				continue
+			}
+
+			fullP := filepath.Join(
+				common.DataMountPath, entryPath,
+			)
+			fi, statErr := os.Stat(fullP)
+			if os.IsNotExist(statErr) {
+				deleted = append(deleted, entryPath)
+				continue
+			} else if statErr != nil {
+				_ = iterator.Close()
+				return nil, nil, nil, statErr
+			}
+
+			if fi.Size() <= smallFileMaxSize {
+				small = append(small, entryPath)
+			} else {
+				large = append(large, entryPath)
+			}
+		}
+		_ = iterator.Close()
+	}
+
+	if walkErr := <-errChan; walkErr != nil {
+		return nil, nil, nil, walkErr
+	}
+	return large, small, deleted, nil
+}
+
+// runSnapdiffBlockPipeline runs the 5-stage pipeline
+// for all large changed files.
+func (w *SourceWorker) runSnapdiffBlockPipeline(
+	ctx context.Context,
+	differ *ceph.SnapshotDiffer,
+	conn *grpc.ClientConn,
+	largeFiles []string,
+) error {
+	if len(largeFiles) == 0 {
+		return nil
+	}
+
+	newIter := func(relPath string) (
+		fileDiffIterator, error,
+	) {
+		it, err := differ.NewBlockDiffIterator(relPath)
+		if err != nil {
+			return nil, err
+		}
+		return &cephBlockDiffAdapter{inner: it}, nil
+	}
+
+	iter := NewCephFSBlockIterator(newIter, largeFiles)
+	defer func() { _ = iter.Close() }()
+
+	reader := NewCephFSReader()
+	defer func() { _ = reader.Close() }()
+
+	hashClient :=
+		apiv1.NewHashServiceClient(conn)
+	dataClient :=
+		apiv1.NewDataServiceClient(conn)
 	stream, err := dataClient.Sync(ctx)
 	if err != nil {
 		return fmt.Errorf(
@@ -499,61 +707,11 @@ func (w *SourceWorker) runStatelessSync(
 		)
 	}
 
-	state := w.initSyncState(differ, dataClient)
-
-	g, gctx := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		return w.deleteWorker(gctx, state)
-	})
-	g.Go(func() error {
-		return w.smallRsyncWorker(gctx, state)
-	})
-	g.Go(func() error {
-		return w.metaRsyncWorker(gctx, state)
-	})
-	g.Go(func() error {
-		return common.StreamBlocks(
-			stream, state.blockChan, state.logger,
-		)
-	})
-
-	g.Go(func() error {
-		defer close(state.blockChan)
-		defer close(state.deleteChan)
-		defer close(state.smallChan)
-		defer close(state.metaChan)
-
-		dirChan, errChan :=
-			w.walkAndStreamDirectories()
-
-		for dirPath := range dirChan {
-			select {
-			case <-gctx.Done():
-				return gctx.Err()
-			default:
-			}
-			if err := w.processDirectorySnapdiff(
-				gctx, state, dirPath,
-			); err != nil {
-				return fmt.Errorf(
-					"failed to process "+
-						"directory %s: %w",
-					dirPath, err,
-				)
-			}
-		}
-
-		if err := <-errChan; err != nil {
-			return fmt.Errorf(
-				"error walking directories: %w", err,
-			)
-		}
-
-		return nil
-	})
-
-	if err := g.Wait(); err != nil {
+	cfg := pipeline.Config{ReadWorkers: 2}
+	p := pipeline.New(cfg)
+	if err := p.Run(
+		ctx, iter, reader, stream, hashClient,
+	); err != nil {
 		return err
 	}
 
@@ -562,17 +720,6 @@ func (w *SourceWorker) runStatelessSync(
 			"failed to close sync stream: %w", err,
 		)
 	}
-
-	if err := w.rsyncConvergence(state); err != nil {
-		return fmt.Errorf(
-			"post-traversal convergence failed: %w",
-			err,
-		)
-	}
-
-	w.Logger.Info(
-		"Stateless sync completed successfully",
-	)
 	return nil
 }
 
@@ -654,8 +801,7 @@ func (w *SourceWorker) walkAndStreamDirectories() (
 	return dirChan, errChan
 }
 
-// initSyncState initializes the sync state with
-// channels for parallel processing.
+// initSyncState initializes the sync state.
 func (w *SourceWorker) initSyncState(
 	differ *ceph.SnapshotDiffer,
 	dataClient apiv1.DataServiceClient,
@@ -671,241 +817,8 @@ func (w *SourceWorker) initSyncState(
 		differ:      differ,
 		dataClient:  dataClient,
 		logger:      w.Logger,
-		deleteChan:  make(chan string, 1000),
-		smallChan:   make(chan string, 1000),
-		metaChan:    make(chan string, 1000),
-		blockChan:   make(chan common.BlockEntry, 1000),
 		rsyncTarget: rsyncTarget,
 	}
-}
-
-// processDirectorySnapdiff processes snapdiff results
-// for a single directory. NOT recursive.
-func (w *SourceWorker) processDirectorySnapdiff(
-	ctx context.Context, state *syncState,
-	dirPath string,
-) error {
-	w.Logger.V(1).Info(
-		"Processing directory snapdiff",
-		"path", dirPath,
-	)
-
-	iterator, err := state.differ.NewSnapDiffIterator(
-		dirPath,
-	)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to create snap diff iterator "+
-				"for %s: %w",
-			dirPath, err,
-		)
-	}
-	defer func() { _ = iterator.Close() }()
-
-	for {
-		entry, err := iterator.Read()
-		if err != nil {
-			return fmt.Errorf(
-				"failed to read entry: %w", err,
-			)
-		}
-		if entry == nil {
-			break
-		}
-		if err := w.processEntry(
-			ctx, state, dirPath, entry,
-		); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// processEntry handles a single snapdiff entry.
-func (w *SourceWorker) processEntry(
-	ctx context.Context, state *syncState,
-	dirPath string, entry *cephfs.SnapDiffEntry,
-) error {
-	entryName := entry.DirEntry.Name()
-	entryPath := filepath.Join(dirPath, entryName)
-
-	if entry.DirEntry.DType() == cephfs.DTypeReg {
-		return w.processFile(ctx, state, entryPath)
-	}
-
-	fullPath := filepath.Join(
-		common.DataMountPath, entryPath,
-	)
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-		select {
-		case state.deleteChan <- entryPath:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if entry.DirEntry.DType() == cephfs.DTypeDir {
-		return nil
-	}
-
-	select {
-	case state.smallChan <- entryPath:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	return nil
-}
-
-// processFile handles file processing.
-func (w *SourceWorker) processFile(
-	ctx context.Context, state *syncState,
-	entryPath string,
-) error {
-	fullPath := filepath.Join(
-		common.DataMountPath, entryPath,
-	)
-
-	fileInfo, err := os.Stat(fullPath)
-	if os.IsNotExist(err) {
-		w.Logger.Info(
-			"File deleted, queuing for batch delete",
-			"path", entryPath,
-		)
-		select {
-		case state.deleteChan <- entryPath:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		return nil
-	} else if err != nil {
-		return fmt.Errorf(
-			"failed to stat file %s: %w",
-			fullPath, err,
-		)
-	}
-
-	fileSize := fileInfo.Size()
-
-	if fileSize <= smallFileMaxSize {
-		select {
-		case state.smallChan <- entryPath:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		w.Logger.V(1).Info(
-			"Queued small file for rsync",
-			"path", entryPath, "size", fileSize,
-		)
-		return nil
-	}
-
-	select {
-	case state.metaChan <- entryPath:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	state.nextReqID++
-	return w.streamBlockDiff(
-		ctx, state, entryPath, state.nextReqID,
-	)
-}
-
-// streamBlockDiff produces BlockEntry items for a
-// single file into state.blockChan. The reqID groups
-// all blocks for this file so StreamBlocks knows when
-// to commit.
-func (w *SourceWorker) streamBlockDiff(
-	ctx context.Context, state *syncState,
-	relPath string, reqID uint64,
-) error {
-	blockIterator, err :=
-		state.differ.NewBlockDiffIterator(relPath)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to create block diff iterator: %w",
-			err,
-		)
-	}
-	defer func() { _ = blockIterator.Close() }()
-
-	fullPath := filepath.Join(
-		common.DataMountPath, relPath,
-	)
-	file, err := os.Open(fullPath) //nolint:gosec // G304: path constructed from validated input
-	if err != nil {
-		return fmt.Errorf(
-			"failed to open source file %s: %w",
-			fullPath, err,
-		)
-	}
-	defer func() { _ = file.Close() }()
-
-	for blockIterator.More() {
-		changedBlocks, err := blockIterator.Read()
-		if err != nil {
-			return fmt.Errorf(
-				"failed to read block diff: %w", err,
-			)
-		}
-
-		for _, block := range changedBlocks.ChangedBlocks {
-			entry, err := common.ReadBlockEntry(
-				file, reqID, relPath,
-				int64(block.Offset), //nolint:gosec // G115: value within safe range
-				int64(block.Len),    //nolint:gosec // G115: value within safe range
-			)
-			if err != nil {
-				return err
-			}
-
-			select {
-			case state.blockChan <- entry:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-
-	w.Logger.V(1).Info(
-		"Produced block diff", "path", relPath,
-	)
-	return nil
-}
-
-// deleteWorker reads paths from deleteChan, batches
-// them, and sends delete requests via the unary Delete
-// RPC.
-func (w *SourceWorker) deleteWorker(
-	ctx context.Context, state *syncState,
-) error {
-	var batch []string
-
-	for path := range state.deleteChan {
-		batch = append(batch, path)
-
-		if len(batch) >= deleteBatchSize {
-			if err := w.sendDeleteBatch(
-				ctx, state, batch,
-			); err != nil {
-				return err
-			}
-			batch = batch[:0]
-		}
-	}
-
-	if len(batch) > 0 {
-		if err := w.sendDeleteBatch(
-			ctx, state, batch,
-		); err != nil {
-			return err
-		}
-	}
-
-	w.Logger.Info("Delete worker finished")
-	return nil
 }
 
 // sendDeleteBatch sends a single batched delete
@@ -925,70 +838,6 @@ func (w *SourceWorker) sendDeleteBatch(
 			len(paths), err,
 		)
 	}
-	return nil
-}
-
-// smallRsyncWorker reads paths from smallChan, batches
-// them, and runs rsync for content+metadata.
-func (w *SourceWorker) smallRsyncWorker(
-	_ context.Context, state *syncState,
-) error {
-	var batch []string
-
-	for path := range state.smallChan {
-		batch = append(batch, path)
-
-		if len(batch) >= rsyncBatchSize {
-			if err := w.rsyncBatch(
-				batch, state.rsyncTarget, true,
-			); err != nil {
-				return err
-			}
-			batch = batch[:0]
-		}
-	}
-
-	if len(batch) > 0 {
-		if err := w.rsyncBatch(
-			batch, state.rsyncTarget, true,
-		); err != nil {
-			return err
-		}
-	}
-
-	w.Logger.Info("Small file rsync worker finished")
-	return nil
-}
-
-// metaRsyncWorker reads paths from metaChan, batches
-// them, and runs rsync for metadata only.
-func (w *SourceWorker) metaRsyncWorker(
-	_ context.Context, state *syncState,
-) error {
-	var batch []string
-
-	for path := range state.metaChan {
-		batch = append(batch, path)
-
-		if len(batch) >= rsyncBatchSize {
-			if err := w.rsyncBatch(
-				batch, state.rsyncTarget, false,
-			); err != nil {
-				return err
-			}
-			batch = batch[:0]
-		}
-	}
-
-	if len(batch) > 0 {
-		if err := w.rsyncBatch(
-			batch, state.rsyncTarget, false,
-		); err != nil {
-			return err
-		}
-	}
-
-	w.Logger.Info("Metadata rsync worker finished")
 	return nil
 }
 
