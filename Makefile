@@ -222,6 +222,7 @@ proto-generate: proto-image ## Regenerate gRPC stubs from .proto definitions.
 		--go-grpc_opt=paths=source_relative \
 		api/v1/data.proto \
 		api/v1/done.proto \
+		api/v1/hash.proto \
 		api/v1/metadata.proto \
 		version/v1/version.proto
 

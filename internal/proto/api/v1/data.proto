@@ -32,6 +32,19 @@ message ChangedBlock {
 
   // Indicates this write represents a zeroed range.
   bool is_zero = 4;
+
+  // Unique ID for deduplication and tracking.
+  uint64 request_id = 5;
+
+  // Compression algorithm applied to data.
+  CompressionAlgo compression = 6;
+}
+
+// CompressionAlgo specifies the compression format used for block data.
+enum CompressionAlgo {
+  COMPRESSION_NONE = 0;
+  COMPRESSION_LZ4 = 1;
+  COMPRESSION_ZSTD = 2;
 }
 
 // --------------------

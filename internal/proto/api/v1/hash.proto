@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package api.v1;
+
+option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1";
+
+// HashService allows the source to check which chunks the destination
+// already has, avoiding redundant data transfer.
+service HashService {
+  rpc CompareHashes(HashBatchRequest) returns (HashBatchResponse);
+}
+
+message BlockHash {
+  uint64 request_id = 1;
+  string file_path = 2;
+  uint64 offset = 3;
+  uint64 length = 4;
+  bytes sha256 = 5;
+}
+
+message HashBatchRequest {
+  repeated BlockHash hashes = 1;
+}
+
+message HashBatchResponse {
+  // reqIDs of chunks that do NOT match the destination's data
+  // (must be sent).
+  repeated uint64 mismatched_ids = 1;
+}

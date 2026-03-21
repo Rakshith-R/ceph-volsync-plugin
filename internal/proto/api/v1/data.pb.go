@@ -21,6 +21,56 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// CompressionAlgo specifies the compression format used for block data.
+type CompressionAlgo int32
+
+const (
+	CompressionAlgo_COMPRESSION_NONE CompressionAlgo = 0
+	CompressionAlgo_COMPRESSION_LZ4  CompressionAlgo = 1
+	CompressionAlgo_COMPRESSION_ZSTD CompressionAlgo = 2
+)
+
+// Enum value maps for CompressionAlgo.
+var (
+	CompressionAlgo_name = map[int32]string{
+		0: "COMPRESSION_NONE",
+		1: "COMPRESSION_LZ4",
+		2: "COMPRESSION_ZSTD",
+	}
+	CompressionAlgo_value = map[string]int32{
+		"COMPRESSION_NONE": 0,
+		"COMPRESSION_LZ4":  1,
+		"COMPRESSION_ZSTD": 2,
+	}
+)
+
+func (x CompressionAlgo) Enum() *CompressionAlgo {
+	p := new(CompressionAlgo)
+	*p = x
+	return p
+}
+
+func (x CompressionAlgo) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CompressionAlgo) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_v1_data_proto_enumTypes[0].Descriptor()
+}
+
+func (CompressionAlgo) Type() protoreflect.EnumType {
+	return &file_api_v1_data_proto_enumTypes[0]
+}
+
+func (x CompressionAlgo) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CompressionAlgo.Descriptor instead.
+func (CompressionAlgo) EnumDescriptor() ([]byte, []int) {
+	return file_api_v1_data_proto_rawDescGZIP(), []int{0}
+}
+
 // ChangedBlock represents a modified data range.
 type ChangedBlock struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -31,7 +81,11 @@ type ChangedBlock struct {
 	// Data payload. May be empty if is_zero is true.
 	Data []byte `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
 	// Indicates this write represents a zeroed range.
-	IsZero        bool `protobuf:"varint,4,opt,name=is_zero,json=isZero,proto3" json:"is_zero,omitempty"`
+	IsZero bool `protobuf:"varint,4,opt,name=is_zero,json=isZero,proto3" json:"is_zero,omitempty"`
+	// Unique ID for deduplication and tracking.
+	RequestId uint64 `protobuf:"varint,5,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Compression algorithm applied to data.
+	Compression   CompressionAlgo `protobuf:"varint,6,opt,name=compression,proto3,enum=api.v1.CompressionAlgo" json:"compression,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -92,6 +146,20 @@ func (x *ChangedBlock) GetIsZero() bool {
 		return x.IsZero
 	}
 	return false
+}
+
+func (x *ChangedBlock) GetRequestId() uint64 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+func (x *ChangedBlock) GetCompression() CompressionAlgo {
+	if x != nil {
+		return x.Compression
+	}
+	return CompressionAlgo_COMPRESSION_NONE
 }
 
 // SyncRequest wraps a single write or commit operation sent over the stream.
@@ -405,12 +473,15 @@ var File_api_v1_data_proto protoreflect.FileDescriptor
 
 const file_api_v1_data_proto_rawDesc = "" +
 	"\n" +
-	"\x11api/v1/data.proto\x12\x06api.v1\"k\n" +
+	"\x11api/v1/data.proto\x12\x06api.v1\"\xc5\x01\n" +
 	"\fChangedBlock\x12\x16\n" +
 	"\x06offset\x18\x01 \x01(\x04R\x06offset\x12\x16\n" +
 	"\x06length\x18\x02 \x01(\x04R\x06length\x12\x12\n" +
 	"\x04data\x18\x03 \x01(\fR\x04data\x12\x17\n" +
-	"\ais_zero\x18\x04 \x01(\bR\x06isZero\"y\n" +
+	"\ais_zero\x18\x04 \x01(\bR\x06isZero\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x05 \x01(\x04R\trequestId\x129\n" +
+	"\vcompression\x18\x06 \x01(\x0e2\x17.api.v1.CompressionAlgoR\vcompression\"y\n" +
 	"\vSyncRequest\x12,\n" +
 	"\x05write\x18\x01 \x01(\v2\x14.api.v1.WriteRequestH\x00R\x05write\x12/\n" +
 	"\x06commit\x18\x03 \x01(\v2\x15.api.v1.CommitRequestH\x00R\x06commitB\v\n" +
@@ -423,7 +494,11 @@ const file_api_v1_data_proto_rawDesc = "" +
 	"\rCommitRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"\x0e\n" +
 	"\fSyncResponse\"\x10\n" +
-	"\x0eDeleteResponse2{\n" +
+	"\x0eDeleteResponse*R\n" +
+	"\x0fCompressionAlgo\x12\x14\n" +
+	"\x10COMPRESSION_NONE\x10\x00\x12\x13\n" +
+	"\x0fCOMPRESSION_LZ4\x10\x01\x12\x14\n" +
+	"\x10COMPRESSION_ZSTD\x10\x022{\n" +
 	"\vDataService\x123\n" +
 	"\x04Sync\x12\x13.api.v1.SyncRequest\x1a\x14.api.v1.SyncResponse(\x01\x127\n" +
 	"\x06Delete\x12\x15.api.v1.DeleteRequest\x1a\x16.api.v1.DeleteResponseB>Z<github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1b\x06proto3"
@@ -440,29 +515,32 @@ func file_api_v1_data_proto_rawDescGZIP() []byte {
 	return file_api_v1_data_proto_rawDescData
 }
 
+var file_api_v1_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_api_v1_data_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_api_v1_data_proto_goTypes = []any{
-	(*ChangedBlock)(nil),   // 0: api.v1.ChangedBlock
-	(*SyncRequest)(nil),    // 1: api.v1.SyncRequest
-	(*WriteRequest)(nil),   // 2: api.v1.WriteRequest
-	(*DeleteRequest)(nil),  // 3: api.v1.DeleteRequest
-	(*CommitRequest)(nil),  // 4: api.v1.CommitRequest
-	(*SyncResponse)(nil),   // 5: api.v1.SyncResponse
-	(*DeleteResponse)(nil), // 6: api.v1.DeleteResponse
+	(CompressionAlgo)(0),   // 0: api.v1.CompressionAlgo
+	(*ChangedBlock)(nil),   // 1: api.v1.ChangedBlock
+	(*SyncRequest)(nil),    // 2: api.v1.SyncRequest
+	(*WriteRequest)(nil),   // 3: api.v1.WriteRequest
+	(*DeleteRequest)(nil),  // 4: api.v1.DeleteRequest
+	(*CommitRequest)(nil),  // 5: api.v1.CommitRequest
+	(*SyncResponse)(nil),   // 6: api.v1.SyncResponse
+	(*DeleteResponse)(nil), // 7: api.v1.DeleteResponse
 }
 var file_api_v1_data_proto_depIdxs = []int32{
-	2, // 0: api.v1.SyncRequest.write:type_name -> api.v1.WriteRequest
-	4, // 1: api.v1.SyncRequest.commit:type_name -> api.v1.CommitRequest
-	0, // 2: api.v1.WriteRequest.blocks:type_name -> api.v1.ChangedBlock
-	1, // 3: api.v1.DataService.Sync:input_type -> api.v1.SyncRequest
-	3, // 4: api.v1.DataService.Delete:input_type -> api.v1.DeleteRequest
-	5, // 5: api.v1.DataService.Sync:output_type -> api.v1.SyncResponse
-	6, // 6: api.v1.DataService.Delete:output_type -> api.v1.DeleteResponse
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	0, // 0: api.v1.ChangedBlock.compression:type_name -> api.v1.CompressionAlgo
+	3, // 1: api.v1.SyncRequest.write:type_name -> api.v1.WriteRequest
+	5, // 2: api.v1.SyncRequest.commit:type_name -> api.v1.CommitRequest
+	1, // 3: api.v1.WriteRequest.blocks:type_name -> api.v1.ChangedBlock
+	2, // 4: api.v1.DataService.Sync:input_type -> api.v1.SyncRequest
+	4, // 5: api.v1.DataService.Delete:input_type -> api.v1.DeleteRequest
+	6, // 6: api.v1.DataService.Sync:output_type -> api.v1.SyncResponse
+	7, // 7: api.v1.DataService.Delete:output_type -> api.v1.DeleteResponse
+	6, // [6:8] is the sub-list for method output_type
+	4, // [4:6] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_api_v1_data_proto_init() }
@@ -479,13 +557,14 @@ func file_api_v1_data_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_v1_data_proto_rawDesc), len(file_api_v1_data_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_api_v1_data_proto_goTypes,
 		DependencyIndexes: file_api_v1_data_proto_depIdxs,
+		EnumInfos:         file_api_v1_data_proto_enumTypes,
 		MessageInfos:      file_api_v1_data_proto_msgTypes,
 	}.Build()
 	File_api_v1_data_proto = out.File
