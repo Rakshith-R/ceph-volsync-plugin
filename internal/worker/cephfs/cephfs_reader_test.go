@@ -32,7 +32,7 @@ func TestCephFSReader_PartialRead(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "f.bin"), content, 0600)
 
 	r := newCephFSReader(dir)
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	data, err := r.ReadAt("f.bin", 3, 4)
 	if err != nil {
@@ -49,7 +49,7 @@ func TestCephFSReader_CloseFile(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "b.bin"), []byte("bbb"), 0600)
 
 	r := newCephFSReader(dir)
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	_, _ = r.ReadAt("a.bin", 0, 3)
 	_ = r.CloseFile("a.bin")

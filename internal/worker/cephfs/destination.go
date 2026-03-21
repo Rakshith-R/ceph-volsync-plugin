@@ -63,7 +63,7 @@ func (w *DestinationWorker) Run(
 	}
 	hashServer := NewCephFSHashServer(w.Logger)
 
-	return w.BaseDestinationWorker.RunWithHash(
+	return w.RunWithHash(
 		ctx, dataServer, hashServer,
 	)
 }

@@ -54,10 +54,6 @@ const (
 	// deleteBatchSize is the number of paths per
 	// batched delete request.
 	deleteBatchSize = 2000
-
-	// rsyncBatchSize is the number of file paths per
-	// batched rsync invocation.
-	rsyncBatchSize = 2000
 )
 
 // syncState holds the context for the sync operation.
