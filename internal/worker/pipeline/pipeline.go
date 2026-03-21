@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"io"
 
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -37,7 +36,7 @@ func New(cfg Config) *Pipeline {
 func (p *Pipeline) Run(
 	ctx context.Context,
 	iter BlockIterator,
-	device io.ReaderAt,
+	reader DataReader,
 	stream grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse],
 	hashClient apiv1.HashServiceClient,
 ) error {
@@ -70,7 +69,7 @@ func (p *Pipeline) Run(
 	g.Go(func() error {
 		defer close(readCh)
 		defer close(zeroCh)
-		return StageRead(gctx, cfg, memRaw, win, device, chunkCh, readCh, zeroCh)
+		return StageRead(gctx, cfg, memRaw, win, reader, chunkCh, readCh, zeroCh)
 	})
 
 	// Stage 2: Hash - SHA-256 computation

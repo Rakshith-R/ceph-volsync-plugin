@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"golang.org/x/sync/errgroup"
 
@@ -17,7 +16,7 @@ func StageRead(
 	cfg *Config,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
-	device io.ReaderAt,
+	reader DataReader,
 	inCh <-chan Chunk,
 	readCh chan<- ReadChunk,
 	zeroCh chan<- ZeroChunk,
@@ -26,7 +25,7 @@ func StageRead(
 
 	for range cfg.ReadWorkers {
 		g.Go(func() error {
-			return readWorker(gctx, cfg, memRaw, win, device, inCh, readCh, zeroCh)
+			return readWorker(gctx, cfg, memRaw, win, reader, inCh, readCh, zeroCh)
 		})
 	}
 
@@ -38,7 +37,7 @@ func readWorker(
 	cfg *Config,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
-	device io.ReaderAt,
+	reader DataReader,
 	inCh <-chan Chunk,
 	readCh chan<- ReadChunk,
 	zeroCh chan<- ZeroChunk,
@@ -64,14 +63,14 @@ func readWorker(
 			return err
 		}
 
-		data := make([]byte, chunk.Length)
-		n, err := device.ReadAt(data, chunk.Offset)
-		if err != nil && err != io.EOF {
+		data, err := reader.ReadAt(
+			chunk.FilePath, chunk.Offset, chunk.Length,
+		)
+		if err != nil {
 			memRaw.Release(cfg.ChunkSize)
 			win.Release(chunk.ReqID)
-			return fmt.Errorf("pread at offset %d: %w", chunk.Offset, err)
+			return fmt.Errorf("read chunk %d: %w", chunk.ReqID, err)
 		}
-		data = data[:n]
 
 		if common.IsAllZero(data) {
 			memRaw.Release(cfg.ChunkSize)

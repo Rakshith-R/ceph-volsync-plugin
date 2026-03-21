@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"bytes"
 	"context"
 	"sync"
 	"testing"
@@ -9,6 +8,24 @@ import (
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"google.golang.org/grpc"
 )
+
+type mockDataReaderForPipeline struct {
+	data []byte
+}
+
+func (m *mockDataReaderForPipeline) ReadAt(
+	_ string, offset, length int64,
+) ([]byte, error) {
+	end := offset + length
+	if end > int64(len(m.data)) {
+		end = int64(len(m.data))
+	}
+	return append([]byte(nil), m.data[offset:end]...), nil
+}
+
+func (m *mockDataReaderForPipeline) CloseFile(_ string) error {
+	return nil
+}
 
 type mockIterator struct {
 	blocks []ChangeBlock
@@ -59,8 +76,11 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	chunkSize := int64(64 * 1024) // 64KB minimum
-	data := bytes.Repeat([]byte{0xBB}, int(chunkSize*4))
-	device := bytes.NewReader(data)
+	data := make([]byte, chunkSize*4)
+	for i := range data {
+		data[i] = 0xBB
+	}
+	reader := &mockDataReaderForPipeline{data: data}
 
 	iter := &mockIterator{
 		blocks: []ChangeBlock{
@@ -82,7 +102,7 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 
 	p := New(cfg)
-	err := p.Run(ctx, iter, device, stream, hashClient)
+	err := p.Run(ctx, iter, reader, stream, hashClient)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,14 +115,14 @@ func TestPipeline_EndToEnd(t *testing.T) {
 func TestPipeline_EmptyIterator(t *testing.T) {
 	ctx := context.Background()
 
-	device := bytes.NewReader(nil)
+	reader := &mockDataReaderForPipeline{data: nil}
 	iter := &mockIterator{}
 	stream := &pipelineMockStream{}
 	hashClient := &mockHashClientForPipeline{}
 
 	cfg := Config{}
 	p := New(cfg)
-	err := p.Run(ctx, iter, device, stream, hashClient)
+	err := p.Run(ctx, iter, reader, stream, hashClient)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +133,7 @@ func TestPipeline_ZeroBlocks(t *testing.T) {
 
 	chunkSize := int64(64 * 1024)     // 64KB minimum
 	data := make([]byte, chunkSize*2) // all zeros
-	device := bytes.NewReader(data)
+	reader := &mockDataReaderForPipeline{data: data}
 
 	iter := &mockIterator{
 		blocks: []ChangeBlock{
@@ -133,7 +153,7 @@ func TestPipeline_ZeroBlocks(t *testing.T) {
 	}
 
 	p := New(cfg)
-	err := p.Run(ctx, iter, device, stream, hashClient)
+	err := p.Run(ctx, iter, reader, stream, hashClient)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +164,13 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 
 	chunkSize := int64(64 * 1024)
 	// 8 chunks = 512KB total
-	data := bytes.Repeat([]byte{0xAA, 0xBB, 0xCC, 0xDD}, int(chunkSize*8/4))
-	device := bytes.NewReader(data)
+	totalSize := chunkSize * 8
+	data := make([]byte, totalSize)
+	pattern := []byte{0xAA, 0xBB, 0xCC, 0xDD}
+	for i := range data {
+		data[i] = pattern[i%len(pattern)]
+	}
+	reader := &mockDataReaderForPipeline{data: data}
 
 	var blocks []ChangeBlock
 	for offset := int64(0); offset < int64(len(data)); offset += chunkSize {
@@ -172,7 +197,7 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 	}
 
 	p := New(cfg)
-	err := p.Run(ctx, iter, device, stream, hashClient)
+	err := p.Run(ctx, iter, reader, stream, hashClient)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +210,7 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 func TestPipeline_ConfigValidation(t *testing.T) {
 	ctx := context.Background()
 
-	device := bytes.NewReader(nil)
+	reader := &mockDataReaderForPipeline{data: nil}
 	iter := &mockIterator{}
 	stream := &pipelineMockStream{}
 	hashClient := &mockHashClientForPipeline{}
@@ -196,7 +221,7 @@ func TestPipeline_ConfigValidation(t *testing.T) {
 	}
 
 	p := New(cfg)
-	err := p.Run(ctx, iter, device, stream, hashClient)
+	err := p.Run(ctx, iter, reader, stream, hashClient)
 	if err == nil {
 		t.Fatal("expected validation error for invalid ChunkSize")
 	}

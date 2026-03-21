@@ -19,6 +19,7 @@ package rbd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/go-logr/logr"
@@ -144,7 +145,8 @@ func (w *SourceWorker) Sync(
 
 	cfg := pipeline.Config{}
 	p := pipeline.New(cfg)
-	if err := p.Run(ctx, &rbdIterAdapter{iter: iter}, device, stream, hashClient); err != nil {
+	reader := &fileDataReader{file: device}
+	if err := p.Run(ctx, &rbdIterAdapter{iter: iter}, reader, stream, hashClient); err != nil {
 		return err
 	}
 
@@ -434,6 +436,26 @@ func (a *rbdIterAdapter) Next() (*pipeline.ChangeBlock, bool) {
 
 func (a *rbdIterAdapter) Close() error {
 	return a.iter.Close()
+}
+
+// fileDataReader adapts os.File to pipeline.DataReader.
+type fileDataReader struct {
+	file *os.File
+}
+
+func (f *fileDataReader) ReadAt(
+	_ string, offset, length int64,
+) ([]byte, error) {
+	data := make([]byte, length)
+	n, err := f.file.ReadAt(data, offset)
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("pread at offset %d: %w", offset, err)
+	}
+	return data[:n], nil
+}
+
+func (f *fileDataReader) CloseFile(_ string) error {
+	return nil
 }
 
 // closeAndSignalDone closes the sync stream and

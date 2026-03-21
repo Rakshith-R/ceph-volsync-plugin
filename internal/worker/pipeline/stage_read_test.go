@@ -1,10 +1,27 @@
 package pipeline
 
 import (
-	"bytes"
 	"context"
 	"testing"
 )
+
+type mockDataReader struct {
+	data []byte
+}
+
+func (m *mockDataReader) ReadAt(
+	_ string, offset, length int64,
+) ([]byte, error) {
+	end := offset + length
+	if end > int64(len(m.data)) {
+		end = int64(len(m.data))
+	}
+	return append([]byte(nil), m.data[offset:end]...), nil
+}
+
+func (m *mockDataReader) CloseFile(_ string) error {
+	return nil
+}
 
 func TestStageRead_ReadsAllChunks(t *testing.T) {
 	ctx := context.Background()
@@ -15,8 +32,11 @@ func TestStageRead_ReadsAllChunks(t *testing.T) {
 	mem := NewMemSemaphore(cfg.MaxRawMemoryBytes)
 	win := NewWindowSemaphore(cfg.MaxWindow)
 
-	data := bytes.Repeat([]byte{0xAB}, 48)
-	device := bytes.NewReader(data)
+	data := make([]byte, 48)
+	for i := range data {
+		data[i] = 0xAB
+	}
+	reader := &mockDataReader{data: data}
 
 	inCh := make(chan Chunk, 3)
 	inCh <- Chunk{ReqID: 0, Offset: 0, Length: 16}
@@ -27,7 +47,7 @@ func TestStageRead_ReadsAllChunks(t *testing.T) {
 	readCh := make(chan ReadChunk, 3)
 	zeroCh := make(chan ZeroChunk, 3)
 
-	err := StageRead(ctx, cfg, mem, win, device, inCh, readCh, zeroCh)
+	err := StageRead(ctx, cfg, mem, win, reader, inCh, readCh, zeroCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +77,7 @@ func TestStageRead_ZeroShortCircuit(t *testing.T) {
 	win := NewWindowSemaphore(cfg.MaxWindow)
 
 	data := make([]byte, 16) // all zeros
-	device := bytes.NewReader(data)
+	reader := &mockDataReader{data: data}
 
 	inCh := make(chan Chunk, 1)
 	inCh <- Chunk{ReqID: 0, Offset: 0, Length: 16}
@@ -66,7 +86,7 @@ func TestStageRead_ZeroShortCircuit(t *testing.T) {
 	readCh := make(chan ReadChunk, 1)
 	zeroCh := make(chan ZeroChunk, 1)
 
-	err := StageRead(ctx, cfg, mem, win, device, inCh, readCh, zeroCh)
+	err := StageRead(ctx, cfg, mem, win, reader, inCh, readCh, zeroCh)
 	if err != nil {
 		t.Fatal(err)
 	}
