@@ -146,10 +146,10 @@ func (w *WindowSemaphore) Release(reqID uint64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	idx := int(reqID-w.base) % w.limit
-	if idx >= 0 && idx < w.limit {
-		w.released[idx] = true
-	}
+	// Use absolute (ring-buffer) indexing, consistent
+	// with the advance loop below.
+	idx := int(reqID%uint64(w.limit)) //nolint:gosec // G115: result in [0, limit)
+	w.released[idx] = true
 	w.inFlight--
 
 	for w.released[int(w.base%uint64(w.limit))] {
