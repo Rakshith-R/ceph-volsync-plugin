@@ -45,7 +45,7 @@ func (s *CephFSHashServer) CompareHashes(
 		full := filepath.Join(s.baseDir, bh.FilePath)
 		data, err := readAt(
 			full, int64(bh.Offset), //nolint:gosec
-			int64(bh.Length),       //nolint:gosec
+			int64(bh.Length), //nolint:gosec
 		)
 		if err != nil {
 			// File not present on destination =

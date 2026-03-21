@@ -49,12 +49,12 @@ func dataSendWorker(
 	reader DataReader,
 ) error {
 	var (
-		blocks     []*apiv1.ChangedBlock
-		pending    []held
-		accum      int
-		curPath    string
-		prevReqID  uint64
-		commits    []pendingCommit
+		blocks    []*apiv1.ChangedBlock
+		pending   []held
+		accum     int
+		curPath   string
+		prevReqID uint64
+		commits   []pendingCommit
 	)
 
 	flush := func() error {
