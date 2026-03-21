@@ -19,10 +19,10 @@ package rbd
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
@@ -141,13 +141,26 @@ func (w *SourceWorker) Sync(
 		)
 	}
 
-	if err := w.streamBlocks(
-		iter, device, stream,
-	); err != nil {
+	blockChan := make(chan common.BlockEntry, 64)
+	g, gctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		defer close(blockChan)
+		return w.produceBlocks(
+			gctx, iter, device, blockChan,
+		)
+	})
+	g.Go(func() error {
+		return common.StreamBlocks(
+			stream, blockChan, w.Logger,
+		)
+	})
+
+	if err := g.Wait(); err != nil {
 		return err
 	}
 
-	return w.commitAndSignalDone(ctx, conn, stream)
+	return w.closeAndSignalDone(ctx, conn, stream)
 }
 
 // resolveSourceConfig reads environment variables,
@@ -414,120 +427,48 @@ func (w *SourceWorker) resolveSnapshotDiff(
 	return nil
 }
 
-// streamBlocks iterates over changed blocks from the
+// produceBlocks iterates over changed blocks from the
 // diff iterator, reads data from the device, and sends
-// batched write requests over the gRPC stream.
-func (w *SourceWorker) streamBlocks(
+// BlockEntry items to blockChan.
+func (w *SourceWorker) produceBlocks(
+	ctx context.Context,
 	iter *ceph.RBDBlockDiffIterator,
 	device *os.File,
-	stream grpc.ClientStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
-	],
+	blockChan chan<- common.BlockEntry,
 ) error {
-	var accumulatedBlocks []*apiv1.ChangedBlock
-	accumulatedPayloadSize := 0
-
 	for {
 		block, ok := iter.Next()
 		if !ok {
 			break
 		}
 
-		data := make([]byte, block.Len)
-		n, err := device.ReadAt(data, block.Offset)
-		if err != nil && err != io.EOF {
-			return fmt.Errorf(
-				"failed to read at offset %d: %w",
-				block.Offset, err,
-			)
-		}
-		data = data[:n]
-
-		isZero := common.IsAllZero(data)
-		protoBlock := &apiv1.ChangedBlock{
-			Offset: uint64(block.Offset), //nolint:gosec // G115: RBD offsets are non-negative
-			Length: uint64(block.Len),    //nolint:gosec // G115: RBD offsets are non-negative
-			IsZero: isZero,
-		}
-
-		if !isZero {
-			protoBlock.Data = data
-			accumulatedPayloadSize += len(data)
-		} else {
-			accumulatedPayloadSize += 20
-		}
-
-		accumulatedBlocks = append(
-			accumulatedBlocks, protoBlock,
+		entry, err := common.ReadBlockEntry(
+			device, 0, common.DevicePath,
+			block.Offset, block.Len,
 		)
-
-		if accumulatedPayloadSize >=
-			common.WritePayloadMaxSize {
-			if err := common.SendBlockWrite(
-				stream, common.DevicePath,
-				accumulatedBlocks,
-			); err != nil {
-				return err
-			}
-			accumulatedBlocks = nil
-			accumulatedPayloadSize = 0
-		}
-
-		if accumulatedPayloadSize >=
-			common.WritePayloadMinSize {
-			if err := common.SendBlockWrite(
-				stream, common.DevicePath,
-				accumulatedBlocks,
-			); err != nil {
-				return err
-			}
-			accumulatedBlocks = nil
-			accumulatedPayloadSize = 0
-		}
-	}
-
-	if len(accumulatedBlocks) > 0 {
-		if err := common.SendBlockWrite(
-			stream, common.DevicePath,
-			accumulatedBlocks,
-		); err != nil {
+		if err != nil {
 			return err
+		}
+
+		select {
+		case blockChan <- entry:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 
 	return nil
 }
 
-// commitAndSignalDone sends the commit request on the
-// stream and signals done to the destination.
-func (w *SourceWorker) commitAndSignalDone(
+// closeAndSignalDone closes the sync stream and
+// signals done to the destination.
+func (w *SourceWorker) closeAndSignalDone(
 	ctx context.Context,
 	conn *grpc.ClientConn,
 	stream grpc.ClientStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	],
 ) error {
-	if err := stream.Send(&apiv1.SyncRequest{
-		Operation: &apiv1.SyncRequest_Commit{
-			Commit: &apiv1.CommitRequest{
-				Path: common.DevicePath,
-			},
-		},
-	}); err != nil {
-		if err == io.EOF {
-			if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
-				return fmt.Errorf(
-					"destination error during "+
-						"commit: %w",
-					recvErr,
-				)
-			}
-		}
-		return fmt.Errorf(
-			"failed to send commit: %w", err,
-		)
-	}
-
 	if _, err := stream.CloseAndRecv(); err != nil {
 		return fmt.Errorf(
 			"failed to close sync stream: %w", err,

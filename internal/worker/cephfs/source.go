@@ -19,7 +19,6 @@ package cephfs
 import (
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -65,15 +64,14 @@ const (
 type syncState struct {
 	differ     *ceph.SnapshotDiffer
 	dataClient apiv1.DataServiceClient
-	stream     grpc.ClientStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
-	]
-	logger logr.Logger
+	logger     logr.Logger
 
 	deleteChan chan string
 	smallChan  chan string
 	metaChan   chan string
+	blockChan  chan common.BlockEntry
 
+	nextReqID   uint64
 	rsyncTarget string
 }
 
@@ -502,7 +500,6 @@ func (w *SourceWorker) runStatelessSync(
 	}
 
 	state := w.initSyncState(differ, dataClient)
-	state.stream = stream
 
 	g, gctx := errgroup.WithContext(ctx)
 
@@ -515,8 +512,14 @@ func (w *SourceWorker) runStatelessSync(
 	g.Go(func() error {
 		return w.metaRsyncWorker(gctx, state)
 	})
+	g.Go(func() error {
+		return common.StreamBlocks(
+			stream, state.blockChan, state.logger,
+		)
+	})
 
 	g.Go(func() error {
+		defer close(state.blockChan)
 		defer close(state.deleteChan)
 		defer close(state.smallChan)
 		defer close(state.metaChan)
@@ -671,6 +674,7 @@ func (w *SourceWorker) initSyncState(
 		deleteChan:  make(chan string, 1000),
 		smallChan:   make(chan string, 1000),
 		metaChan:    make(chan string, 1000),
+		blockChan:   make(chan common.BlockEntry, 1000),
 		rsyncTarget: rsyncTarget,
 	}
 }
@@ -803,16 +807,19 @@ func (w *SourceWorker) processFile(
 		return ctx.Err()
 	}
 
-	return w.streamBlockDiff(ctx, state, entryPath)
+	state.nextReqID++
+	return w.streamBlockDiff(
+		ctx, state, entryPath, state.nextReqID,
+	)
 }
 
-// streamBlockDiff uses CephFS block diff to send only
-// changed blocks.
-//
-//nolint:unparam // ctx reserved for future use
+// streamBlockDiff produces BlockEntry items for a
+// single file into state.blockChan. The reqID groups
+// all blocks for this file so StreamBlocks knows when
+// to commit.
 func (w *SourceWorker) streamBlockDiff(
-	_ context.Context, state *syncState,
-	relPath string,
+	ctx context.Context, state *syncState,
+	relPath string, reqID uint64,
 ) error {
 	blockIterator, err :=
 		state.differ.NewBlockDiffIterator(relPath)
@@ -836,9 +843,6 @@ func (w *SourceWorker) streamBlockDiff(
 	}
 	defer func() { _ = file.Close() }()
 
-	var accumulatedBlocks []*apiv1.ChangedBlock
-	accumulatedPayloadSize := 0
-
 	for blockIterator.More() {
 		changedBlocks, err := blockIterator.Read()
 		if err != nil {
@@ -848,86 +852,25 @@ func (w *SourceWorker) streamBlockDiff(
 		}
 
 		for _, block := range changedBlocks.ChangedBlocks {
-			data := make([]byte, block.Len)
-			n, err := file.ReadAt(data, int64(block.Offset)) //nolint:gosec // G115: value within safe range
-			if err != nil && err != io.EOF {
-				return fmt.Errorf(
-					"failed to read block at "+
-						"offset %d: %w",
-					block.Offset, err,
-				)
-			}
-			data = data[:n]
-
-			isZero := common.IsAllZero(data)
-
-			protoBlock := &apiv1.ChangedBlock{
-				Offset: block.Offset,
-				Length: block.Len,
-				IsZero: isZero,
-			}
-
-			if !isZero {
-				protoBlock.Data = data
-				accumulatedPayloadSize += len(data)
-			} else {
-				accumulatedPayloadSize += 20
-			}
-
-			accumulatedBlocks = append(
-				accumulatedBlocks, protoBlock,
+			entry, err := common.ReadBlockEntry(
+				file, reqID, relPath,
+				int64(block.Offset), //nolint:gosec // G115: value within safe range
+				int64(block.Len),    //nolint:gosec // G115: value within safe range
 			)
-
-			if accumulatedPayloadSize >=
-				common.WritePayloadMaxSize {
-				if err := common.SendBlockWrite(
-					state.stream, relPath,
-					accumulatedBlocks,
-				); err != nil {
-					return err
-				}
-				accumulatedBlocks = nil
-				accumulatedPayloadSize = 0
-			}
-		}
-
-		if accumulatedPayloadSize >=
-			common.WritePayloadMinSize {
-			if err := common.SendBlockWrite(
-				state.stream, relPath,
-				accumulatedBlocks,
-			); err != nil {
+			if err != nil {
 				return err
 			}
-			accumulatedBlocks = nil
-			accumulatedPayloadSize = 0
-		}
-	}
 
-	if len(accumulatedBlocks) > 0 {
-		if err := common.SendBlockWrite(
-			state.stream, relPath,
-			accumulatedBlocks,
-		); err != nil {
-			return err
+			select {
+			case state.blockChan <- entry:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
-	}
-
-	if err := state.stream.Send(&apiv1.SyncRequest{
-		Operation: &apiv1.SyncRequest_Commit{
-			Commit: &apiv1.CommitRequest{
-				Path: relPath,
-			},
-		},
-	}); err != nil {
-		return fmt.Errorf(
-			"failed to send commit for %s: %w",
-			relPath, err,
-		)
 	}
 
 	w.Logger.V(1).Info(
-		"Streamed block diff", "path", relPath,
+		"Produced block diff", "path", relPath,
 	)
 	return nil
 }
