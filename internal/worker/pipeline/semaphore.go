@@ -161,6 +161,14 @@ func (w *WindowSemaphore) Release(reqID uint64) {
 	w.checkPressure()
 }
 
+// IsReleased returns true if reqID has been released
+// and its window slot has been reclaimed (base > reqID).
+func (w *WindowSemaphore) IsReleased(reqID uint64) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.base > reqID
+}
+
 func (w *WindowSemaphore) PressureSignal(threshold float64) <-chan struct{} {
 	w.mu.Lock()
 	defer w.mu.Unlock()

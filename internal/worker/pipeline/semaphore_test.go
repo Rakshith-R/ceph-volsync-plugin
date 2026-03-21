@@ -190,6 +190,41 @@ func TestWindowSemaphore_ContextCancel(t *testing.T) {
 	}
 }
 
+func TestWindowSemaphore_IsReleased(t *testing.T) {
+	w := NewWindowSemaphore(4)
+	ctx := context.Background()
+	for i := range uint64(4) {
+		_ = w.Acquire(ctx, i)
+	}
+
+	// Before release, IsReleased should be false.
+	if w.IsReleased(0) {
+		t.Fatal("reqID 0 should not be released yet")
+	}
+
+	// Release 0 — base advances to 1.
+	w.Release(0)
+	if !w.IsReleased(0) {
+		t.Fatal("reqID 0 should be released after Release(0)")
+	}
+	if w.IsReleased(1) {
+		t.Fatal("reqID 1 should not be released yet")
+	}
+
+	// Release out of order: 2, then 1 — base
+	// should advance to 3.
+	w.Release(2)
+	if w.IsReleased(2) {
+		t.Fatal("reqID 2 released but base blocked by 1")
+	}
+	w.Release(1)
+	if !w.IsReleased(2) {
+		t.Fatal("reqID 2 should be released after 1 unblocks base")
+	}
+
+	w.Release(3)
+}
+
 func TestWindowSemaphore_PressureSignal(t *testing.T) {
 	w := NewWindowSemaphore(4)
 	ctx := context.Background()
