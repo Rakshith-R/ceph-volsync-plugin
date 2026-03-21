@@ -59,7 +59,6 @@ type SnapshotDiffer struct {
 // The caller must call Destroy() when done to clean up resources.
 func New(
 	mons string,
-	creds *Credentials,
 	fsID int64,
 	subVolumeGroup string,
 	subVolumeName string,
@@ -68,7 +67,7 @@ func New(
 ) (*SnapshotDiffer, error) {
 	// Create and connect to cluster
 	cc := &ClusterConnection{}
-	if err := cc.Connect(mons, creds); err != nil {
+	if err := cc.Connect(mons); err != nil {
 		return nil, fmt.Errorf("failed to connect to cluster: %w", err)
 	}
 	defer cc.Destroy() // Ensure cleanup if any step fails

@@ -20,12 +20,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
 	"github.com/backube/volsync/controllers/utils"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -257,25 +255,12 @@ func (m *Mover) ensureCephCSISecret(
 				return err
 			}
 			utils.SetOwnedByVolSync(newSecret)
-			// Store secret entries as a single JSON
-			// file so the mover reads one file instead
-			// of iterating over directory entries.
-			secretMap := make(
-				map[string]string,
-				len(origSecret.Data),
-			)
-			for k, v := range origSecret.Data {
-				secretMap[k] = string(v)
-			}
-			jsonBytes, err := json.Marshal(secretMap)
-			if err != nil {
-				return fmt.Errorf(
-					"failed to marshal secret: %w",
-					err,
-				)
-			}
+			// Mount only userID and userKey directly
+			// so the worker reads them as files without
+			// JSON parsing or temp file creation.
 			newSecret.Data = map[string][]byte{
-				worker.CsiSecretJSONKey: jsonBytes,
+				"userID":  origSecret.Data["userID"],
+				"userKey": origSecret.Data["userKey"],
 			}
 			return nil
 		},

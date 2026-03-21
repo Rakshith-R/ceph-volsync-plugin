@@ -238,13 +238,6 @@ func (w *SourceWorker) runSnapdiffSync(
 	targetSnapName := "csi-snap-" +
 		targetSnapID.ObjectUUID
 
-	creds, err := common.ReadMountedCredentials()
-	if err != nil {
-		return fmt.Errorf(
-			"failed to get ceph credentials: %w", err,
-		)
-	}
-
 	mons, err := config.Mons(
 		config.CsiConfigFile, volumeID.ClusterID,
 	)
@@ -258,7 +251,6 @@ func (w *SourceWorker) runSnapdiffSync(
 
 	differ, err := ceph.New(
 		mons,
-		creds,
 		volumeID.LocationID,
 		subVolumeGroup,
 		subVolumeName,

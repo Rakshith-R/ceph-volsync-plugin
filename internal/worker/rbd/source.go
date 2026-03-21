@@ -55,8 +55,6 @@ func NewSourceWorker(
 // sync operation.
 type sourceContext struct {
 	mons            string
-	user            string
-	key             string
 	radosNS         string
 	volumeID        *volid.CSIIdentifier
 	parentPoolID    int64
@@ -112,7 +110,7 @@ func (w *SourceWorker) Sync(
 	_ = parentImage.Close()
 
 	iter, err := ceph.NewRBDBlockDiffIterator(
-		sc.mons, sc.user, sc.key,
+		sc.mons,
 		sc.parentPoolID, sc.parentNS,
 		sc.parentImageName,
 		sc.fromSnapID, sc.targetSnapID, volSize,
@@ -173,21 +171,6 @@ func (w *SourceWorker) resolveSourceConfig() (
 		)
 	}
 
-	creds, err := common.ReadMountedCredentials()
-	if err != nil {
-		return nil, nil, fmt.Errorf(
-			"failed to get ceph credentials: %w", err,
-		)
-	}
-
-	userKey, err := os.ReadFile(creds.KeyFile)
-	if err != nil {
-		return nil, nil, fmt.Errorf(
-			"failed to read key file %s: %w",
-			creds.KeyFile, err,
-		)
-	}
-
 	mons, err := config.Mons(
 		config.CsiConfigFile, volumeID.ClusterID,
 	)
@@ -207,12 +190,7 @@ func (w *SourceWorker) resolveSourceConfig() (
 		)
 	}
 
-	user := creds.ID
-	key := string(userKey)
-
-	cc, err := ceph.NewClusterConnection(
-		mons, user, key,
-	)
+	cc, err := ceph.NewClusterConnection(mons)
 	if err != nil {
 		return nil, nil, fmt.Errorf(
 			"failed to connect to cluster: %w", err,
@@ -221,8 +199,6 @@ func (w *SourceWorker) resolveSourceConfig() (
 
 	sc := &sourceContext{
 		mons:     mons,
-		user:     user,
-		key:      key,
 		radosNS:  radosNS,
 		volumeID: volumeID,
 	}

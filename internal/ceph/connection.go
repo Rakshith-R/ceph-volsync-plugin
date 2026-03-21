@@ -19,8 +19,12 @@ package ceph
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
 	"github.com/ceph/go-ceph/cephfs"
 	ca "github.com/ceph/go-ceph/cephfs/admin"
 	"github.com/ceph/go-ceph/rados"
@@ -28,8 +32,7 @@ import (
 
 // ClusterConnection represents a connection to a Ceph cluster.
 type ClusterConnection struct {
-	conn  *rados.Conn
-	Creds *Credentials
+	conn *rados.Conn
 }
 
 var (
@@ -38,24 +41,39 @@ var (
 	connPool   = NewConnPool(cpInterval, cpExpiry)
 )
 
-// Connect connects to the Ceph cluster.
-func (cc *ClusterConnection) Connect(
-	monitors string, cr *Credentials,
-) error {
-	if cc.conn == nil {
-		conn, err := connPool.Get(
-			monitors, cr.ID, cr.KeyFile,
-		)
-		if err != nil {
-			return fmt.Errorf(
-				"failed to get connection: %w", err,
-			)
-		}
-
-		cc.conn = conn
-		cc.Creds = cr
+// Connect connects to the Ceph cluster using credentials
+// mounted at the ceph-csi-secret volume.
+func (cc *ClusterConnection) Connect(monitors string) error {
+	if cc.conn != nil {
+		return nil
 	}
 
+	idPath := filepath.Join(
+		worker.CsiSecretMountPath,
+		worker.CsiSecretUserIDKey,
+	)
+	idBytes, err := os.ReadFile(idPath) //nolint:gosec // G304: path is internally constructed
+	if err != nil {
+		return fmt.Errorf(
+			"failed to read userID from %s: %w",
+			idPath, err,
+		)
+	}
+	userID := strings.TrimSpace(string(idBytes))
+
+	keyFilePath := filepath.Join(
+		worker.CsiSecretMountPath,
+		worker.CsiSecretUserKeyKey,
+	)
+
+	conn, err := connPool.Get(monitors, userID, keyFilePath)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to get connection: %w", err,
+		)
+	}
+
+	cc.conn = conn
 	return nil
 }
 

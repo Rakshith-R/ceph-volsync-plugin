@@ -35,7 +35,10 @@ const (
 	// CsiSecretMountPath is the mount path for the
 	// ceph-csi secret volume.
 	CsiSecretMountPath = "/etc/ceph-csi-secret" //nolint:gosec // G101: mount path, not credentials
-	// CsiSecretJSONKey is the key for the ceph-csi
-	// secret JSON file.
-	CsiSecretJSONKey = "credentials.json"
+	// CsiSecretUserIDKey is the secret key for the
+	// ceph user ID.
+	CsiSecretUserIDKey = "userID"
+	// CsiSecretUserKeyKey is the secret key for the
+	// ceph user key file.
+	CsiSecretUserKeyKey = "userKey"
 )

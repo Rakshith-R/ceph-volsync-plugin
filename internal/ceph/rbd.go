@@ -32,21 +32,10 @@ type ChangeBlock struct {
 // NewClusterConnection creates a new cluster connection
 // using the provided monitors, user, and key.
 func NewClusterConnection(
-	monitors, user, userKey string,
+	monitors string,
 ) (*ClusterConnection, error) {
-	secrets := map[string]string{
-		"userID":  user,
-		"userKey": userKey,
-	}
-	cr, err := NewUserCredentials(secrets)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to create credentials: %w", err,
-		)
-	}
-
 	cc := &ClusterConnection{}
-	if err := cc.Connect(monitors, cr); err != nil {
+	if err := cc.Connect(monitors); err != nil {
 		return nil, fmt.Errorf(
 			"failed to connect to cluster: %w", err,
 		)
@@ -175,7 +164,7 @@ type RBDBlockDiffIterator struct {
 // reports changed blocks between fromSnapID and
 // targetSnapID on the image.
 func NewRBDBlockDiffIterator(
-	monitors, user, userKey string,
+	monitors string,
 	poolID int64,
 	radosNamespace string,
 	imageName string,
@@ -183,9 +172,7 @@ func NewRBDBlockDiffIterator(
 	targetSnapID uint64,
 	volSize uint64,
 ) (*RBDBlockDiffIterator, error) {
-	conn, err := NewClusterConnection(
-		monitors, user, userKey,
-	)
+	conn, err := NewClusterConnection(monitors)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"failed to connect to cluster: %w", err,
