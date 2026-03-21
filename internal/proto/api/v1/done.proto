@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package api.v1;
 
-option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1";
+option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1";
 
 
 // DoneService signals completion and requests graceful shutdown.

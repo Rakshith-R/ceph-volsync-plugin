@@ -25,8 +25,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
-	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/version/v1"
+	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
+	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/version/v1"
 )
 
 // ConnectToDestination establishes a gRPC connection

@@ -25,7 +25,7 @@ import (
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
 
-	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
+	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 

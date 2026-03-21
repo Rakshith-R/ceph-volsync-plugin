@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package version.v1;
 
-option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/version/v1";
+option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/proto/version/v1";
 
 // VersionService provides version information
 service VersionService {

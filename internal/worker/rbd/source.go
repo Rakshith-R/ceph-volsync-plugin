@@ -28,7 +28,7 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
-	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/mover/proto/api/v1"
+	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
