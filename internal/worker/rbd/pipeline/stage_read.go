@@ -91,10 +91,10 @@ func readWorker(
 		}
 
 		h := held{
-			reqID:    chunk.ReqID,
-			memRawN:  cfg.ChunkSize,
-			hasWin:   true,
-			hasMem:   true,
+			reqID:   chunk.ReqID,
+			memRawN: cfg.ChunkSize,
+			hasWin:  true,
+			hasMem:  true,
 		}
 
 		select {

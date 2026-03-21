@@ -111,7 +111,7 @@ func TestPipeline_EmptyIterator(t *testing.T) {
 func TestPipeline_ZeroBlocks(t *testing.T) {
 	ctx := context.Background()
 
-	chunkSize := int64(64 * 1024) // 64KB minimum
+	chunkSize := int64(64 * 1024)     // 64KB minimum
 	data := make([]byte, chunkSize*2) // all zeros
 	device := bytes.NewReader(data)
 

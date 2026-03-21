@@ -65,14 +65,14 @@ func compressWorker(
 
 		select {
 		case outCh <- CompressedChunk{
-			ReqID:                hc.ReqID,
-			FilePath:             hc.FilePath,
-			Offset:               hc.Offset,
-			Data:                 dst,
-			Hash:                 hc.Hash,
-			UncompressedLength:   uncompLen,
-			IsRaw:                isRaw,
-			Held:                 hc.Held,
+			ReqID:              hc.ReqID,
+			FilePath:           hc.FilePath,
+			Offset:             hc.Offset,
+			Data:               dst,
+			Hash:               hc.Hash,
+			UncompressedLength: uncompLen,
+			IsRaw:              isRaw,
+			Held:               hc.Held,
 		}:
 		case <-ctx.Done():
 			hc.Held.release(memRaw, nil, nil)
