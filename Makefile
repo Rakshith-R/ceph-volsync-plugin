@@ -80,6 +80,16 @@ MOVER_BUILD_ARGS = \
 	--build-arg RSYNC_VERSION=$(RSYNC_VERSION) \
 	--build-arg STUNNEL_VERSION=$(STUNNEL_VERSION)
 
+# PROTO_IMG defines the image:tag for the protoc code generation image.
+PROTO_IMG ?= ceph-volsync-plugin-protoc:latest
+
+# Proto container --build-arg flags
+PROTO_BUILD_ARGS = \
+	--build-arg GOLANG_VERSION=$(GOLANG_VERSION) \
+	--build-arg PROTOC_VERSION=$(PROTOC_VERSION) \
+	--build-arg PROTOC_GEN_GO_VERSION=$(PROTOC_GEN_GO_VERSION) \
+	--build-arg PROTOC_GEN_GO_GRPC_VERSION=$(PROTOC_GEN_GO_GRPC_VERSION)
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -190,6 +200,39 @@ check-uncommitted: ## Check for uncommitted changes in git
 		exit 1; \
 	else \
 		echo "✓ No uncommitted changes"; \
+	fi
+
+##@ Proto
+
+.PHONY: proto-image
+proto-image: ## Build the containerized protoc code generation image.
+	$(CONTAINER_TOOL) build $(PROTO_BUILD_ARGS) \
+		-t $(PROTO_IMG) -f build/Containerfile.protoc .
+
+.PHONY: proto-generate
+proto-generate: proto-image ## Regenerate gRPC stubs from .proto definitions.
+	find internal/proto -name '*.pb.go' -delete
+	$(CONTAINER_TOOL) run --rm \
+		-v $(PWD):/workspace:Z \
+		$(PROTO_IMG) \
+		--proto_path=internal/proto \
+		--go_out=internal/proto \
+		--go_opt=paths=source_relative \
+		--go-grpc_out=internal/proto \
+		--go-grpc_opt=paths=source_relative \
+		api/v1/data.proto \
+		api/v1/done.proto \
+		api/v1/metadata.proto \
+		version/v1/version.proto
+
+.PHONY: proto-verify
+proto-verify: proto-generate ## Verify generated proto files match committed state.
+	@if [ -n "$$(git diff --name-only internal/proto/)" ]; then \
+		echo "Error: Generated proto files differ from committed:"; \
+		git diff --name-only internal/proto/; \
+		exit 1; \
+	else \
+		echo "✓ Generated proto files are up-to-date"; \
 	fi
 
 ##@ Build
