@@ -3,8 +3,10 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 )
@@ -14,7 +16,7 @@ func StageSendHash(
 	cfg *Config,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
-	hashClient apiv1.HashServiceClient,
+	newHashStream HashStreamFactory,
 	hashedCh <-chan HashedChunk,
 	zeroCh <-chan ZeroChunk,
 	mismatchCh chan<- HashedChunk,
@@ -29,7 +31,11 @@ func StageSendHash(
 
 	for range cfg.HashSendWorkers {
 		g.Go(func() error {
-			return hashSender(gctx, memRaw, win, hashClient, batchCh, mismatchCh)
+			hs, err := newHashStream(gctx)
+			if err != nil {
+				return fmt.Errorf("open hash stream: %w", err)
+			}
+			return hashSender(gctx, memRaw, win, hs, batchCh, mismatchCh)
 		})
 	}
 
@@ -117,10 +123,15 @@ func hashSender(
 	ctx context.Context,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
-	hashClient apiv1.HashServiceClient,
+	stream grpc.BidiStreamingClient[
+		apiv1.HashBatchRequest,
+		apiv1.HashBatchResponse,
+	],
 	batchCh <-chan []HashedChunk,
 	mismatchCh chan<- HashedChunk,
 ) error {
+	defer func() { _ = stream.CloseSend() }()
+
 	for {
 		var batch []HashedChunk
 		var ok bool
@@ -146,7 +157,11 @@ func hashSender(
 			}
 		}
 
-		resp, err := hashClient.CompareHashes(ctx, req)
+		if err := stream.Send(req); err != nil {
+			return err
+		}
+
+		resp, err := stream.Recv()
 		if err != nil {
 			return err
 		}

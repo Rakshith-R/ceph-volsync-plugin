@@ -2,8 +2,10 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
@@ -32,11 +34,26 @@ func StageSendData(
 	cfg *Config,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
-	stream grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse],
+	newStream StreamFactory,
 	inCh <-chan CompressedChunk,
 	reader DataReader,
 ) error {
-	return dataSendWorker(ctx, cfg, memRaw, win, stream, inCh, reader)
+	g, gctx := errgroup.WithContext(ctx)
+	for range cfg.DataSendWorkers {
+		g.Go(func() error {
+			stream, err := newStream(gctx)
+			if err != nil {
+				return fmt.Errorf(
+					"open sync stream: %w", err,
+				)
+			}
+			return dataSendWorker(
+				gctx, cfg, memRaw, win,
+				stream, inCh, reader,
+			)
+		})
+	}
+	return g.Wait()
 }
 
 func dataSendWorker(
@@ -140,6 +157,11 @@ func dataSendWorker(
 					}
 				}
 
+				if _, err := stream.CloseAndRecv(); err != nil {
+					return fmt.Errorf(
+						"close sync stream: %w", err,
+					)
+				}
 				return nil
 			}
 		case <-ctx.Done():

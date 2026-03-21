@@ -132,23 +132,36 @@ func (w *SourceWorker) Sync(
 	}
 	defer func() { _ = device.Close() }()
 
-	hashClient := apiv1.NewHashServiceClient(conn)
 	dataClient := apiv1.NewDataServiceClient(conn)
-	stream, err := dataClient.Sync(ctx)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to create sync stream: %w", err,
-		)
+	hashClient := apiv1.NewHashServiceClient(conn)
+
+	newStream := func(
+		ctx context.Context,
+	) (grpc.ClientStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	], error) {
+		return dataClient.Sync(ctx)
+	}
+	newHashStream := func(
+		ctx context.Context,
+	) (grpc.BidiStreamingClient[
+		apiv1.HashBatchRequest,
+		apiv1.HashBatchResponse,
+	], error) {
+		return hashClient.CompareHashes(ctx)
 	}
 
 	cfg := pipeline.Config{}
 	p := pipeline.New(cfg)
 	reader := &fileDataReader{file: device}
-	if err := p.Run(ctx, &rbdIterAdapter{iter: iter}, reader, stream, hashClient); err != nil {
+	if err := p.Run(
+		ctx, &rbdIterAdapter{iter: iter},
+		reader, newStream, newHashStream,
+	); err != nil {
 		return err
 	}
 
-	return w.closeAndSignalDone(ctx, conn, stream)
+	return w.closeAndSignalDone(ctx, conn)
 }
 
 // resolveSourceConfig reads environment variables,
@@ -434,21 +447,12 @@ func (f *fileDataReader) CloseFile(_ string) error {
 	return nil
 }
 
-// closeAndSignalDone closes the sync stream and
-// signals done to the destination.
+// closeAndSignalDone signals done to the destination.
+// Streams are closed inside individual dataSendWorkers.
 func (w *SourceWorker) closeAndSignalDone(
 	ctx context.Context,
 	conn *grpc.ClientConn,
-	stream grpc.ClientStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
-	],
 ) error {
-	if _, err := stream.CloseAndRecv(); err != nil {
-		return fmt.Errorf(
-			"failed to close sync stream: %w", err,
-		)
-	}
-
 	w.Logger.Info("Block diff sync completed")
 
 	return common.SignalDone(ctx, w.Logger, conn)

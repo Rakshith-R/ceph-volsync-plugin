@@ -684,31 +684,32 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 	reader := NewCephFSReader()
 	defer func() { _ = reader.Close() }()
 
-	hashClient :=
-		apiv1.NewHashServiceClient(conn)
 	dataClient :=
 		apiv1.NewDataServiceClient(conn)
-	stream, err := dataClient.Sync(ctx)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to create sync stream: %w", err,
-		)
+	hashClient :=
+		apiv1.NewHashServiceClient(conn)
+
+	newStream := func(
+		ctx context.Context,
+	) (grpc.ClientStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	], error) {
+		return dataClient.Sync(ctx)
+	}
+	newHashStream := func(
+		ctx context.Context,
+	) (grpc.BidiStreamingClient[
+		apiv1.HashBatchRequest,
+		apiv1.HashBatchResponse,
+	], error) {
+		return hashClient.CompareHashes(ctx)
 	}
 
 	cfg := pipeline.Config{ReadWorkers: 2}
 	p := pipeline.New(cfg)
-	if err := p.Run(
-		ctx, iter, reader, stream, hashClient,
-	); err != nil {
-		return err
-	}
-
-	if _, err := stream.CloseAndRecv(); err != nil {
-		return fmt.Errorf(
-			"failed to close sync stream: %w", err,
-		)
-	}
-	return nil
+	return p.Run(
+		ctx, iter, reader, newStream, newHashStream,
+	)
 }
 
 // walkAndStreamDirectories walks the /data directory

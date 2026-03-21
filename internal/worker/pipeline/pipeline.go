@@ -22,6 +22,26 @@ type BlockIterator interface {
 	Close() error
 }
 
+// StreamFactory opens a new gRPC Sync stream.
+// Called once per DataSendWorker goroutine.
+type StreamFactory func(ctx context.Context) (
+	grpc.ClientStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	], error,
+)
+
+// HashStreamFactory opens a new bidi hash stream.
+// Called once per HashSendWorker goroutine.
+// nil skips hash dedup entirely.
+type HashStreamFactory func(
+	ctx context.Context,
+) (
+	grpc.BidiStreamingClient[
+		apiv1.HashBatchRequest,
+		apiv1.HashBatchResponse,
+	], error,
+)
+
 // Pipeline orchestrates the 5-stage concurrent transfer pipeline.
 type Pipeline struct {
 	cfg Config
@@ -37,8 +57,8 @@ func (p *Pipeline) Run(
 	ctx context.Context,
 	iter BlockIterator,
 	reader DataReader,
-	stream grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse],
-	hashClient apiv1.HashServiceClient,
+	newStream StreamFactory,
+	newHashStream HashStreamFactory,
 ) error {
 	p.cfg.setDefaults()
 	if err := p.cfg.validate(); err != nil {
@@ -71,7 +91,7 @@ func (p *Pipeline) Run(
 		return StageRead(gctx, cfg, memRaw, win, reader, chunkCh, readCh, zeroCh)
 	})
 
-	if hashClient == nil {
+	if newHashStream == nil {
 		// Skip hash stages: forward all to mismatchCh
 		g.Go(func() error {
 			defer close(mismatchCh)
@@ -87,7 +107,7 @@ func (p *Pipeline) Run(
 		// Stage 3: SendHash - hash comparison + dedup
 		g.Go(func() error {
 			defer close(mismatchCh)
-			return StageSendHash(gctx, cfg, memRaw, win, hashClient, hashedCh, zeroCh, mismatchCh)
+			return StageSendHash(gctx, cfg, memRaw, win, newHashStream, hashedCh, zeroCh, mismatchCh)
 		})
 	}
 
@@ -99,7 +119,7 @@ func (p *Pipeline) Run(
 
 	// Stage 5: SendData - batched gRPC sends
 	g.Go(func() error {
-		return StageSendData(gctx, cfg, memRaw, win, stream, compressedCh, reader)
+		return StageSendData(gctx, cfg, memRaw, win, newStream, compressedCh, reader)
 	})
 
 	return g.Wait()
