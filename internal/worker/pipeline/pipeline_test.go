@@ -44,32 +44,6 @@ func (m *mockIterator) Next() (*ChangeBlock, bool) {
 
 func (m *mockIterator) Close() error { return nil }
 
-// mockHashBidiStreamForPipeline returns all chunks
-// as mismatched (forces full send).
-type mockHashBidiStreamForPipeline struct {
-	grpc.BidiStreamingClient[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
-	]
-}
-
-func (m *mockHashBidiStreamForPipeline) Send(
-	_ *apiv1.HashBatchRequest,
-) error {
-	return nil
-}
-
-func (m *mockHashBidiStreamForPipeline) Recv() (
-	*apiv1.HashBatchResponse, error,
-) {
-	// Empty response = all mismatched (no IDs excluded)
-	return &apiv1.HashBatchResponse{}, nil
-}
-
-func (m *mockHashBidiStreamForPipeline) CloseSend() error {
-	return nil
-}
-
 type pipelineMockStream struct {
 	grpc.ClientStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,

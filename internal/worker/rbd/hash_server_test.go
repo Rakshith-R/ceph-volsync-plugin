@@ -62,7 +62,7 @@ func TestHashServer_AllMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 
 	data := []byte("0123456789ABCDEF")
 	_, _ = f.Write(data)
@@ -103,7 +103,7 @@ func TestHashServer_Mismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 
 	data := []byte("0123456789ABCDEF")
 	_, _ = f.Write(data)
