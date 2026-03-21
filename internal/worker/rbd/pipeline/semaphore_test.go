@@ -55,7 +55,6 @@ func TestMemSemaphore_FIFO(t *testing.T) {
 	var order []int
 
 	for i := range 3 {
-		i := i
 		go func() {
 			_ = s.Acquire(ctx, 5)
 			mu.Lock()
