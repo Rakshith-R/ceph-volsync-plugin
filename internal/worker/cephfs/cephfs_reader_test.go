@@ -3,6 +3,7 @@ package cephfs
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -61,5 +62,116 @@ func TestCephFSReader_CloseFile(t *testing.T) {
 	}
 	if string(data) != "bbb" {
 		t.Errorf("expected %q, got %q", "bbb", data)
+	}
+}
+
+func TestFileCache_RefCounting(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(
+		filepath.Join(dir, "ref.bin"),
+		[]byte("refcount"), 0600,
+	)
+
+	fc := NewReadCache(dir)
+	defer func() { _ = fc.Close() }()
+
+	// Two acquires increment refCount to 2.
+	f1, err := fc.Acquire("ref.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2, err := fc.Acquire("ref.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f1 != f2 {
+		t.Fatal("expected same file handle")
+	}
+
+	// First release keeps file open.
+	if err := fc.Release("ref.bin"); err != nil {
+		t.Fatal(err)
+	}
+	// File should still be readable.
+	buf := make([]byte, 3)
+	if _, err := f1.ReadAt(buf, 0); err != nil {
+		t.Fatal("file closed too early:", err)
+	}
+
+	// Second release closes file.
+	if err := fc.Release("ref.bin"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFileCache_SyncAndRelease(t *testing.T) {
+	dir := t.TempDir()
+	fc := NewWriteCache(dir)
+	defer func() { _ = fc.Close() }()
+
+	f, err := fc.Acquire("sync.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteAt([]byte("data"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fc.SyncAndRelease("sync.bin"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify data persisted.
+	got, err := os.ReadFile(filepath.Join(dir, "sync.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "data" {
+		t.Errorf("expected %q, got %q", "data", got)
+	}
+}
+
+func TestFileCache_ConcurrentAcquire(t *testing.T) {
+	dir := t.TempDir()
+	fc := NewWriteCache(dir)
+	defer func() { _ = fc.Close() }()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errs := make(chan error, 2)
+
+	for i := range 2 {
+		go func(offset int64) {
+			defer wg.Done()
+			f, err := fc.Acquire("concurrent.bin")
+			if err != nil {
+				errs <- err
+				return
+			}
+			if _, err := f.WriteAt(
+				[]byte("ab"), offset,
+			); err != nil {
+				errs <- err
+				return
+			}
+			errs <- fc.Release("concurrent.bin")
+		}(int64(i * 2))
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := os.ReadFile(
+		filepath.Join(dir, "concurrent.bin"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "abab" {
+		t.Errorf("expected %q, got %q", "abab", got)
 	}
 }
