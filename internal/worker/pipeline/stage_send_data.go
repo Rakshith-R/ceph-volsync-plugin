@@ -57,7 +57,7 @@ func dataSendWorker(
 	// Sender: batches and sends WriteRequests
 	g.Go(func() error {
 		return dataSender(
-			gctx, cfg, memRaw, stream, inCh,
+			gctx, cfg, memRaw, win, stream, inCh,
 		)
 	})
 
@@ -91,6 +91,7 @@ func dataSender(
 	ctx context.Context,
 	cfg *Config,
 	memRaw *MemSemaphore,
+	win *WindowSemaphore,
 	stream grpc.BidiStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	],
@@ -121,7 +122,7 @@ func dataSender(
 
 		if err := stream.Send(req); err != nil {
 			for i := range pending {
-				pending[i].release(memRaw, nil)
+				pending[i].release(memRaw, win)
 			}
 			return err
 		}
@@ -146,7 +147,7 @@ func dataSender(
 			}
 		case <-ctx.Done():
 			for i := range pending {
-				pending[i].release(memRaw, nil)
+				pending[i].release(memRaw, win)
 			}
 			return ctx.Err()
 		}

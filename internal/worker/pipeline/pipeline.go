@@ -117,7 +117,7 @@ func (p *Pipeline) Run(
 	// Stage 4: Compress - LZ4 compression
 	g.Go(func() error {
 		defer close(compressedCh)
-		return StageCompress(gctx, cfg, memRaw, mismatchCh, compressedCh)
+		return StageCompress(gctx, cfg, memRaw, win, mismatchCh, compressedCh)
 	})
 
 	// Stage 5: SendData - batched gRPC sends

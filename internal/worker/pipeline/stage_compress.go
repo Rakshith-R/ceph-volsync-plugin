@@ -11,6 +11,7 @@ func StageCompress(
 	ctx context.Context,
 	cfg *Config,
 	memRaw *MemSemaphore,
+	win *WindowSemaphore,
 	inCh <-chan HashedChunk,
 	outCh chan<- CompressedChunk,
 ) error {
@@ -18,7 +19,9 @@ func StageCompress(
 
 	for range cfg.CompressWorkers {
 		g.Go(func() error {
-			return compressWorker(gctx, memRaw, inCh, outCh)
+			return compressWorker(
+				gctx, memRaw, win, inCh, outCh,
+			)
 		})
 	}
 
@@ -28,6 +31,7 @@ func StageCompress(
 func compressWorker(
 	ctx context.Context,
 	memRaw *MemSemaphore,
+	win *WindowSemaphore,
 	inCh <-chan HashedChunk,
 	outCh chan<- CompressedChunk,
 ) error {
@@ -76,7 +80,7 @@ func compressWorker(
 			Held:               hc.Held,
 		}:
 		case <-ctx.Done():
-			hc.Held.release(memRaw, nil)
+			hc.Held.release(memRaw, win)
 			return ctx.Err()
 		}
 	}
