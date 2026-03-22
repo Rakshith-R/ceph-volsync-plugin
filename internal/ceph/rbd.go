@@ -258,13 +258,18 @@ func (it *RBDBlockDiffIterator) Next() (
 	return &block, true
 }
 
-// Close releases the image and cluster connection.
+// Close drains remaining blocks, waits for the diff
+// goroutine to finish, then releases the image and
+// cluster connection. Must be called even on error
+// to avoid goroutine/image leaks.
 func (it *RBDBlockDiffIterator) Close() error {
-	var iterErr error
-	select {
-	case iterErr = <-it.doneChan:
-	default:
+	// Drain blocksChan so the diff goroutine can
+	// finish if it's blocked on a channel send.
+	for range it.blocksChan {
 	}
+
+	// Wait for the diff goroutine to complete.
+	iterErr := <-it.doneChan
 
 	var closeErr error
 	if it.image != nil {
