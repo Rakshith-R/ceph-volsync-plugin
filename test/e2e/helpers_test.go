@@ -76,12 +76,12 @@ var drivers = []driverConfig{
 		// 	sc:      "rook-nfs",
 		// 	vsClass: "csi-nfsplugin-snapclass",
 		// }, {
-		// 	name: "cephfs",
-		// 	provider: "rook-ceph." +
-		// 		"cephfs.csi.ceph.com",
-		// 	sc:      "rook-cephfs",
-		// 	vsClass: "csi-cephfsplugin-snapclass",
-		// }, {
+		name: "cephfs",
+		provider: "rook-ceph." +
+			"cephfs.csi.ceph.com",
+		sc:      "rook-cephfs",
+		vsClass: "csi-cephfsplugin-snapclass",
+	}, {
 		name: "rbd",
 		provider: "rook-ceph." +
 			"rbd.csi.ceph.com",
@@ -89,7 +89,7 @@ var drivers = []driverConfig{
 		vsClass: "csi-rbdplugin-snapclass",
 		volumeMode: ptr.To(
 			corev1.PersistentVolumeBlock),
-		accessMode: corev1.ReadWriteMany,
+		accessMode: corev1.ReadWriteOnce,
 	},
 }
 
