@@ -164,16 +164,15 @@ func (s *DataServer) Sync(
 	}
 }
 
-// collectRequestIDs extracts non-zero request IDs
-// from a slice of ChangedBlocks.
+// collectRequestIDs extracts request IDs from a
+// slice of ChangedBlocks. All IDs are included
+// (reqID 0 is valid — it's the first block).
 func collectRequestIDs(
 	blocks []*apiv1.ChangedBlock,
 ) []uint64 {
 	ids := make([]uint64, 0, len(blocks))
 	for _, b := range blocks {
-		if b.RequestId != 0 {
-			ids = append(ids, b.RequestId)
-		}
+		ids = append(ids, b.RequestId)
 	}
 	return ids
 }

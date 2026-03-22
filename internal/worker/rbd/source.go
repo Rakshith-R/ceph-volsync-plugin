@@ -178,6 +178,12 @@ func (w *SourceWorker) Sync(
 	}
 	for !win.IsReleased(lastReqID) {
 		runtime.Gosched()
+		if ctx.Err() != nil {
+			return fmt.Errorf(
+				"waiting for acks: %w",
+				ctx.Err(),
+			)
+		}
 	}
 
 	// Send commit for the device
