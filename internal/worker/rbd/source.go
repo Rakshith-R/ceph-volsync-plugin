@@ -171,11 +171,20 @@ func (w *SourceWorker) Sync(
 		return err
 	}
 
+	w.Logger.Info("Pipeline completed",
+		"blocksProcessed", adapter.reqID,
+	)
+
 	// Wait for all acks before committing
 	lastReqID := adapter.reqID
-	if lastReqID > 0 {
-		lastReqID--
+	if lastReqID == 0 {
+		w.Logger.Info(
+			"No changed blocks in diff," +
+				" skipping commit",
+		)
+		return w.closeAndSignalDone(ctx, conn)
 	}
+	lastReqID--
 	for !win.IsReleased(lastReqID) {
 		runtime.Gosched()
 		if ctx.Err() != nil {
@@ -438,6 +447,7 @@ func (w *SourceWorker) resolveSnapshotDiff(
 			"baseSnap", baseSnapName,
 			"targetSnap", targetSnapName,
 			"fromSnapID", sc.fromSnapID,
+			"targetSnapID", sc.targetSnapID,
 		)
 	} else {
 		w.Logger.Info(
