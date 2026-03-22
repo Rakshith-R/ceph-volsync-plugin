@@ -43,3 +43,29 @@ func TestHeld_PartialReleaseMemRaw(t *testing.T) {
 		t.Fatalf("expected 70, got %d", h.memRawN)
 	}
 }
+
+func TestHeld_ReleaseMemOnly(t *testing.T) {
+	mem := NewMemSemaphore(1000)
+	win := NewWindowSemaphore(64)
+	ctx := context.Background()
+	_ = mem.Acquire(ctx, 100)
+	_ = win.Acquire(ctx, 0)
+	h := held{
+		reqID: 0, memRawN: 100,
+		hasWin: true, hasMem: true,
+	}
+	h.releaseMemOnly(mem)
+	if h.hasMem {
+		t.Fatal("hasMem should be cleared")
+	}
+	if !h.hasWin {
+		t.Fatal("hasWin should still be set")
+	}
+	// Memory should be reclaimable now.
+	if err := mem.Acquire(ctx, 100); err != nil {
+		t.Fatal(err)
+	}
+	mem.Release(100)
+	// Clean up window.
+	win.Release(0)
+}

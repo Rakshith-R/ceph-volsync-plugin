@@ -58,8 +58,11 @@ func NewWriteCache(baseDir string) *FileCache {
 
 // Acquire returns the file for relPath, opening
 // it if needed, and increments refCount.
+// If totalSize > 0 and the file is smaller, it is
+// truncated to totalSize on first open. Pass 0 for
+// read-only access (no truncation, no stat overhead).
 func (fc *FileCache) Acquire(
-	relPath string,
+	relPath string, totalSize int64,
 ) (*os.File, error) {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
@@ -87,6 +90,26 @@ func (fc *FileCache) Acquire(
 			"open %s: %w", full, err,
 		)
 	}
+
+	if totalSize > 0 {
+		fi, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf(
+				"stat %s: %w", full, err,
+			)
+		}
+		if fi.Size() < totalSize {
+			if err := f.Truncate(totalSize); err != nil {
+				_ = f.Close()
+				return nil, fmt.Errorf(
+					"truncate %s to %d: %w",
+					full, totalSize, err,
+				)
+			}
+		}
+	}
+
 	fc.files[relPath] = &fileEntry{
 		file: f, refCount: 1,
 	}
@@ -177,7 +200,7 @@ func NewCephFSReader() *CephFSReader {
 func (r *CephFSReader) ReadAt(
 	filePath string, offset, length int64,
 ) ([]byte, error) {
-	f, err := r.cache.Acquire(filePath)
+	f, err := r.cache.Acquire(filePath, 0)
 	if err != nil {
 		return nil, err
 	}

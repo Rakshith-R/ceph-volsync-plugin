@@ -76,11 +76,11 @@ func TestFileCache_RefCounting(t *testing.T) {
 	defer func() { _ = fc.Close() }()
 
 	// Two acquires increment refCount to 2.
-	f1, err := fc.Acquire("ref.bin")
+	f1, err := fc.Acquire("ref.bin", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f2, err := fc.Acquire("ref.bin")
+	f2, err := fc.Acquire("ref.bin", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestFileCache_SyncAndRelease(t *testing.T) {
 	fc := NewWriteCache(dir)
 	defer func() { _ = fc.Close() }()
 
-	f, err := fc.Acquire("sync.bin")
+	f, err := fc.Acquire("sync.bin", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestFileCache_ConcurrentAcquire(t *testing.T) {
 	for i := range 2 {
 		go func(offset int64) {
 			defer wg.Done()
-			f, err := fc.Acquire("concurrent.bin")
+			f, err := fc.Acquire("concurrent.bin", 0)
 			if err != nil {
 				errs <- err
 				return

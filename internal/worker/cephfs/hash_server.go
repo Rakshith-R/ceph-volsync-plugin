@@ -42,7 +42,10 @@ func (s *CephFSHashServer) CompareHashes(
 
 		resp := &apiv1.HashBatchResponse{}
 		for _, bh := range req.Hashes {
-			f, err := s.cache.Acquire(bh.FilePath)
+			f, err := s.cache.Acquire(
+				bh.FilePath,
+				int64(bh.TotalSize), //nolint:gosec // G115
+			)
 			if err != nil {
 				resp.MismatchedIds = append(
 					resp.MismatchedIds,

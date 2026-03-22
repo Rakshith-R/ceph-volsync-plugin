@@ -45,7 +45,7 @@ func (m *mockIterator) Next() (*ChangeBlock, bool) {
 func (m *mockIterator) Close() error { return nil }
 
 type pipelineMockStream struct {
-	grpc.ClientStreamingClient[
+	grpc.BidiStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	]
 	mu   sync.Mutex
@@ -61,10 +61,14 @@ func (m *pipelineMockStream) Send(
 	return nil
 }
 
-func (m *pipelineMockStream) CloseAndRecv() (
+func (m *pipelineMockStream) Recv() (
 	*apiv1.SyncResponse, error,
 ) {
-	return &apiv1.SyncResponse{}, nil
+	return nil, io.EOF
+}
+
+func (m *pipelineMockStream) CloseSend() error {
+	return nil
 }
 
 // allMismatchHashStream returns all request IDs
@@ -114,7 +118,7 @@ func newStreamFactory(
 	stream *pipelineMockStream,
 ) StreamFactory {
 	return func(_ context.Context) (
-		grpc.ClientStreamingClient[
+		grpc.BidiStreamingClient[
 			apiv1.SyncRequest, apiv1.SyncResponse,
 		], error,
 	) {
@@ -162,10 +166,12 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 
 	p := New(cfg)
+	win := NewWindowSemaphore(64)
 	err := p.Run(
 		ctx, iter, reader,
 		newStreamFactory(stream),
 		newHashStreamFactory(),
+		win,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -185,10 +191,12 @@ func TestPipeline_EmptyIterator(t *testing.T) {
 
 	cfg := Config{}
 	p := New(cfg)
+	win := NewWindowSemaphore(64)
 	err := p.Run(
 		ctx, iter, reader,
 		newStreamFactory(stream),
 		newHashStreamFactory(),
+		win,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -219,10 +227,12 @@ func TestPipeline_ZeroBlocks(t *testing.T) {
 	}
 
 	p := New(cfg)
+	win := NewWindowSemaphore(64)
 	err := p.Run(
 		ctx, iter, reader,
 		newStreamFactory(stream),
 		newHashStreamFactory(),
+		win,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -266,10 +276,12 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 	}
 
 	p := New(cfg)
+	win := NewWindowSemaphore(64)
 	err := p.Run(
 		ctx, iter, reader,
 		newStreamFactory(stream),
 		newHashStreamFactory(),
+		win,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -308,9 +320,11 @@ func TestPipeline_NilHashStream(t *testing.T) {
 	}
 
 	p := New(cfg)
+	win := NewWindowSemaphore(64)
 	err := p.Run(
 		ctx, iter, reader,
 		newStreamFactory(stream), nil,
+		win,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -333,10 +347,12 @@ func TestPipeline_ConfigValidation(t *testing.T) {
 	}
 
 	p := New(cfg)
+	win := NewWindowSemaphore(64)
 	err := p.Run(
 		ctx, iter, reader,
 		newStreamFactory(stream),
 		newHashStreamFactory(),
+		win,
 	)
 	if err == nil {
 		t.Fatal("expected validation error for invalid ChunkSize")

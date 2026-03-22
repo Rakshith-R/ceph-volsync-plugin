@@ -85,7 +85,9 @@ type ChangedBlock struct {
 	// Unique ID for deduplication and tracking.
 	RequestId uint64 `protobuf:"varint,5,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Compression algorithm applied to data.
-	Compression   CompressionAlgo `protobuf:"varint,6,opt,name=compression,proto3,enum=api.v1.CompressionAlgo" json:"compression,omitempty"`
+	Compression CompressionAlgo `protobuf:"varint,6,opt,name=compression,proto3,enum=api.v1.CompressionAlgo" json:"compression,omitempty"`
+	// Total size of the file or device in bytes.
+	TotalSize     uint64 `protobuf:"varint,7,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -162,13 +164,19 @@ func (x *ChangedBlock) GetCompression() CompressionAlgo {
 	return CompressionAlgo_COMPRESSION_NONE
 }
 
-// SyncRequest wraps a single write or commit operation sent over the stream.
+func (x *ChangedBlock) GetTotalSize() uint64 {
+	if x != nil {
+		return x.TotalSize
+	}
+	return 0
+}
+
+// SyncRequest wraps a write operation sent over the stream.
 type SyncRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Operation:
 	//
 	//	*SyncRequest_Write
-	//	*SyncRequest_Commit
 	Operation     isSyncRequest_Operation `protobuf_oneof:"operation"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -220,15 +228,6 @@ func (x *SyncRequest) GetWrite() *WriteRequest {
 	return nil
 }
 
-func (x *SyncRequest) GetCommit() *CommitRequest {
-	if x != nil {
-		if x, ok := x.Operation.(*SyncRequest_Commit); ok {
-			return x.Commit
-		}
-	}
-	return nil
-}
-
 type isSyncRequest_Operation interface {
 	isSyncRequest_Operation()
 }
@@ -237,13 +236,7 @@ type SyncRequest_Write struct {
 	Write *WriteRequest `protobuf:"bytes,1,opt,name=write,proto3,oneof"`
 }
 
-type SyncRequest_Commit struct {
-	Commit *CommitRequest `protobuf:"bytes,3,opt,name=commit,proto3,oneof"`
-}
-
 func (*SyncRequest_Write) isSyncRequest_Operation() {}
-
-func (*SyncRequest_Commit) isSyncRequest_Operation() {}
 
 // WriteRequest represents a batched write operation.
 type WriteRequest struct {
@@ -346,64 +339,19 @@ func (x *DeleteRequest) GetPaths() []string {
 	return nil
 }
 
-// CommitRequest signals that all data for the specified file has been sent
-// and the destination should sync and close the file.
-type CommitRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Target path of the file to commit.
-	Path          string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CommitRequest) Reset() {
-	*x = CommitRequest{}
-	mi := &file_api_v1_data_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CommitRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CommitRequest) ProtoMessage() {}
-
-func (x *CommitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_data_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CommitRequest.ProtoReflect.Descriptor instead.
-func (*CommitRequest) Descriptor() ([]byte, []int) {
-	return file_api_v1_data_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *CommitRequest) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-// SyncResponse is empty on success.
-// Errors are reported via gRPC status codes.
+// SyncResponse carries acknowledged request IDs
+// for window release on the source side.
 type SyncResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Request IDs that the destination has processed.
+	AcknowledgedIds []uint64 `protobuf:"varint,1,rep,packed,name=acknowledged_ids,json=acknowledgedIds,proto3" json:"acknowledged_ids,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *SyncResponse) Reset() {
 	*x = SyncResponse{}
-	mi := &file_api_v1_data_proto_msgTypes[5]
+	mi := &file_api_v1_data_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -415,7 +363,7 @@ func (x *SyncResponse) String() string {
 func (*SyncResponse) ProtoMessage() {}
 
 func (x *SyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_data_proto_msgTypes[5]
+	mi := &file_api_v1_data_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -428,7 +376,14 @@ func (x *SyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
 func (*SyncResponse) Descriptor() ([]byte, []int) {
-	return file_api_v1_data_proto_rawDescGZIP(), []int{5}
+	return file_api_v1_data_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SyncResponse) GetAcknowledgedIds() []uint64 {
+	if x != nil {
+		return x.AcknowledgedIds
+	}
+	return nil
 }
 
 // DeleteResponse is empty on success.
@@ -441,7 +396,7 @@ type DeleteResponse struct {
 
 func (x *DeleteResponse) Reset() {
 	*x = DeleteResponse{}
-	mi := &file_api_v1_data_proto_msgTypes[6]
+	mi := &file_api_v1_data_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -453,7 +408,7 @@ func (x *DeleteResponse) String() string {
 func (*DeleteResponse) ProtoMessage() {}
 
 func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_data_proto_msgTypes[6]
+	mi := &file_api_v1_data_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -466,14 +421,14 @@ func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteResponse.ProtoReflect.Descriptor instead.
 func (*DeleteResponse) Descriptor() ([]byte, []int) {
-	return file_api_v1_data_proto_rawDescGZIP(), []int{6}
+	return file_api_v1_data_proto_rawDescGZIP(), []int{5}
 }
 
 var File_api_v1_data_proto protoreflect.FileDescriptor
 
 const file_api_v1_data_proto_rawDesc = "" +
 	"\n" +
-	"\x11api/v1/data.proto\x12\x06api.v1\"\xc5\x01\n" +
+	"\x11api/v1/data.proto\x12\x06api.v1\"\xe4\x01\n" +
 	"\fChangedBlock\x12\x16\n" +
 	"\x06offset\x18\x01 \x01(\x04R\x06offset\x12\x16\n" +
 	"\x06length\x18\x02 \x01(\x04R\x06length\x12\x12\n" +
@@ -481,26 +436,26 @@ const file_api_v1_data_proto_rawDesc = "" +
 	"\ais_zero\x18\x04 \x01(\bR\x06isZero\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x05 \x01(\x04R\trequestId\x129\n" +
-	"\vcompression\x18\x06 \x01(\x0e2\x17.api.v1.CompressionAlgoR\vcompression\"y\n" +
+	"\vcompression\x18\x06 \x01(\x0e2\x17.api.v1.CompressionAlgoR\vcompression\x12\x1d\n" +
+	"\n" +
+	"total_size\x18\a \x01(\x04R\ttotalSize\"N\n" +
 	"\vSyncRequest\x12,\n" +
-	"\x05write\x18\x01 \x01(\v2\x14.api.v1.WriteRequestH\x00R\x05write\x12/\n" +
-	"\x06commit\x18\x03 \x01(\v2\x15.api.v1.CommitRequestH\x00R\x06commitB\v\n" +
-	"\toperation\"P\n" +
+	"\x05write\x18\x01 \x01(\v2\x14.api.v1.WriteRequestH\x00R\x05writeB\v\n" +
+	"\toperationJ\x04\b\x03\x10\x04\"P\n" +
 	"\fWriteRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12,\n" +
 	"\x06blocks\x18\x02 \x03(\v2\x14.api.v1.ChangedBlockR\x06blocks\"%\n" +
 	"\rDeleteRequest\x12\x14\n" +
-	"\x05paths\x18\x01 \x03(\tR\x05paths\"#\n" +
-	"\rCommitRequest\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"\x0e\n" +
-	"\fSyncResponse\"\x10\n" +
+	"\x05paths\x18\x01 \x03(\tR\x05paths\"9\n" +
+	"\fSyncResponse\x12)\n" +
+	"\x10acknowledged_ids\x18\x01 \x03(\x04R\x0facknowledgedIds\"\x10\n" +
 	"\x0eDeleteResponse*R\n" +
 	"\x0fCompressionAlgo\x12\x14\n" +
 	"\x10COMPRESSION_NONE\x10\x00\x12\x13\n" +
 	"\x0fCOMPRESSION_LZ4\x10\x01\x12\x14\n" +
-	"\x10COMPRESSION_ZSTD\x10\x022{\n" +
-	"\vDataService\x123\n" +
-	"\x04Sync\x12\x13.api.v1.SyncRequest\x1a\x14.api.v1.SyncResponse(\x01\x127\n" +
+	"\x10COMPRESSION_ZSTD\x10\x022}\n" +
+	"\vDataService\x125\n" +
+	"\x04Sync\x12\x13.api.v1.SyncRequest\x1a\x14.api.v1.SyncResponse(\x010\x01\x127\n" +
 	"\x06Delete\x12\x15.api.v1.DeleteRequest\x1a\x16.api.v1.DeleteResponseB>Z<github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1b\x06proto3"
 
 var (
@@ -516,31 +471,29 @@ func file_api_v1_data_proto_rawDescGZIP() []byte {
 }
 
 var file_api_v1_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_v1_data_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_api_v1_data_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_api_v1_data_proto_goTypes = []any{
 	(CompressionAlgo)(0),   // 0: api.v1.CompressionAlgo
 	(*ChangedBlock)(nil),   // 1: api.v1.ChangedBlock
 	(*SyncRequest)(nil),    // 2: api.v1.SyncRequest
 	(*WriteRequest)(nil),   // 3: api.v1.WriteRequest
 	(*DeleteRequest)(nil),  // 4: api.v1.DeleteRequest
-	(*CommitRequest)(nil),  // 5: api.v1.CommitRequest
-	(*SyncResponse)(nil),   // 6: api.v1.SyncResponse
-	(*DeleteResponse)(nil), // 7: api.v1.DeleteResponse
+	(*SyncResponse)(nil),   // 5: api.v1.SyncResponse
+	(*DeleteResponse)(nil), // 6: api.v1.DeleteResponse
 }
 var file_api_v1_data_proto_depIdxs = []int32{
 	0, // 0: api.v1.ChangedBlock.compression:type_name -> api.v1.CompressionAlgo
 	3, // 1: api.v1.SyncRequest.write:type_name -> api.v1.WriteRequest
-	5, // 2: api.v1.SyncRequest.commit:type_name -> api.v1.CommitRequest
-	1, // 3: api.v1.WriteRequest.blocks:type_name -> api.v1.ChangedBlock
-	2, // 4: api.v1.DataService.Sync:input_type -> api.v1.SyncRequest
-	4, // 5: api.v1.DataService.Delete:input_type -> api.v1.DeleteRequest
-	6, // 6: api.v1.DataService.Sync:output_type -> api.v1.SyncResponse
-	7, // 7: api.v1.DataService.Delete:output_type -> api.v1.DeleteResponse
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	1, // 2: api.v1.WriteRequest.blocks:type_name -> api.v1.ChangedBlock
+	2, // 3: api.v1.DataService.Sync:input_type -> api.v1.SyncRequest
+	4, // 4: api.v1.DataService.Delete:input_type -> api.v1.DeleteRequest
+	5, // 5: api.v1.DataService.Sync:output_type -> api.v1.SyncResponse
+	6, // 6: api.v1.DataService.Delete:output_type -> api.v1.DeleteResponse
+	5, // [5:7] is the sub-list for method output_type
+	3, // [3:5] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_api_v1_data_proto_init() }
@@ -550,7 +503,6 @@ func file_api_v1_data_proto_init() {
 	}
 	file_api_v1_data_proto_msgTypes[1].OneofWrappers = []any{
 		(*SyncRequest_Write)(nil),
-		(*SyncRequest_Commit)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -558,7 +510,7 @@ func file_api_v1_data_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_v1_data_proto_rawDesc), len(file_api_v1_data_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

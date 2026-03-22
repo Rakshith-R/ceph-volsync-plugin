@@ -74,11 +74,21 @@ func readWorker(
 
 		if common.IsAllZero(data) {
 			memRaw.Release(cfg.ChunkSize)
-			win.Release(chunk.ReqID)
-
+			// Win stays acquired; released by ack receiver
 			select {
-			case zeroCh <- ZeroChunk(chunk):
+			case zeroCh <- ZeroChunk{
+				ReqID:     chunk.ReqID,
+				FilePath:  chunk.FilePath,
+				Offset:    chunk.Offset,
+				Length:    chunk.Length,
+				TotalSize: chunk.TotalSize,
+				Held: held{
+					reqID:  chunk.ReqID,
+					hasWin: true,
+				},
+			}:
 			case <-ctx.Done():
+				win.Release(chunk.ReqID)
 				return ctx.Err()
 			}
 			continue
@@ -93,11 +103,12 @@ func readWorker(
 
 		select {
 		case readCh <- ReadChunk{
-			ReqID:    chunk.ReqID,
-			FilePath: chunk.FilePath,
-			Offset:   chunk.Offset,
-			Data:     data,
-			Held:     h,
+			ReqID:     chunk.ReqID,
+			FilePath:  chunk.FilePath,
+			Offset:    chunk.Offset,
+			Data:      data,
+			TotalSize: chunk.TotalSize,
+			Held:      h,
 		}:
 		case <-ctx.Done():
 			h.release(memRaw, win)

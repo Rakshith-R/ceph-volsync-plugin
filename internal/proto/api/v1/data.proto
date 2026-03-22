@@ -6,10 +6,10 @@ option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v
 
 // DataService provides streaming sync and deletion APIs.
 service DataService {
-  // Sync opens a client-streaming RPC that handles one file at a time.
-  // Each stream is reusable: after a CommitRequest the stream accepts
-  // writes for the next file.
-  rpc Sync(stream SyncRequest) returns (SyncResponse);
+  // Sync opens a bidirectional streaming RPC for data transfer.
+  // Source sends WriteRequests, destination responds with
+  // acknowledged request IDs for window release.
+  rpc Sync(stream SyncRequest) returns (stream SyncResponse);
 
   // Delete removes files or directories at the specified paths.
   rpc Delete(DeleteRequest) returns (DeleteResponse);
@@ -38,6 +38,9 @@ message ChangedBlock {
 
   // Compression algorithm applied to data.
   CompressionAlgo compression = 6;
+
+  // Total size of the file or device in bytes.
+  uint64 total_size = 7;
 }
 
 // CompressionAlgo specifies the compression format used for block data.
@@ -51,11 +54,13 @@ enum CompressionAlgo {
 // Requests
 // --------------------
 
-// SyncRequest wraps a single write or commit operation sent over the stream.
+// SyncRequest wraps a write operation sent over the stream.
 message SyncRequest {
+  // Field 3 was CommitRequest, now in CommitService.
+  reserved 3;
+
   oneof operation {
     WriteRequest write = 1;
-    CommitRequest commit = 3;
   }
 }
 
@@ -74,20 +79,16 @@ message DeleteRequest {
   repeated string paths = 1;
 }
 
-// CommitRequest signals that all data for the specified file has been sent
-// and the destination should sync and close the file.
-message CommitRequest {
-  // Target path of the file to commit.
-  string path = 1;
-}
-
 // --------------------
 // Responses
 // --------------------
 
-// SyncResponse is empty on success.
-// Errors are reported via gRPC status codes.
-message SyncResponse {}
+// SyncResponse carries acknowledged request IDs
+// for window release on the source side.
+message SyncResponse {
+  // Request IDs that the destination has processed.
+  repeated uint64 acknowledged_ids = 1;
+}
 
 // DeleteResponse is empty on success.
 // Errors are reported via gRPC status codes.

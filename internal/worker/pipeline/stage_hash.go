@@ -46,13 +46,14 @@ func hashWorker(
 
 		select {
 		case outCh <- HashedChunk{
-			ReqID:    rc.ReqID,
-			FilePath: rc.FilePath,
-			Offset:   rc.Offset,
-			Length:   int64(len(rc.Data)),
-			Data:     rc.Data,
-			Hash:     hash,
-			Held:     rc.Held,
+			ReqID:     rc.ReqID,
+			FilePath:  rc.FilePath,
+			Offset:    rc.Offset,
+			Length:    int64(len(rc.Data)),
+			Data:      rc.Data,
+			Hash:      hash,
+			TotalSize: rc.TotalSize,
+			Held:      rc.Held,
 		}:
 		case <-ctx.Done():
 			return ctx.Err()

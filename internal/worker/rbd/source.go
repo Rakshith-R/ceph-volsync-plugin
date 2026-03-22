@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
@@ -134,10 +135,11 @@ func (w *SourceWorker) Sync(
 
 	dataClient := apiv1.NewDataServiceClient(conn)
 	hashClient := apiv1.NewHashServiceClient(conn)
+	commitClient := apiv1.NewCommitServiceClient(conn)
 
 	newStream := func(
 		ctx context.Context,
-	) (grpc.ClientStreamingClient[
+	) (grpc.BidiStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	], error) {
 		return dataClient.Sync(ctx)
@@ -152,14 +154,49 @@ func (w *SourceWorker) Sync(
 	}
 
 	cfg := pipeline.Config{}
+	cfg.SetDefaults()
+
+	win := pipeline.NewWindowSemaphore(cfg.MaxWindow)
+	adapter := &rbdIterAdapter{
+		iter:      iter,
+		totalSize: int64(volSize), //nolint:gosec // G115: volume size within range
+	}
+
 	p := pipeline.New(cfg)
 	reader := &fileDataReader{file: device}
 	if err := p.Run(
-		ctx, &rbdIterAdapter{iter: iter},
-		reader, newStream, newHashStream,
+		ctx, adapter, reader,
+		newStream, newHashStream, win,
 	); err != nil {
 		return err
 	}
+
+	// Wait for all acks before committing
+	lastReqID := adapter.reqID
+	if lastReqID > 0 {
+		lastReqID--
+	}
+	for !win.IsReleased(lastReqID) {
+		runtime.Gosched()
+	}
+
+	// Send commit for the device
+	commitStream, err := commitClient.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("open commit stream: %w", err)
+	}
+	if err := commitStream.Send(&apiv1.CommitRequest{
+		Entries: []*apiv1.CommitEntry{{
+			Path:      common.DevicePath,
+			TotalSize: volSize,
+		}},
+	}); err != nil {
+		return fmt.Errorf("send commit: %w", err)
+	}
+	if _, err := commitStream.Recv(); err != nil {
+		return fmt.Errorf("recv commit ack: %w", err)
+	}
+	_ = commitStream.CloseSend()
 
 	return w.closeAndSignalDone(ctx, conn)
 }
@@ -408,7 +445,9 @@ func (w *SourceWorker) resolveSnapshotDiff(
 
 // rbdIterAdapter adapts ceph.RBDBlockDiffIterator to pipeline.BlockIterator.
 type rbdIterAdapter struct {
-	iter *ceph.RBDBlockDiffIterator
+	iter      *ceph.RBDBlockDiffIterator
+	reqID     uint64
+	totalSize int64
 }
 
 func (a *rbdIterAdapter) Next() (*pipeline.ChangeBlock, bool) {
@@ -416,11 +455,15 @@ func (a *rbdIterAdapter) Next() (*pipeline.ChangeBlock, bool) {
 	if !ok {
 		return nil, false
 	}
-	return &pipeline.ChangeBlock{
-		FilePath: common.DevicePath,
-		Offset:   cb.Offset,
-		Len:      cb.Len,
-	}, true
+	block := &pipeline.ChangeBlock{
+		FilePath:  common.DevicePath,
+		Offset:    cb.Offset,
+		Len:       cb.Len,
+		ReqID:     a.reqID,
+		TotalSize: a.totalSize,
+	}
+	a.reqID++
+	return block, true
 }
 
 func (a *rbdIterAdapter) Close() error {

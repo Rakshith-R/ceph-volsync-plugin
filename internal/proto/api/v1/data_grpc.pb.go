@@ -29,10 +29,10 @@ const (
 //
 // DataService provides streaming sync and deletion APIs.
 type DataServiceClient interface {
-	// Sync opens a client-streaming RPC that handles one file at a time.
-	// Each stream is reusable: after a CommitRequest the stream accepts
-	// writes for the next file.
-	Sync(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[SyncRequest, SyncResponse], error)
+	// Sync opens a bidirectional streaming RPC for data transfer.
+	// Source sends WriteRequests, destination responds with
+	// acknowledged request IDs for window release.
+	Sync(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SyncRequest, SyncResponse], error)
 	// Delete removes files or directories at the specified paths.
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
 }
@@ -45,7 +45,7 @@ func NewDataServiceClient(cc grpc.ClientConnInterface) DataServiceClient {
 	return &dataServiceClient{cc}
 }
 
-func (c *dataServiceClient) Sync(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[SyncRequest, SyncResponse], error) {
+func (c *dataServiceClient) Sync(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SyncRequest, SyncResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &DataService_ServiceDesc.Streams[0], DataService_Sync_FullMethodName, cOpts...)
 	if err != nil {
@@ -56,7 +56,7 @@ func (c *dataServiceClient) Sync(ctx context.Context, opts ...grpc.CallOption) (
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type DataService_SyncClient = grpc.ClientStreamingClient[SyncRequest, SyncResponse]
+type DataService_SyncClient = grpc.BidiStreamingClient[SyncRequest, SyncResponse]
 
 func (c *dataServiceClient) Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -74,10 +74,10 @@ func (c *dataServiceClient) Delete(ctx context.Context, in *DeleteRequest, opts 
 //
 // DataService provides streaming sync and deletion APIs.
 type DataServiceServer interface {
-	// Sync opens a client-streaming RPC that handles one file at a time.
-	// Each stream is reusable: after a CommitRequest the stream accepts
-	// writes for the next file.
-	Sync(grpc.ClientStreamingServer[SyncRequest, SyncResponse]) error
+	// Sync opens a bidirectional streaming RPC for data transfer.
+	// Source sends WriteRequests, destination responds with
+	// acknowledged request IDs for window release.
+	Sync(grpc.BidiStreamingServer[SyncRequest, SyncResponse]) error
 	// Delete removes files or directories at the specified paths.
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
 	mustEmbedUnimplementedDataServiceServer()
@@ -90,7 +90,7 @@ type DataServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedDataServiceServer struct{}
 
-func (UnimplementedDataServiceServer) Sync(grpc.ClientStreamingServer[SyncRequest, SyncResponse]) error {
+func (UnimplementedDataServiceServer) Sync(grpc.BidiStreamingServer[SyncRequest, SyncResponse]) error {
 	return status.Error(codes.Unimplemented, "method Sync not implemented")
 }
 func (UnimplementedDataServiceServer) Delete(context.Context, *DeleteRequest) (*DeleteResponse, error) {
@@ -122,7 +122,7 @@ func _DataService_Sync_Handler(srv interface{}, stream grpc.ServerStream) error 
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type DataService_SyncServer = grpc.ClientStreamingServer[SyncRequest, SyncResponse]
+type DataService_SyncServer = grpc.BidiStreamingServer[SyncRequest, SyncResponse]
 
 func _DataService_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteRequest)
@@ -158,6 +158,7 @@ var DataService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Sync",
 			Handler:       _DataService_Sync_Handler,
+			ServerStreams: true,
 			ClientStreams: true,
 		},
 	},

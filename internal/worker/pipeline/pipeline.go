@@ -11,9 +11,11 @@ import (
 
 // ChangeBlock matches ceph.ChangeBlock to avoid importing ceph package (no CGO needed).
 type ChangeBlock struct {
-	FilePath string
-	Offset   int64
-	Len      int64
+	FilePath  string
+	Offset    int64
+	Len       int64
+	ReqID     uint64
+	TotalSize int64
 }
 
 // BlockIterator abstracts the RBD diff iterator.
@@ -25,7 +27,7 @@ type BlockIterator interface {
 // StreamFactory opens a new gRPC Sync stream.
 // Called once per DataSendWorker goroutine.
 type StreamFactory func(ctx context.Context) (
-	grpc.ClientStreamingClient[
+	grpc.BidiStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	], error,
 )
@@ -53,14 +55,16 @@ func New(cfg Config) *Pipeline {
 }
 
 // Run executes the full pipeline: feeder -> read -> hash -> sendHash -> compress -> sendData.
+// The caller creates win and may share it with external components (e.g. commitDrainer).
 func (p *Pipeline) Run(
 	ctx context.Context,
 	iter BlockIterator,
 	reader DataReader,
 	newStream StreamFactory,
 	newHashStream HashStreamFactory,
+	win *WindowSemaphore,
 ) error {
-	p.cfg.setDefaults()
+	p.cfg.SetDefaults()
 	if err := p.cfg.validate(); err != nil {
 		return err
 	}
@@ -68,7 +72,6 @@ func (p *Pipeline) Run(
 	cfg := &p.cfg
 
 	memRaw := NewMemSemaphore(cfg.MaxRawMemoryBytes)
-	win := NewWindowSemaphore(cfg.MaxWindow)
 
 	chunkCh := make(chan Chunk, cfg.ReadChanBuf)
 	readCh := make(chan ReadChunk, cfg.ReadChanBuf)
@@ -119,7 +122,7 @@ func (p *Pipeline) Run(
 
 	// Stage 5: SendData - batched gRPC sends
 	g.Go(func() error {
-		return StageSendData(gctx, cfg, memRaw, win, newStream, compressedCh, reader)
+		return StageSendData(gctx, cfg, memRaw, win, newStream, compressedCh)
 	})
 
 	return g.Wait()
@@ -145,12 +148,13 @@ func forwardReadToMismatch(
 			}
 			select {
 			case mismatchCh <- HashedChunk{
-				ReqID:    rc.ReqID,
-				FilePath: rc.FilePath,
-				Offset:   rc.Offset,
-				Length:   int64(len(rc.Data)),
-				Data:     rc.Data,
-				Held:     rc.Held,
+				ReqID:     rc.ReqID,
+				FilePath:  rc.FilePath,
+				Offset:    rc.Offset,
+				Length:    int64(len(rc.Data)),
+				Data:      rc.Data,
+				TotalSize: rc.TotalSize,
+				Held:      rc.Held,
 			}:
 			case <-ctx.Done():
 				rc.Held.release(memRaw, win)
@@ -163,13 +167,16 @@ func forwardReadToMismatch(
 			}
 			select {
 			case mismatchCh <- HashedChunk{
-				ReqID:    zc.ReqID,
-				FilePath: zc.FilePath,
-				Offset:   zc.Offset,
-				Length:   zc.Length,
-				Data:     nil,
+				ReqID:     zc.ReqID,
+				FilePath:  zc.FilePath,
+				Offset:    zc.Offset,
+				Length:    zc.Length,
+				Data:      nil,
+				TotalSize: zc.TotalSize,
+				Held:      zc.Held,
 			}:
 			case <-ctx.Done():
+				zc.Held.release(memRaw, win)
 				return ctx.Err()
 			}
 		case <-ctx.Done():
@@ -180,7 +187,6 @@ func forwardReadToMismatch(
 }
 
 func feeder(ctx context.Context, iter BlockIterator, chunkCh chan<- Chunk) error {
-	var reqID uint64
 	for {
 		block, ok := iter.Next()
 		if !ok {
@@ -189,12 +195,12 @@ func feeder(ctx context.Context, iter BlockIterator, chunkCh chan<- Chunk) error
 
 		select {
 		case chunkCh <- Chunk{
-			ReqID:    reqID,
-			FilePath: block.FilePath,
-			Offset:   block.Offset,
-			Length:   block.Len,
+			ReqID:     block.ReqID,
+			FilePath:  block.FilePath,
+			Offset:    block.Offset,
+			Length:    block.Len,
+			TotalSize: block.TotalSize,
 		}:
-			reqID++
 		case <-ctx.Done():
 			return ctx.Err()
 		}

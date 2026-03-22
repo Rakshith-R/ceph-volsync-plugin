@@ -72,6 +72,7 @@ func compressWorker(
 			Hash:               hc.Hash,
 			UncompressedLength: uncompLen,
 			IsRaw:              isRaw,
+			TotalSize:          hc.TotalSize,
 			Held:               hc.Held,
 		}:
 		case <-ctx.Done():

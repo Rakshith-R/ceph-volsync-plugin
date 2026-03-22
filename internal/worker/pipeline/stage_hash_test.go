@@ -9,7 +9,7 @@ import (
 func TestStageHash_CorrectHash(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{}
-	cfg.setDefaults()
+	cfg.SetDefaults()
 	cfg.HashWorkers = 1
 
 	data := []byte("hello world block data")

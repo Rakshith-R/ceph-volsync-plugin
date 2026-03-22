@@ -147,7 +147,7 @@ vet: ## Run go vet against code.
 	go vet -tags=ceph_preview ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
+test: manifests generate fmt vet lint proto-verify setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test -tags=ceph_preview $$(go list -tags=ceph_preview -f '{{if or (gt (len .TestGoFiles) 0) (gt (len .XTestGoFiles) 0)}}{{.ImportPath}}{{end}}' ./... | grep -v /e2e) -coverprofile cover.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
@@ -220,6 +220,7 @@ proto-generate: proto-image ## Regenerate gRPC stubs from .proto definitions.
 		--go_opt=paths=source_relative \
 		--go-grpc_out=internal/proto \
 		--go-grpc_opt=paths=source_relative \
+		api/v1/commit.proto \
 		api/v1/data.proto \
 		api/v1/done.proto \
 		api/v1/hash.proto \

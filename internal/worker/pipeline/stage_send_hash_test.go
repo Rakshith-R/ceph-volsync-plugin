@@ -61,7 +61,7 @@ func (m *mockHashStream) CloseSend() error {
 func TestStageSendHash_AllMatched(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{}
-	cfg.setDefaults()
+	cfg.SetDefaults()
 	cfg.HashSendWorkers = 1
 	cfg.HashBatchMaxCount = 4
 
@@ -124,7 +124,7 @@ func TestStageSendHash_AllMatched(t *testing.T) {
 func TestStageSendHash_AllMismatched(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{}
-	cfg.setDefaults()
+	cfg.SetDefaults()
 	cfg.HashSendWorkers = 1
 	cfg.HashBatchMaxCount = 4
 

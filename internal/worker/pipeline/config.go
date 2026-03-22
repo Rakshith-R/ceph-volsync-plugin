@@ -46,7 +46,8 @@ const (
 	maxBatchCount      = 256
 )
 
-func (c *Config) setDefaults() {
+// SetDefaults fills zero-valued fields with defaults.
+func (c *Config) SetDefaults() {
 	if c.ChunkSize == 0 {
 		c.ChunkSize = defaultChunkSize
 	}

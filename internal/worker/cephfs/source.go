@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/ceph/go-ceph/cephfs"
@@ -658,6 +659,8 @@ func (w *SourceWorker) collectChangedEntries(
 
 // runSnapdiffBlockPipeline runs the 5-stage pipeline
 // for all large changed files.
+//
+//nolint:funlen // pipeline setup with commit drainer
 func (w *SourceWorker) runSnapdiffBlockPipeline(
 	ctx context.Context,
 	differ *ceph.SnapshotDiffer,
@@ -678,9 +681,6 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 		return &cephBlockDiffAdapter{inner: it}, nil
 	}
 
-	iter := NewCephFSBlockIterator(newIter, largeFiles)
-	defer func() { _ = iter.Close() }()
-
 	reader := NewCephFSReader()
 	defer func() { _ = reader.Close() }()
 
@@ -688,10 +688,12 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 		apiv1.NewDataServiceClient(conn)
 	hashClient :=
 		apiv1.NewHashServiceClient(conn)
+	commitClient :=
+		apiv1.NewCommitServiceClient(conn)
 
 	newStream := func(
 		ctx context.Context,
-	) (grpc.ClientStreamingClient[
+	) (grpc.BidiStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	], error) {
 		return dataClient.Sync(ctx)
@@ -706,10 +708,65 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 	}
 
 	cfg := pipeline.Config{ReadWorkers: 2}
-	p := pipeline.New(cfg)
-	return p.Run(
-		ctx, iter, reader, newStream, newHashStream,
+	cfg.SetDefaults()
+
+	win := pipeline.NewWindowSemaphore(cfg.MaxWindow)
+	boundaryCh := make(
+		chan fileBoundary, cfg.MaxWindow,
 	)
+
+	sizeFn := func(path string) (int64, error) {
+		full := common.DataMountPath + "/" + path
+		fi, err := os.Stat(full)
+		if err != nil {
+			return 0, err
+		}
+		return fi.Size(), nil
+	}
+
+	iter := NewCephFSBlockIterator(
+		newIter, largeFiles,
+		WithSizeFunc(sizeFn),
+		WithBoundaryChan(boundaryCh),
+	)
+
+	commitStream, err := commitClient.Commit(ctx)
+	if err != nil {
+		_ = iter.Close()
+		return fmt.Errorf(
+			"open commit stream: %w", err,
+		)
+	}
+
+	drainer := &commitDrainer{
+		boundaryCh:   boundaryCh,
+		reader:       reader,
+		commitStream: commitStream,
+		win:          win,
+		maxWindow:    cfg.MaxWindow,
+	}
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		return drainer.Run(gctx)
+	})
+
+	g.Go(func() error {
+		p := pipeline.New(cfg)
+		pErr := p.Run(
+			gctx, iter, reader,
+			newStream, newHashStream, win,
+		)
+		if pErr != nil {
+			iter.SetFailed()
+		}
+		_ = iter.Close()
+		close(boundaryCh)
+		return pErr
+	})
+
+	return g.Wait()
 }
 
 // walkAndStreamDirectories walks the /data directory

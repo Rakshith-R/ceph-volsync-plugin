@@ -60,3 +60,20 @@ func (w *BaseDestinationWorker) RunWithHash(
 		grpc.MaxRecvMsgSize(MaxGRPCMessageSize),
 	)
 }
+
+// RunWithHashAndCommit starts the destination server with
+// DataServiceServer, HashServiceServer, and CommitServiceServer.
+func (w *BaseDestinationWorker) RunWithHashAndCommit(
+	ctx context.Context,
+	dataServer apiv1.DataServiceServer,
+	hashServer apiv1.HashServiceServer,
+	commitServer apiv1.CommitServiceServer,
+) error {
+	w.Logger.Info("Starting destination worker")
+
+	return RunDestinationServerFull(
+		ctx, w.Logger, DefaultServerPort,
+		dataServer, hashServer, commitServer,
+		grpc.MaxRecvMsgSize(MaxGRPCMessageSize),
+	)
+}

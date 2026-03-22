@@ -12,7 +12,7 @@ import (
 func TestStageCompress_LZ4_Compresses(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{}
-	cfg.setDefaults()
+	cfg.SetDefaults()
 	cfg.CompressWorkers = 1
 
 	mem := NewMemSemaphore(cfg.MaxRawMemoryBytes)
@@ -64,7 +64,7 @@ func TestStageCompress_LZ4_Compresses(t *testing.T) {
 func TestStageCompress_LZ4_Incompressible(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{}
-	cfg.setDefaults()
+	cfg.SetDefaults()
 	cfg.CompressWorkers = 1
 
 	mem := NewMemSemaphore(cfg.MaxRawMemoryBytes)

@@ -63,7 +63,13 @@ func (w *DestinationWorker) Run(
 		logger:     w.Logger,
 		devicePath: common.DevicePath,
 	}
-	return w.RunWithHash(ctx, dataServer, hashServer)
+	commitServer := &RBDCommitServer{
+		logger:     w.Logger,
+		devicePath: common.DevicePath,
+	}
+	return w.RunWithHashAndCommit(
+		ctx, dataServer, hashServer, commitServer,
+	)
 }
 
 // RBDDataServer implements DataService for block
@@ -74,13 +80,13 @@ type RBDDataServer struct {
 	devicePath string
 }
 
-// Sync handles a client-streaming RPC for writing to
+// Sync handles a bidi-streaming RPC for writing to
 // a block device. The block device is opened lazily on
 // the first WriteRequest and kept open across all
-// writes. CommitRequests sync but do not close the
-// device.
+// writes. After each batch, acknowledged request IDs
+// are sent back to the source.
 func (s *RBDDataServer) Sync(
-	stream grpc.ClientStreamingServer[
+	stream grpc.BidiStreamingServer[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	],
 ) (err error) {
@@ -108,9 +114,7 @@ func (s *RBDDataServer) Sync(
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
-			return stream.SendAndClose(
-				&apiv1.SyncResponse{},
-			)
+			return nil
 		}
 		if err != nil {
 			return err
@@ -137,24 +141,17 @@ func (s *RBDDataServer) Sync(
 				return err
 			}
 
-		case *apiv1.SyncRequest_Commit:
-			if file != nil {
-				s.logger.Info(
-					"Committing block device writes",
-					"path", s.devicePath,
-				)
-				if err := file.Sync(); err != nil {
-					return fmt.Errorf(
-						"failed to sync block "+
-							"device %s: %w",
-						s.devicePath, err,
-					)
+			ackIDs := collectRequestIDs(
+				op.Write.Blocks,
+			)
+			if len(ackIDs) > 0 {
+				if err := stream.Send(
+					&apiv1.SyncResponse{
+						AcknowledgedIds: ackIDs,
+					},
+				); err != nil {
+					return err
 				}
-				s.logger.Info(
-					"Successfully committed block "+
-						"device writes",
-					"path", s.devicePath,
-				)
 			}
 
 		default:
@@ -162,6 +159,93 @@ func (s *RBDDataServer) Sync(
 				"unknown operation type in " +
 					"sync request",
 			)
+		}
+	}
+}
+
+// collectRequestIDs extracts non-zero request IDs
+// from a slice of ChangedBlocks.
+func collectRequestIDs(
+	blocks []*apiv1.ChangedBlock,
+) []uint64 {
+	ids := make([]uint64, 0, len(blocks))
+	for _, b := range blocks {
+		if b.RequestId != 0 {
+			ids = append(ids, b.RequestId)
+		}
+	}
+	return ids
+}
+
+// RBDCommitServer implements CommitServiceServer
+// for block devices. Commit syncs the block device.
+type RBDCommitServer struct {
+	apiv1.UnimplementedCommitServiceServer
+	logger     logr.Logger
+	devicePath string
+}
+
+// Commit handles a bidi-streaming RPC for committing
+// block device writes. Each CommitRequest triggers an
+// fsync on the block device.
+func (s *RBDCommitServer) Commit(
+	stream grpc.BidiStreamingServer[
+		apiv1.CommitRequest, apiv1.CommitResponse,
+	],
+) error {
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		file, err := os.OpenFile(
+			s.devicePath, os.O_RDWR, 0,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to open block device "+
+					"%s for commit: %w",
+				s.devicePath, err,
+			)
+		}
+
+		paths := make(
+			[]string, 0, len(req.Entries),
+		)
+		for _, entry := range req.Entries {
+			if err := file.Sync(); err != nil {
+				_ = file.Close()
+				return fmt.Errorf(
+					"failed to sync block device "+
+						"%s: %w",
+					s.devicePath, err,
+				)
+			}
+			s.logger.Info(
+				"Committed block device writes",
+				"path", entry.Path,
+			)
+			paths = append(paths, entry.Path)
+		}
+
+		if err := file.Close(); err != nil {
+			return fmt.Errorf(
+				"failed to close block device "+
+					"%s: %w",
+				s.devicePath, err,
+			)
+		}
+
+		if err := stream.Send(
+			&apiv1.CommitResponse{
+				Paths: paths,
+			},
+		); err != nil {
+			return err
 		}
 	}
 }

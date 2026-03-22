@@ -69,9 +69,13 @@ func (w *DestinationWorker) Run(
 		logger: w.Logger,
 		cache:  cache,
 	}
+	commitServer := &CephFSCommitServer{
+		logger: w.Logger,
+		cache:  cache,
+	}
 
-	return w.RunWithHash(
-		ctx, dataServer, hashServer,
+	return w.RunWithHashAndCommit(
+		ctx, dataServer, hashServer, commitServer,
 	)
 }
 
@@ -83,12 +87,12 @@ type DataServer struct {
 	cache  *FileCache
 }
 
-// Sync handles a client-streaming RPC that processes
-// one file at a time. Each stream is reusable: after a
-// CommitRequest the stream resets and accepts writes for
-// the next file.
+// Sync handles a bidi-streaming RPC that processes
+// one file at a time. After writing blocks, it sends
+// back acknowledged request IDs. File commits are
+// handled by the separate CommitService.
 func (s *DataServer) Sync(
-	stream grpc.ClientStreamingServer[
+	stream grpc.BidiStreamingServer[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	],
 ) (err error) {
@@ -108,9 +112,7 @@ func (s *DataServer) Sync(
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
-			return stream.SendAndClose(
-				&apiv1.SyncResponse{},
-			)
+			return nil
 		}
 		if err != nil {
 			return err
@@ -120,7 +122,15 @@ func (s *DataServer) Sync(
 		case *apiv1.SyncRequest_Write:
 			if file == nil {
 				curPath = op.Write.Path
-				file, err = s.cache.Acquire(curPath)
+				totalSize := int64(0)
+				if len(op.Write.Blocks) > 0 {
+					totalSize = int64( //nolint:gosec // G115
+						op.Write.Blocks[0].TotalSize,
+					)
+				}
+				file, err = s.cache.Acquire(
+					curPath, totalSize,
+				)
 				if err != nil {
 					return err
 				}
@@ -132,29 +142,93 @@ func (s *DataServer) Sync(
 				return err
 			}
 
-		case *apiv1.SyncRequest_Commit:
-			if curPath != "" {
-				s.logger.Info(
-					"Committing file",
-					"path", curPath,
-				)
-				if err := s.cache.SyncAndRelease(
-					curPath,
+			ackIDs := collectRequestIDs(
+				op.Write.Blocks,
+			)
+			if len(ackIDs) > 0 {
+				if err := stream.Send(
+					&apiv1.SyncResponse{
+						AcknowledgedIds: ackIDs,
+					},
 				); err != nil {
 					return err
 				}
-				s.logger.Info(
-					"Successfully committed file",
-					"path", curPath,
-				)
-				file = nil
-				curPath = ""
 			}
 
 		default:
 			return fmt.Errorf(
-				"unknown operation type in sync request",
+				"unknown operation type in " +
+					"sync request",
 			)
+		}
+	}
+}
+
+// collectRequestIDs extracts non-zero request IDs
+// from a slice of ChangedBlocks.
+func collectRequestIDs(
+	blocks []*apiv1.ChangedBlock,
+) []uint64 {
+	ids := make([]uint64, 0, len(blocks))
+	for _, b := range blocks {
+		if b.RequestId != 0 {
+			ids = append(ids, b.RequestId)
+		}
+	}
+	return ids
+}
+
+// CephFSCommitServer implements CommitServiceServer
+// for CephFS file-based writes.
+type CephFSCommitServer struct {
+	apiv1.UnimplementedCommitServiceServer
+	logger logr.Logger
+	cache  *FileCache
+}
+
+// Commit handles a bidi-streaming RPC for committing
+// written files. Each CommitRequest triggers fsync
+// and release of cached file handles.
+func (s *CephFSCommitServer) Commit(
+	stream grpc.BidiStreamingServer[
+		apiv1.CommitRequest, apiv1.CommitResponse,
+	],
+) error {
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		paths := make(
+			[]string, 0, len(req.Entries),
+		)
+		for _, entry := range req.Entries {
+			s.logger.Info(
+				"Committing file",
+				"path", entry.Path,
+			)
+			if err := s.cache.SyncAndRelease(
+				entry.Path,
+			); err != nil {
+				return err
+			}
+			s.logger.Info(
+				"Successfully committed file",
+				"path", entry.Path,
+			)
+			paths = append(paths, entry.Path)
+		}
+
+		if err := stream.Send(
+			&apiv1.CommitResponse{
+				Paths: paths,
+			},
+		); err != nil {
+			return err
 		}
 	}
 }
@@ -189,46 +263,6 @@ func (s *DataServer) writeBlocks(
 		"path", req.Path,
 		"block_count", len(req.Blocks),
 	)
-
-	var maxSize int64
-	for _, block := range req.Blocks {
-		endOffset := int64(block.Offset + block.Length) //nolint:gosec // G115: value within safe range
-		if endOffset > maxSize {
-			maxSize = endOffset
-		}
-	}
-
-	fileInfo, err := file.Stat()
-	if err != nil {
-		s.logger.Error(
-			err, "Failed to stat file",
-			"path", fullPath,
-		)
-		return fmt.Errorf(
-			"failed to stat file %s: %w",
-			fullPath, err,
-		)
-	}
-
-	if maxSize > fileInfo.Size() {
-		if err := file.Truncate(maxSize); err != nil {
-			s.logger.Error(
-				err, "Failed to truncate file",
-				"path", fullPath, "size", maxSize,
-			)
-			return fmt.Errorf(
-				"failed to resize file %s to "+
-					"%d bytes: %w",
-				fullPath, maxSize, err,
-			)
-		}
-		s.logger.Info(
-			"Resized file",
-			"path", fullPath,
-			"old_size", fileInfo.Size(),
-			"new_size", maxSize,
-		)
-	}
 
 	for i, block := range req.Blocks {
 		offset := int64(block.Offset) //nolint:gosec // G115: value within safe range

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"io"
 	"sync"
 	"testing"
 
@@ -10,34 +11,37 @@ import (
 	"google.golang.org/grpc"
 )
 
-type noopReader struct{}
-
-func (noopReader) ReadAt(_ string, _, _ int64) ([]byte, error) { return nil, nil }
-func (noopReader) CloseFile(_ string) error                    { return nil }
-
 type mockSyncStream struct {
-	grpc.ClientStreamingClient[apiv1.SyncRequest, apiv1.SyncResponse]
+	grpc.BidiStreamingClient[
+		apiv1.SyncRequest, apiv1.SyncResponse,
+	]
 	mu   sync.Mutex
 	sent []*apiv1.SyncRequest
 }
 
-func (m *mockSyncStream) Send(req *apiv1.SyncRequest) error {
+func (m *mockSyncStream) Send(
+	req *apiv1.SyncRequest,
+) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sent = append(m.sent, req)
 	return nil
 }
 
-func (m *mockSyncStream) CloseAndRecv() (
+func (m *mockSyncStream) Recv() (
 	*apiv1.SyncResponse, error,
 ) {
-	return &apiv1.SyncResponse{}, nil
+	return nil, io.EOF
+}
+
+func (m *mockSyncStream) CloseSend() error {
+	return nil
 }
 
 func TestStageSendData_SendsAll(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{}
-	cfg.setDefaults()
+	cfg.SetDefaults()
 
 	mem := NewMemSemaphore(cfg.MaxRawMemoryBytes)
 	win := NewWindowSemaphore(cfg.MaxWindow)
@@ -66,7 +70,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 
 	factory := StreamFactory(func(
 		_ context.Context,
-	) (grpc.ClientStreamingClient[
+	) (grpc.BidiStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	], error) {
 		return &mockSyncStream{
@@ -77,7 +81,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 	// Track sends across all workers via wrapper.
 	wrappedFactory := StreamFactory(func(
 		ctx context.Context,
-	) (grpc.ClientStreamingClient[
+	) (grpc.BidiStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	], error) {
 		stream, err := factory(ctx)
@@ -85,15 +89,15 @@ func TestStageSendData_SendsAll(t *testing.T) {
 			return nil, err
 		}
 		return &countingSyncStream{
-			ClientStreamingClient: stream,
-			mu:                    &mu,
-			count:                 &totalSent,
+			BidiStreamingClient: stream,
+			mu:                  &mu,
+			count:               &totalSent,
 		}, nil
 	})
 
 	err := StageSendData(
 		ctx, cfg, mem, win, wrappedFactory,
-		inCh, noopReader{},
+		inCh,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +109,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 }
 
 type countingSyncStream struct {
-	grpc.ClientStreamingClient[
+	grpc.BidiStreamingClient[
 		apiv1.SyncRequest, apiv1.SyncResponse,
 	]
 	mu    *sync.Mutex
@@ -118,11 +122,15 @@ func (c *countingSyncStream) Send(
 	c.mu.Lock()
 	*c.count++
 	c.mu.Unlock()
-	return c.ClientStreamingClient.Send(req)
+	return c.BidiStreamingClient.Send(req)
 }
 
-func (c *countingSyncStream) CloseAndRecv() (
+func (c *countingSyncStream) Recv() (
 	*apiv1.SyncResponse, error,
 ) {
-	return &apiv1.SyncResponse{}, nil
+	return nil, io.EOF
+}
+
+func (c *countingSyncStream) CloseSend() error {
+	return nil
 }

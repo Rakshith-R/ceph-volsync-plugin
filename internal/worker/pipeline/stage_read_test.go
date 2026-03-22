@@ -26,7 +26,7 @@ func (m *mockDataReader) CloseFile(_ string) error {
 func TestStageRead_ReadsAllChunks(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{}
-	cfg.setDefaults()
+	cfg.SetDefaults()
 	cfg.ReadWorkers = 2
 
 	mem := NewMemSemaphore(cfg.MaxRawMemoryBytes)
@@ -70,7 +70,7 @@ func TestStageRead_ReadsAllChunks(t *testing.T) {
 func TestStageRead_ZeroShortCircuit(t *testing.T) {
 	ctx := context.Background()
 	cfg := &Config{}
-	cfg.setDefaults()
+	cfg.SetDefaults()
 	cfg.ReadWorkers = 1
 
 	mem := NewMemSemaphore(cfg.MaxRawMemoryBytes)

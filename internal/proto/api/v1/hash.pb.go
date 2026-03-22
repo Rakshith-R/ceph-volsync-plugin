@@ -28,6 +28,7 @@ type BlockHash struct {
 	Offset        uint64                 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
 	Length        uint64                 `protobuf:"varint,4,opt,name=length,proto3" json:"length,omitempty"`
 	Sha256        []byte                 `protobuf:"bytes,5,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	TotalSize     uint64                 `protobuf:"varint,6,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -95,6 +96,13 @@ func (x *BlockHash) GetSha256() []byte {
 		return x.Sha256
 	}
 	return nil
+}
+
+func (x *BlockHash) GetTotalSize() uint64 {
+	if x != nil {
+		return x.TotalSize
+	}
+	return 0
 }
 
 type HashBatchRequest struct {
@@ -191,14 +199,16 @@ var File_api_v1_hash_proto protoreflect.FileDescriptor
 
 const file_api_v1_hash_proto_rawDesc = "" +
 	"\n" +
-	"\x11api/v1/hash.proto\x12\x06api.v1\"\x8f\x01\n" +
+	"\x11api/v1/hash.proto\x12\x06api.v1\"\xae\x01\n" +
 	"\tBlockHash\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1b\n" +
 	"\tfile_path\x18\x02 \x01(\tR\bfilePath\x12\x16\n" +
 	"\x06offset\x18\x03 \x01(\x04R\x06offset\x12\x16\n" +
 	"\x06length\x18\x04 \x01(\x04R\x06length\x12\x16\n" +
-	"\x06sha256\x18\x05 \x01(\fR\x06sha256\"=\n" +
+	"\x06sha256\x18\x05 \x01(\fR\x06sha256\x12\x1d\n" +
+	"\n" +
+	"total_size\x18\x06 \x01(\x04R\ttotalSize\"=\n" +
 	"\x10HashBatchRequest\x12)\n" +
 	"\x06hashes\x18\x01 \x03(\v2\x11.api.v1.BlockHashR\x06hashes\":\n" +
 	"\x11HashBatchResponse\x12%\n" +

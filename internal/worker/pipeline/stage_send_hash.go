@@ -94,12 +94,14 @@ func hashBatcher(
 				continue
 			}
 			batch = append(batch, HashedChunk{
-				ReqID:    zc.ReqID,
-				FilePath: zc.FilePath,
-				Offset:   zc.Offset,
-				Length:   zc.Length,
-				Data:     nil,
-				Hash:     zeroHash,
+				ReqID:     zc.ReqID,
+				FilePath:  zc.FilePath,
+				Offset:    zc.Offset,
+				Length:    zc.Length,
+				Data:      nil,
+				Hash:      zeroHash,
+				TotalSize: zc.TotalSize,
+				Held:      zc.Held,
 			})
 			if len(batch) >= cfg.HashBatchMaxCount {
 				if err := flush(); err != nil {
@@ -154,6 +156,7 @@ func hashSender(
 				Offset:    uint64(hc.Offset), //nolint:gosec // G115: non-negative offset
 				Length:    uint64(hc.Length), //nolint:gosec // G115: non-negative length
 				Sha256:    hc.Hash[:],
+				TotalSize: uint64(hc.TotalSize), //nolint:gosec // G115: non-negative size
 			}
 		}
 
