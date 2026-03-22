@@ -88,7 +88,7 @@ var drivers = []driverConfig{
 		vsClass: "csi-rbdplugin-snapclass",
 		volumeMode: ptr.To(
 			corev1.PersistentVolumeBlock),
-		accessMode: corev1.ReadWriteOnce,
+		accessMode: corev1.ReadWriteMany,
 	},
 }
 
@@ -617,8 +617,55 @@ func debugAfterEach() {
 		return
 	}
 
-	By("Fetching controller pod name")
+	By("Fetching all ReplicationSources")
 	cmd := exec.Command(
+		"kubectl", "get",
+		"replicationsources",
+		"-n", namespace,
+		"-o", "yaml",
+	)
+	rsOutput, err := utils.Run(cmd)
+	if err == nil {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"ReplicationSources:\n%s",
+			rsOutput,
+		)
+	} else {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"Failed to get"+
+				" ReplicationSources: %s\n",
+			err,
+		)
+	}
+
+	By("Fetching all ReplicationDestinations")
+	cmd = exec.Command(
+		"kubectl", "get",
+		"replicationdestinations",
+		"-n", namespace,
+		"-o", "yaml",
+	)
+	rdOutput, err := utils.Run(cmd)
+	if err == nil {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"ReplicationDestinations:\n%s",
+			rdOutput,
+		)
+	} else {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"Failed to get"+
+				" ReplicationDestinations:"+
+				" %s\n",
+			err,
+		)
+	}
+
+	By("Fetching controller pod name")
+	cmd = exec.Command(
 		"kubectl", "get", "pods",
 		"-l", "control-plane="+
 			"controller-manager",
@@ -695,53 +742,6 @@ func debugAfterEach() {
 		fmt.Println(
 			"Failed to describe " +
 				"controller pod",
-		)
-	}
-
-	By("Fetching all ReplicationSources")
-	cmd = exec.Command(
-		"kubectl", "get",
-		"replicationsources",
-		"-n", namespace,
-		"-o", "yaml",
-	)
-	rsOutput, err := utils.Run(cmd)
-	if err == nil {
-		_, _ = fmt.Fprintf(
-			GinkgoWriter,
-			"ReplicationSources:\n%s",
-			rsOutput,
-		)
-	} else {
-		_, _ = fmt.Fprintf(
-			GinkgoWriter,
-			"Failed to get"+
-				" ReplicationSources: %s\n",
-			err,
-		)
-	}
-
-	By("Fetching all ReplicationDestinations")
-	cmd = exec.Command(
-		"kubectl", "get",
-		"replicationdestinations",
-		"-n", namespace,
-		"-o", "yaml",
-	)
-	rdOutput, err := utils.Run(cmd)
-	if err == nil {
-		_, _ = fmt.Fprintf(
-			GinkgoWriter,
-			"ReplicationDestinations:\n%s",
-			rdOutput,
-		)
-	} else {
-		_, _ = fmt.Fprintf(
-			GinkgoWriter,
-			"Failed to get"+
-				" ReplicationDestinations:"+
-				" %s\n",
-			err,
 		)
 	}
 }
