@@ -1,6 +1,8 @@
 package cephfs
 
 import (
+	"context"
+
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/pipeline"
 )
 
@@ -30,12 +32,16 @@ type fileBoundary struct {
 }
 
 // CephFSBlockIterator implements pipeline.BlockIterator.
-// It flattens block diffs across all large changed files.
+// It flattens block diffs across all large changed
+// files. Supports both slice-fed (files []string) and
+// channel-fed (fileCh) input modes.
 type CephFSBlockIterator struct {
 	newIter func(relPath string) (
 		fileDiffIterator, error,
 	)
 	files      []string
+	fileCh     <-chan string
+	ctx        context.Context
 	fileIdx    int
 	curIter    fileDiffIterator
 	curFile    string
@@ -69,6 +75,29 @@ func WithBoundaryChan(
 ) CephFSIterOpt {
 	return func(it *CephFSBlockIterator) {
 		it.boundaryCh = ch
+	}
+}
+
+// WithFileChan sets a channel of file paths as input
+// instead of a static slice. The iterator reads files
+// from the channel and processes them as they arrive.
+func WithFileChan(
+	ch <-chan string,
+) CephFSIterOpt {
+	return func(it *CephFSBlockIterator) {
+		it.fileCh = ch
+	}
+}
+
+// WithContext sets a context for cancellation-aware
+// blocking on channels. Required when using
+// WithFileChan to allow context cancellation to
+// unblock the iterator.
+func WithContext(
+	ctx context.Context,
+) CephFSIterOpt {
+	return func(it *CephFSBlockIterator) {
+		it.ctx = ctx
 	}
 }
 
@@ -124,26 +153,23 @@ func (it *CephFSBlockIterator) Next() (
 			}
 		}
 
-		// Advance to next file.
-		if it.fileIdx >= len(it.files) {
-			return nil, false
-		}
-
 		// Emit boundary for the previous file.
 		if it.curFile != "" && it.boundaryCh != nil {
-			select {
-			case it.boundaryCh <- fileBoundary{
-				path:      it.curFile,
-				lastReqID: it.reqID - 1,
-				totalSize: it.totalSize,
-			}:
-			default:
+			if !it.emitBoundary() {
+				it.curFile = ""
+				return nil, false
 			}
 		}
 
 		it.closeCurrentIter()
-		it.curFile = it.files[it.fileIdx]
-		it.fileIdx++
+
+		// Advance to next file.
+		nextFile, ok := it.nextFile()
+		if !ok {
+			it.curFile = ""
+			return nil, false
+		}
+		it.curFile = nextFile
 
 		iter, err := it.newIter(it.curFile)
 		if err != nil {
@@ -166,6 +192,58 @@ func (it *CephFSBlockIterator) Next() (
 	}
 }
 
+// emitBoundary sends a fileBoundary for the current
+// file. Returns true on success, false if context was
+// cancelled (only possible when ctx is set).
+func (it *CephFSBlockIterator) emitBoundary() bool {
+	fb := fileBoundary{
+		path:      it.curFile,
+		lastReqID: it.reqID - 1,
+		totalSize: it.totalSize,
+	}
+	if it.ctx != nil {
+		select {
+		case it.boundaryCh <- fb:
+			return true
+		case <-it.ctx.Done():
+			return false
+		}
+	}
+	// Legacy non-blocking for slice mode.
+	select {
+	case it.boundaryCh <- fb:
+	default:
+	}
+	return true
+}
+
+// nextFile returns the next file path to process.
+// In channel mode, blocks until a file arrives or
+// the channel closes. In slice mode, indexes into
+// the files slice.
+func (it *CephFSBlockIterator) nextFile() (
+	string, bool,
+) {
+	if it.fileCh != nil {
+		if it.ctx != nil {
+			select {
+			case f, ok := <-it.fileCh:
+				return f, ok
+			case <-it.ctx.Done():
+				return "", false
+			}
+		}
+		f, ok := <-it.fileCh
+		return f, ok
+	}
+	if it.fileIdx >= len(it.files) {
+		return "", false
+	}
+	f := it.files[it.fileIdx]
+	it.fileIdx++
+	return f, true
+}
+
 func (it *CephFSBlockIterator) closeCurrentIter() {
 	if it.curIter != nil {
 		_ = it.curIter.Close()
@@ -180,14 +258,7 @@ func (it *CephFSBlockIterator) closeCurrentIter() {
 func (it *CephFSBlockIterator) Close() error {
 	if !it.failed && it.curFile != "" &&
 		it.boundaryCh != nil {
-		select {
-		case it.boundaryCh <- fileBoundary{
-			path:      it.curFile,
-			lastReqID: it.reqID - 1,
-			totalSize: it.totalSize,
-		}:
-		default:
-		}
+		_ = it.emitBoundary()
 	}
 	it.closeCurrentIter()
 	return nil

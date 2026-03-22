@@ -20,8 +20,9 @@ type commitDrainer struct {
 	commitStream grpc.BidiStreamingClient[
 		apiv1.CommitRequest, apiv1.CommitResponse,
 	]
-	win       *pipeline.WindowSemaphore
-	maxWindow int
+	win         *pipeline.WindowSemaphore
+	maxWindow   int
+	committedCh chan<- string
 }
 
 // Run processes file boundary events until boundaryCh
@@ -61,6 +62,7 @@ func (d *commitDrainer) drainQualified(
 	currentReqID uint64,
 ) error {
 	var batch []*apiv1.CommitEntry
+	var committed []string
 
 	for len(*pending) > 0 {
 		head := (*pending)[0]
@@ -79,6 +81,7 @@ func (d *commitDrainer) drainQualified(
 			TotalSize: uint64(head.totalSize), //nolint:gosec // G115: non-negative size
 		})
 		_ = d.reader.CloseFile(head.path)
+		committed = append(committed, head.path)
 		*pending = (*pending)[1:]
 	}
 
@@ -86,7 +89,11 @@ func (d *commitDrainer) drainQualified(
 		return nil
 	}
 
-	return d.sendCommitBatch(ctx, batch)
+	if err := d.sendCommitBatch(ctx, batch); err != nil {
+		return err
+	}
+
+	return d.notifyCommitted(ctx, committed)
 }
 
 // flushAll waits for all pending files to be acked,
@@ -105,19 +112,45 @@ func (d *commitDrainer) flushAll(
 	}
 
 	var batch []*apiv1.CommitEntry
+	var committed []string
 	for _, fb := range pending {
 		batch = append(batch, &apiv1.CommitEntry{
 			Path:      fb.path,
 			TotalSize: uint64(fb.totalSize), //nolint:gosec // G115: non-negative size
 		})
 		_ = d.reader.CloseFile(fb.path)
+		committed = append(committed, fb.path)
 	}
 
 	if len(batch) == 0 {
 		return nil
 	}
 
-	return d.sendCommitBatch(ctx, batch)
+	if err := d.sendCommitBatch(ctx, batch); err != nil {
+		return err
+	}
+
+	return d.notifyCommitted(ctx, committed)
+}
+
+// notifyCommitted sends committed file paths to the
+// committedCh for metadata rsync. Only sends if
+// committedCh is set.
+func (d *commitDrainer) notifyCommitted(
+	ctx context.Context,
+	paths []string,
+) error {
+	if d.committedCh == nil {
+		return nil
+	}
+	for _, p := range paths {
+		select {
+		case d.committedCh <- p:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func (d *commitDrainer) sendCommitBatch(

@@ -55,6 +55,10 @@ const (
 	// deleteBatchSize is the number of paths per
 	// batched delete request.
 	deleteBatchSize = 2000
+
+	// smallBatchSize is the number of paths per
+	// batched rsync request for small files.
+	smallBatchSize = 500
 )
 
 // syncState holds the context for the sync operation.
@@ -497,7 +501,12 @@ func (w *SourceWorker) syncForDeletion(
 }
 
 // runStatelessSync implements the stateless sync
-// algorithm with directory pre-scan.
+// algorithm with concurrent channel-based streaming.
+// A producer goroutine routes entries to category
+// channels; consumers process them concurrently in
+// an errgroup.
+//
+//nolint:funlen // errgroup orchestration
 func (w *SourceWorker) runStatelessSync(
 	ctx context.Context,
 	conn *grpc.ClientConn,
@@ -508,62 +517,50 @@ func (w *SourceWorker) runStatelessSync(
 
 	state := w.initSyncState(differ, dataClient)
 
-	large, small, deleted, err :=
-		w.collectChangedEntries(ctx, state)
-	if err != nil {
-		return fmt.Errorf(
-			"collecting changed entries: %w", err,
+	g, gctx := errgroup.WithContext(ctx)
+
+	// Producer (in errgroup — errors cancel all)
+	largeCh, smallCh, deletedCh :=
+		w.streamChangedEntries(gctx, g, state)
+
+	committedCh := make(chan string, 1000)
+
+	// Pipeline consumer
+	g.Go(func() error {
+		defer close(committedCh)
+		return w.runSnapdiffBlockPipeline(
+			gctx, differ, conn,
+			largeCh, committedCh,
 		)
-	}
+	})
 
-	w.Logger.Info("Collected changed entries",
-		"large", len(large),
-		"small", len(small),
-		"deleted", len(deleted),
-	)
-
-	// Phase 1: block diff via pipeline (large files)
-	if err := w.runSnapdiffBlockPipeline(
-		ctx, differ, conn, large,
-	); err != nil {
-		return fmt.Errorf(
-			"block pipeline failed: %w", err,
+	// Metadata rsync consumer
+	g.Go(func() error {
+		return w.consumeMetaRsync(
+			gctx, committedCh,
+			state.rsyncTarget,
 		)
+	})
+
+	// Small file consumer
+	g.Go(func() error {
+		return w.consumeSmallFiles(
+			gctx, smallCh, state.rsyncTarget,
+		)
+	})
+
+	// Delete consumer
+	g.Go(func() error {
+		return w.consumeDeletes(
+			gctx, state, deletedCh,
+		)
+	})
+
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
-	// Phase 2: rsync small files (content+metadata)
-	if len(small) > 0 {
-		if err := w.rsyncBatch(
-			small, state.rsyncTarget, true,
-		); err != nil {
-			return fmt.Errorf(
-				"small file rsync: %w", err,
-			)
-		}
-	}
-
-	// Phase 3: rsync large file metadata only
-	if len(large) > 0 {
-		if err := w.rsyncBatch(
-			large, state.rsyncTarget, false,
-		); err != nil {
-			return fmt.Errorf(
-				"large file meta rsync: %w", err,
-			)
-		}
-	}
-
-	// Phase 4: delete removed files/dirs
-	for i := 0; i < len(deleted); i += deleteBatchSize {
-		end := min(i+deleteBatchSize, len(deleted))
-		if err := w.sendDeleteBatch(
-			ctx, state, deleted[i:end],
-		); err != nil {
-			return err
-		}
-	}
-
-	// Phase 5: convergence rsync
+	// Convergence rsync (directory metadata)
 	if err := w.rsyncConvergence(state); err != nil {
 		return fmt.Errorf(
 			"convergence rsync: %w", err,
@@ -576,100 +573,185 @@ func (w *SourceWorker) runStatelessSync(
 	return nil
 }
 
-// collectChangedEntries walks the snapdiff and returns
-// three slices: large files (for pipeline), small
-// files (for rsync), and deleted paths.
-func (w *SourceWorker) collectChangedEntries(
+// streamChangedEntries walks the snapdiff and routes
+// entries to category channels as they are discovered.
+// The producer goroutine joins the provided errgroup
+// so errors cancel all consumers.
+func (w *SourceWorker) streamChangedEntries(
+	ctx context.Context,
+	g *errgroup.Group,
+	state *syncState,
+) (
+	largeCh, smallCh, deletedCh <-chan string,
+) {
+	lCh := make(chan string, 1000)
+	sCh := make(chan string, 1000)
+	dCh := make(chan string, 1000)
+
+	g.Go(func() error {
+		defer close(lCh)
+		defer close(sCh)
+		defer close(dCh)
+
+		return w.produceEntries(
+			ctx, state, lCh, sCh, dCh,
+		)
+	})
+
+	return lCh, sCh, dCh
+}
+
+// produceEntries walks directories and sends each
+// changed entry to the appropriate channel.
+//
+//nolint:funlen,cyclop // entry categorization logic
+func (w *SourceWorker) produceEntries(
 	ctx context.Context,
 	state *syncState,
-) (large, small, deleted []string, err error) {
+	largeCh, smallCh, deletedCh chan<- string,
+) error {
 	dirChan, errChan := w.walkAndStreamDirectories()
 
 	for dirPath := range dirChan {
 		select {
 		case <-ctx.Done():
-			return nil, nil, nil, ctx.Err()
+			return ctx.Err()
 		default:
 		}
 
-		iterator, iterErr :=
-			state.differ.NewSnapDiffIterator(dirPath)
-		if iterErr != nil {
-			return nil, nil, nil, fmt.Errorf(
-				"snap diff iterator %s: %w",
-				dirPath, iterErr,
-			)
+		if err := w.categorizeDir(
+			ctx, state, dirPath,
+			largeCh, smallCh, deletedCh,
+		); err != nil {
+			return err
 		}
-
-		for {
-			entry, readErr := iterator.Read()
-			if readErr != nil {
-				_ = iterator.Close()
-				return nil, nil, nil, readErr
-			}
-			if entry == nil {
-				break
-			}
-			entryName := entry.DirEntry.Name()
-			entryPath := filepath.Join(
-				dirPath, entryName,
-			)
-
-			if entry.DirEntry.DType() != cephfs.DTypeReg {
-				fullP := filepath.Join(
-					common.DataMountPath, entryPath,
-				)
-				if _, statErr := os.Stat(fullP); os.IsNotExist(statErr) {
-					deleted = append(
-						deleted, entryPath,
-					)
-				} else if entry.DirEntry.DType() !=
-					cephfs.DTypeDir {
-					small = append(small, entryPath)
-				}
-				continue
-			}
-
-			fullP := filepath.Join(
-				common.DataMountPath, entryPath,
-			)
-			fi, statErr := os.Stat(fullP)
-			if os.IsNotExist(statErr) {
-				deleted = append(deleted, entryPath)
-				continue
-			} else if statErr != nil {
-				_ = iterator.Close()
-				return nil, nil, nil, statErr
-			}
-
-			if fi.Size() <= smallFileMaxSize {
-				small = append(small, entryPath)
-			} else {
-				large = append(large, entryPath)
-			}
-		}
-		_ = iterator.Close()
 	}
 
 	if walkErr := <-errChan; walkErr != nil {
-		return nil, nil, nil, walkErr
+		return walkErr
 	}
-	return large, small, deleted, nil
+
+	return nil
 }
 
-// runSnapdiffBlockPipeline runs the 5-stage pipeline
-// for all large changed files.
+// categorizeDir opens a SnapDiffIterator for a single
+// directory and routes each entry to the appropriate
+// channel.
+//
+//nolint:cyclop,funlen // entry type routing
+func (w *SourceWorker) categorizeDir(
+	ctx context.Context,
+	state *syncState,
+	dirPath string,
+	largeCh, smallCh, deletedCh chan<- string,
+) error {
+	iterator, err :=
+		state.differ.NewSnapDiffIterator(dirPath)
+	if err != nil {
+		return fmt.Errorf(
+			"snap diff iterator %s: %w",
+			dirPath, err,
+		)
+	}
+	defer func() { _ = iterator.Close() }()
+
+	for {
+		entry, readErr := iterator.Read()
+		if readErr != nil {
+			return readErr
+		}
+		if entry == nil {
+			return nil
+		}
+		entryName := entry.DirEntry.Name()
+		entryPath := filepath.Join(
+			dirPath, entryName,
+		)
+
+		if entry.DirEntry.DType() != cephfs.DTypeReg {
+			fullP := filepath.Join(
+				common.DataMountPath, entryPath,
+			)
+			if _, statErr := os.Stat(fullP); os.IsNotExist(statErr) {
+				select {
+				case deletedCh <- entryPath:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			} else if entry.DirEntry.DType() !=
+				cephfs.DTypeDir {
+				select {
+				case smallCh <- entryPath:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			continue
+		}
+
+		fullP := filepath.Join(
+			common.DataMountPath, entryPath,
+		)
+		fi, statErr := os.Stat(fullP)
+		if os.IsNotExist(statErr) {
+			select {
+			case deletedCh <- entryPath:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
+		} else if statErr != nil {
+			return statErr
+		}
+
+		if fi.Size() <= smallFileMaxSize {
+			select {
+			case smallCh <- entryPath:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		} else {
+			select {
+			case largeCh <- entryPath:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+}
+
+// runSnapdiffBlockPipeline runs the 6-stage pipeline
+// for large changed files streamed via largeCh.
+// Committed file paths are sent to committedCh for
+// metadata rsync.
 //
 //nolint:funlen // pipeline setup with commit drainer
 func (w *SourceWorker) runSnapdiffBlockPipeline(
 	ctx context.Context,
 	differ *ceph.SnapshotDiffer,
 	conn *grpc.ClientConn,
-	largeFiles []string,
+	largeCh <-chan string,
+	committedCh chan<- string,
 ) error {
-	if len(largeFiles) == 0 {
-		return nil
+	// Peek first element for early exit.
+	first, ok := <-largeCh
+	if !ok {
+		return nil // no large files
 	}
+
+	// Proxy channel: re-inject first element.
+	proxyCh := make(chan string, 1000)
+	proxyCh <- first
+	go func() {
+		defer close(proxyCh)
+		for f := range largeCh {
+			select {
+			case proxyCh <- f:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	newIter := func(relPath string) (
 		fileDiffIterator, error,
@@ -725,7 +807,9 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 	}
 
 	iter := NewCephFSBlockIterator(
-		newIter, largeFiles,
+		newIter, nil,
+		WithFileChan(proxyCh),
+		WithContext(ctx),
 		WithSizeFunc(sizeFn),
 		WithBoundaryChan(boundaryCh),
 	)
@@ -744,6 +828,7 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 		commitStream: commitStream,
 		win:          win,
 		maxWindow:    cfg.MaxWindow,
+		committedCh:  committedCh,
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -920,6 +1005,136 @@ func (w *SourceWorker) rsyncBatch(
 	return w.rsyncFromList(
 		tmpPath, target, includeContent,
 	)
+}
+
+// consumeSmallFiles batches paths from smallCh and
+// runs rsync for each batch.
+func (w *SourceWorker) consumeSmallFiles(
+	ctx context.Context,
+	smallCh <-chan string,
+	target string,
+) error {
+	batch := make([]string, 0, smallBatchSize)
+
+	for {
+		select {
+		case p, ok := <-smallCh:
+			if !ok {
+				return w.flushBatch(
+					batch, target, true,
+				)
+			}
+			batch = append(batch, p)
+			if len(batch) >= smallBatchSize {
+				if err := w.rsyncBatch(
+					batch, target, true,
+				); err != nil {
+					return fmt.Errorf(
+						"small file rsync: %w", err,
+					)
+				}
+				batch = batch[:0]
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// consumeDeletes batches paths from deletedCh and
+// sends batched delete requests.
+func (w *SourceWorker) consumeDeletes(
+	ctx context.Context,
+	state *syncState,
+	deletedCh <-chan string,
+) error {
+	batch := make([]string, 0, deleteBatchSize)
+
+	for {
+		select {
+		case p, ok := <-deletedCh:
+			if !ok {
+				return w.flushDeletes(
+					ctx, state, batch,
+				)
+			}
+			batch = append(batch, p)
+			if len(batch) >= deleteBatchSize {
+				if err := w.sendDeleteBatch(
+					ctx, state, batch,
+				); err != nil {
+					return err
+				}
+				batch = batch[:0]
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// consumeMetaRsync batches committed large file paths
+// and runs metadata-only rsync for each batch.
+func (w *SourceWorker) consumeMetaRsync(
+	ctx context.Context,
+	committedCh <-chan string,
+	target string,
+) error {
+	batch := make([]string, 0, smallBatchSize)
+
+	for {
+		select {
+		case p, ok := <-committedCh:
+			if !ok {
+				return w.flushBatch(
+					batch, target, false,
+				)
+			}
+			batch = append(batch, p)
+			if len(batch) >= smallBatchSize {
+				if err := w.rsyncBatch(
+					batch, target, false,
+				); err != nil {
+					return fmt.Errorf(
+						"meta rsync: %w", err,
+					)
+				}
+				batch = batch[:0]
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// flushBatch sends remaining paths via rsync if any.
+func (w *SourceWorker) flushBatch(
+	batch []string, target string,
+	includeContent bool,
+) error {
+	if len(batch) == 0 {
+		return nil
+	}
+	if err := w.rsyncBatch(
+		batch, target, includeContent,
+	); err != nil {
+		return fmt.Errorf(
+			"rsync flush: %w", err,
+		)
+	}
+	return nil
+}
+
+// flushDeletes sends remaining delete paths if any.
+func (w *SourceWorker) flushDeletes(
+	ctx context.Context,
+	state *syncState,
+	batch []string,
+) error {
+	if len(batch) == 0 {
+		return nil
+	}
+	return w.sendDeleteBatch(ctx, state, batch)
 }
 
 // rsyncConvergence performs the final rsync pass for
