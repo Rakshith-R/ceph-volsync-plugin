@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
@@ -662,6 +663,68 @@ func debugAfterEach() {
 				" %s\n",
 			err,
 		)
+	}
+
+	By("Fetching volsync mover pod logs")
+	cmd = exec.Command(
+		"kubectl", "get", "pods",
+		"-l", "app.kubernetes.io/part-of="+
+			"ceph-volsync-plugin",
+		"-n", namespace,
+		"-o", "jsonpath="+
+			"{.items[*].metadata.name}",
+	)
+	moverPodNames, err := utils.Run(cmd)
+	if err != nil {
+		_, _ = fmt.Fprintf(
+			GinkgoWriter,
+			"Failed to list mover"+
+				" pods: %s\n", err,
+		)
+	} else if moverPodNames != "" {
+		for _, moverPod := range strings.Fields(
+			moverPodNames,
+		) {
+			cmd = exec.Command(
+				"kubectl", "logs",
+				moverPod,
+				"-n", namespace,
+				"--all-containers",
+				"--previous",
+			)
+			prevLogs, prevErr := utils.Run(cmd)
+			if prevErr == nil && prevLogs != "" {
+				_, _ = fmt.Fprintf(
+					GinkgoWriter,
+					"Mover pod %s"+
+						" previous logs:\n%s\n",
+					moverPod, prevLogs,
+				)
+			}
+
+			cmd = exec.Command(
+				"kubectl", "logs",
+				moverPod,
+				"-n", namespace,
+				"--all-containers",
+			)
+			moverLogs, logErr := utils.Run(cmd)
+			if logErr == nil {
+				_, _ = fmt.Fprintf(
+					GinkgoWriter,
+					"Mover pod %s logs:\n%s\n",
+					moverPod, moverLogs,
+				)
+			} else {
+				_, _ = fmt.Fprintf(
+					GinkgoWriter,
+					"Failed to get logs"+
+						" for mover pod"+
+						" %s: %s\n",
+					moverPod, logErr,
+				)
+			}
+		}
 	}
 
 	By("Fetching controller pod name")
