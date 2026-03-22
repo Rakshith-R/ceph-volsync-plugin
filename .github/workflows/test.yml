@@ -97,7 +97,7 @@ jobs:
       # TODO: enable e2e tests after e2e,mover and worker has been added.
       - name: Running Test e2e
         run: |
-          ginkgo -v --procs 2 --timeout=40m ./test/e2e/
+          ginkgo -v --procs 4 --timeout=40m ./test/e2e/
 
       - name: Cleanup ceph-volsync-plugin operator
         if: success() # do not run this step if the previous steps have failed.

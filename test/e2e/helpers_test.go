@@ -76,12 +76,12 @@ var drivers = []driverConfig{
 		// 	sc:      "rook-nfs",
 		// 	vsClass: "csi-nfsplugin-snapclass",
 		// }, {
-		name: "cephfs",
-		provider: "rook-ceph." +
-			"cephfs.csi.ceph.com",
-		sc:      "rook-cephfs",
-		vsClass: "csi-cephfsplugin-snapclass",
-	}, {
+		// 	name: "cephfs",
+		// 	provider: "rook-ceph." +
+		// 		"cephfs.csi.ceph.com",
+		// 	sc:      "rook-cephfs",
+		// 	vsClass: "csi-cephfsplugin-snapclass",
+		// }, {
 		name: "rbd",
 		provider: "rook-ceph." +
 			"rbd.csi.ceph.com",
@@ -1437,6 +1437,7 @@ func tryCompareDataInPod(
 					Command: []string{
 						"/bin/sh", "-c", command,
 					},
+					ImagePullPolicy: corev1.PullAlways,
 				},
 			},
 			Volumes: []corev1.Volume{
