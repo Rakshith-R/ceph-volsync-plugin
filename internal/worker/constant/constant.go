@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package worker
+package constant
 
 // Environment variable key constants for the mover worker
 // container. These are passed to Kubernetes Jobs as

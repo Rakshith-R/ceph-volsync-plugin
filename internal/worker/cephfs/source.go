@@ -36,8 +36,8 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/pipeline"
 )
 
@@ -135,13 +135,13 @@ func (w *SourceWorker) Sync(
 	conn *grpc.ClientConn,
 ) error {
 	baseSnapshotHandle := os.Getenv(
-		worker.EnvBaseSnapshotHandle,
+		constant.EnvBaseSnapshotHandle,
 	)
 	targetSnapshotHandle := os.Getenv(
-		worker.EnvTargetSnapshotHandle,
+		constant.EnvTargetSnapshotHandle,
 	)
 	volumeHandle := os.Getenv(
-		worker.EnvVolumeHandle,
+		constant.EnvVolumeHandle,
 	)
 
 	if baseSnapshotHandle == "" ||
@@ -286,7 +286,7 @@ func (w *SourceWorker) runSnapdiffSync(
 func (w *SourceWorker) rsync() error {
 	startTime := time.Now()
 	rsyncDaemonPort := os.Getenv(
-		worker.EnvRsyncDaemonPort,
+		constant.EnvRsyncDaemonPort,
 	)
 	rsyncTarget := fmt.Sprintf(
 		"rsync://127.0.0.1:%s/data", rsyncDaemonPort,
@@ -938,7 +938,7 @@ func (w *SourceWorker) initSyncState(
 	dataClient apiv1.DataServiceClient,
 ) *syncState {
 	rsyncDaemonPort := os.Getenv(
-		worker.EnvRsyncDaemonPort,
+		constant.EnvRsyncDaemonPort,
 	)
 	rsyncTarget := fmt.Sprintf(
 		"rsync://127.0.0.1:%s/data", rsyncDaemonPort,

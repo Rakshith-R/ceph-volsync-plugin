@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	"github.com/ceph/go-ceph/cephfs"
 	ca "github.com/ceph/go-ceph/cephfs/admin"
 	"github.com/ceph/go-ceph/rados"
@@ -49,8 +49,8 @@ func (cc *ClusterConnection) Connect(monitors string) error {
 	}
 
 	idPath := filepath.Join(
-		worker.CsiSecretMountPath,
-		worker.CsiSecretUserIDKey,
+		constant.CsiSecretMountPath,
+		constant.CsiSecretUserIDKey,
 	)
 	idBytes, err := os.ReadFile(idPath) //nolint:gosec // G304: path is internally constructed
 	if err != nil {
@@ -62,8 +62,8 @@ func (cc *ClusterConnection) Connect(monitors string) error {
 	userID := strings.TrimSpace(string(idBytes))
 
 	keyFilePath := filepath.Join(
-		worker.CsiSecretMountPath,
-		worker.CsiSecretUserKeyKey,
+		constant.CsiSecretMountPath,
+		constant.CsiSecretUserKeyKey,
 	)
 
 	conn, err := connPool.Get(monitors, userID, keyFilePath)

@@ -24,9 +24,9 @@ import (
 	"syscall"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/tunnel"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
 	wcephfs "github.com/RamenDR/ceph-volsync-plugin/internal/worker/cephfs"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	wrbd "github.com/RamenDR/ceph-volsync-plugin/internal/worker/rbd"
 	"github.com/backube/volsync/controllers/utils"
 	"github.com/go-logr/logr"
@@ -73,23 +73,23 @@ func envOrDefault(key, defaultVal string) string {
 func loadConfig() Config {
 	moverType := envOrDefault("MOVER_TYPE", "cephfs")
 	return Config{
-		WorkerType: os.Getenv(worker.EnvWorkerType),
+		WorkerType: os.Getenv(constant.EnvWorkerType),
 		MoverType:  moverType,
 		DestinationAddress: os.Getenv(
-			worker.EnvDestinationAddress,
+			constant.EnvDestinationAddress,
 		),
 		LogLevel: envOrDefault(
-			worker.EnvLogLevel, "info",
+			constant.EnvLogLevel, "info",
 		),
 		DestinationPort: envOrDefault(
-			worker.EnvDestinationPort, "8000",
+			constant.EnvDestinationPort, "8000",
 		),
 		EnableRsyncTunnel: moverType == "cephfs",
 		RsyncPort: envOrDefault(
-			worker.EnvRsyncPort, "8873",
+			constant.EnvRsyncPort, "8873",
 		),
 		RsyncDaemonPort: envOrDefault(
-			worker.EnvRsyncDaemonPort, "8874",
+			constant.EnvRsyncDaemonPort, "8874",
 		),
 	}
 }
@@ -110,7 +110,7 @@ func runMover(config Config) error {
 	if config.WorkerType == "" {
 		return fmt.Errorf(
 			"%s env var is required",
-			worker.EnvWorkerType,
+			constant.EnvWorkerType,
 		)
 	}
 
@@ -118,7 +118,7 @@ func runMover(config Config) error {
 		config.WorkerType != workerTypeDestination {
 		return fmt.Errorf(
 			"invalid %s '%s': must be '%s' or '%s'",
-			worker.EnvWorkerType,
+			constant.EnvWorkerType,
 			config.WorkerType,
 			workerTypeSource,
 			workerTypeDestination,

@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	"github.com/go-logr/logr"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -264,7 +264,7 @@ func (m *Mover) getVolumeEnvVars(
 
 		envVars = append(envVars,
 			corev1.EnvVar{
-				Name:  worker.EnvVolumeHandle,
+				Name:  constant.EnvVolumeHandle,
 				Value: volumeHandle,
 			},
 		)
@@ -286,7 +286,7 @@ func (m *Mover) getVolumeEnvVars(
 
 			envVars = append(envVars,
 				corev1.EnvVar{
-					Name:  worker.EnvVolumeHandle,
+					Name:  constant.EnvVolumeHandle,
 					Value: volumeHandle,
 				},
 			)
@@ -317,15 +317,15 @@ func (m *Mover) getVolumeEnvVars(
 		}
 		envVars = append(envVars,
 			corev1.EnvVar{
-				Name:  worker.EnvVolumeHandle,
+				Name:  constant.EnvVolumeHandle,
 				Value: volumeHandle,
 			},
 			corev1.EnvVar{
-				Name:  worker.EnvBaseSnapshotHandle,
+				Name:  constant.EnvBaseSnapshotHandle,
 				Value: baseSnapshotHandle,
 			},
 			corev1.EnvVar{
-				Name:  worker.EnvTargetSnapshotHandle,
+				Name:  constant.EnvTargetSnapshotHandle,
 				Value: targetSnapshotHandle,
 			},
 		)
@@ -344,7 +344,7 @@ func (m *Mover) getVolumeEnvVars(
 
 		envVars = append(envVars,
 			corev1.EnvVar{
-				Name:  worker.EnvVolumeHandle,
+				Name:  constant.EnvVolumeHandle,
 				Value: volumeHandle,
 			},
 		)
@@ -375,15 +375,15 @@ func (m *Mover) getVolumeEnvVars(
 	}
 	envVars = append(envVars,
 		corev1.EnvVar{
-			Name:  worker.EnvVolumeHandle,
+			Name:  constant.EnvVolumeHandle,
 			Value: volumeHandle,
 		},
 		corev1.EnvVar{
-			Name:  worker.EnvBaseSnapshotHandle,
+			Name:  constant.EnvBaseSnapshotHandle,
 			Value: baseSnapHandle,
 		},
 		corev1.EnvVar{
-			Name:  worker.EnvTargetSnapshotHandle,
+			Name:  constant.EnvTargetSnapshotHandle,
 			Value: targetSnapHandle,
 		},
 	)

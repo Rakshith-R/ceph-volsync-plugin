@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker"
 	wcommon "github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"github.com/backube/volsync/controllers/mover/rsynctls"
 	"github.com/backube/volsync/controllers/utils"
@@ -86,7 +86,7 @@ func (m *Mover) ensureJob(
 			workerType = "source"
 		}
 		containerEnv = append(containerEnv, corev1.EnvVar{
-			Name:  worker.EnvWorkerType,
+			Name:  constant.EnvWorkerType,
 			Value: workerType,
 		})
 
@@ -96,12 +96,12 @@ func (m *Mover) ensureJob(
 			serverPort = strconv.Itoa(int(*m.port))
 		}
 		containerEnv = append(containerEnv, corev1.EnvVar{
-			Name:  worker.EnvDestinationPort,
+			Name:  constant.EnvDestinationPort,
 			Value: serverPort,
 		})
 
 		containerEnv = append(containerEnv, corev1.EnvVar{
-			Name:  worker.EnvLogLevel,
+			Name:  constant.EnvLogLevel,
 			Value: "info",
 		})
 
@@ -114,17 +114,17 @@ func (m *Mover) ensureJob(
 		// CephFS-specific: rsync port configuration
 		if m.moverType == MoverTypeCephFS {
 			containerEnv = append(containerEnv, corev1.EnvVar{
-				Name:  worker.EnvRsyncPort,
+				Name:  constant.EnvRsyncPort,
 				Value: wcommon.DefaultRsyncStunnelPort,
 			})
 			containerEnv = append(containerEnv, corev1.EnvVar{
-				Name:  worker.EnvRsyncDaemonPort,
+				Name:  constant.EnvRsyncDaemonPort,
 				Value: wcommon.DefaultRsyncDaemonPort,
 			})
 		}
 
 		containerEnv = append(containerEnv, corev1.EnvVar{
-			Name: worker.EnvPodNamespace,
+			Name: constant.EnvPodNamespace,
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{
 					FieldPath: "metadata.namespace",
@@ -135,11 +135,11 @@ func (m *Mover) ensureJob(
 		if m.isSource {
 			// Set dest address/port if necessary
 			if m.address != nil {
-				containerEnv = append(containerEnv, corev1.EnvVar{Name: worker.EnvDestinationAddress, Value: *m.address})
+				containerEnv = append(containerEnv, corev1.EnvVar{Name: constant.EnvDestinationAddress, Value: *m.address})
 			}
 			if m.port != nil {
 				connectPort := strconv.Itoa(int(*m.port))
-				containerEnv = append(containerEnv, corev1.EnvVar{Name: worker.EnvDestinationPort, Value: connectPort})
+				containerEnv = append(containerEnv, corev1.EnvVar{Name: constant.EnvDestinationPort, Value: connectPort})
 			}
 
 			// Set read-only for volume in repl source job spec if the PVC only supports read-only
@@ -195,7 +195,7 @@ func (m *Mover) ensureJob(
 			},
 			corev1.VolumeMount{
 				Name:      csiSecretVolumeName,
-				MountPath: worker.CsiSecretMountPath,
+				MountPath: constant.CsiSecretMountPath,
 				ReadOnly:  true,
 			},
 		)
@@ -263,7 +263,7 @@ func (m *Mover) ensureJob(
 
 		if m.privileged {
 			podSpec.Containers[0].Env = append(podSpec.Containers[0].Env, corev1.EnvVar{
-				Name:  worker.EnvPrivilegedMover,
+				Name:  constant.EnvPrivilegedMover,
 				Value: "1",
 			})
 			podSpec.Containers[0].SecurityContext.Capabilities.Add = []corev1.Capability{
@@ -275,7 +275,7 @@ func (m *Mover) ensureJob(
 			podSpec.Containers[0].SecurityContext.RunAsUser = ptr.To[int64](0)
 		} else {
 			podSpec.Containers[0].Env = append(podSpec.Containers[0].Env, corev1.EnvVar{
-				Name:  worker.EnvPrivilegedMover,
+				Name:  constant.EnvPrivilegedMover,
 				Value: "0",
 			})
 		}
