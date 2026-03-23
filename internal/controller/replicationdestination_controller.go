@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
-	cephPluginMover "github.com/RamenDR/ceph-volsync-plugin/internal/mover"
+	cephpluginmover "github.com/RamenDR/ceph-volsync-plugin/internal/mover"
 )
 
 // ReplicationDestinationReconciler reconciles a ReplicationDestination object
@@ -164,7 +164,7 @@ func rdHasMover(rd *volsyncv1alpha1.ReplicationDestination) bool {
 
 func newRDMachine(rd *volsyncv1alpha1.ReplicationDestination, c client.Client,
 	l logr.Logger, er events.EventRecorder) (*rdMachine, error) {
-	dataMover, err := cephPluginMover.GetDestinationMoverFromCatalog(c, l, er, rd, true)
+	dataMover, err := cephpluginmover.GetDestinationMoverFromCatalog(c, l, er, rd, true)
 	if err != nil {
 		return nil, err
 	}

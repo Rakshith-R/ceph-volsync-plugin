@@ -31,9 +31,7 @@ var (
 	ErrClusterIDNotSet = errors.New("clusterID must be set")
 	// ErrConfigNotFound is returned when no configuration is found
 	// for a cluster ID.
-	ErrConfigNotFound = errors.New(
-		"missing configuration for cluster ID",
-	)
+	ErrConfigNotFound = errors.New("missing configuration for cluster ID")
 )
 
 const (
@@ -73,28 +71,20 @@ const (
 	}
 }]
 */
-func readClusterInfo(
-	pathToConfig, clusterID string,
-) (*kubernetes.ClusterInfo, error) {
+func readClusterInfo(pathToConfig, clusterID string) (*kubernetes.ClusterInfo, error) {
 	var config []kubernetes.ClusterInfo
 
 	// #nosec
 	content, err := os.ReadFile(pathToConfig)
 	if err != nil {
-		err = fmt.Errorf(
-			"error fetching configuration for cluster ID %q: %w",
-			clusterID, err,
-		)
+		err = fmt.Errorf("error fetching configuration for cluster ID %q: %w", clusterID, err)
 
 		return nil, err
 	}
 
 	err = json.Unmarshal(content, &config)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"unmarshal failed (%w), raw buffer response: %s",
-			err, string(content),
-		)
+		return nil, fmt.Errorf("unmarshal failed (%w), raw buffer response: %s", err, string(content))
 	}
 
 	for i := range config {
@@ -115,10 +105,7 @@ func Mons(pathToConfig, clusterID string) (string, error) {
 	}
 
 	if len(cluster.Monitors) == 0 {
-		return "", fmt.Errorf(
-			"empty monitor list for cluster ID (%s) in config",
-			clusterID,
-		)
+		return "", fmt.Errorf("empty monitor list for cluster ID (%s) in config", clusterID)
 	}
 
 	return strings.Join(cluster.Monitors, ","), nil
@@ -136,9 +123,7 @@ func GetRBDRadosNamespace(pathToConfig, clusterID string) (string, error) {
 
 // GetCephFSRadosNamespace returns the namespace for the given clusterID.
 // If not set, it returns the default value "csi".
-func GetCephFSRadosNamespace(
-	pathToConfig, clusterID string,
-) (string, error) {
+func GetCephFSRadosNamespace(pathToConfig, clusterID string) (string, error) {
 	cluster, err := readClusterInfo(pathToConfig, clusterID)
 	if err != nil {
 		return "", err
@@ -178,9 +163,7 @@ func GetClusterID(options map[string]string) (string, error) {
 
 // GetRBDControllerPublishSecretRef returns the secret name and
 // namespace used for controller publish operations for RBD volumes.
-func GetRBDControllerPublishSecretRef(
-	pathToConfig, clusterID string,
-) (string, string, error) {
+func GetRBDControllerPublishSecretRef(pathToConfig, clusterID string) (string, string, error) {
 	cluster, err := readClusterInfo(pathToConfig, clusterID)
 	if err != nil {
 		return "", "", err
@@ -193,9 +176,7 @@ func GetRBDControllerPublishSecretRef(
 
 // GetCephFSControllerPublishSecretRef returns the secret name and
 // namespace used for controller publish operations for CephFS volumes.
-func GetCephFSControllerPublishSecretRef(
-	pathToConfig, clusterID string,
-) (string, string, error) {
+func GetCephFSControllerPublishSecretRef(pathToConfig, clusterID string) (string, string, error) {
 	cluster, err := readClusterInfo(pathToConfig, clusterID)
 	if err != nil {
 		return "", "", err
