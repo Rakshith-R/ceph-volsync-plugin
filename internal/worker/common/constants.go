@@ -43,38 +43,11 @@ const (
 	// size for send and receive.
 	MaxGRPCMessageSize = 8 * 1024 * 1024 // 8MB
 
-	// DataMountPath is the mount path for the data
-	// PVC inside the mover container.
-	DataMountPath = "/data"
-
-	// DevicePath is the block device path for RBD
-	// volumes inside the mover container.
-	DevicePath = "/dev/block"
-
-	// TLSPort is the stunnel TLS proxy port.
-	TLSPort int32 = 8000
-
-	// RsyncStunnelPort is the rsync stunnel port for
-	// CephFS mover workers.
-	RsyncStunnelPort int32 = 8873
-
 	// RsyncDaemonPort is the rsync daemon port for
 	// CephFS mover workers.
 	RsyncDaemonPort int32 = 8874
 
-	// DefaultServerStunnelPort is the string form of
-	// TLSPort for env var configuration.
-	DefaultServerStunnelPort = "8000"
-
 	// DefaultServerPort is the gRPC server listen
 	// port inside the mover container.
 	DefaultServerPort = "8080"
-
-	// DefaultRsyncStunnelPort is the string form of
-	// RsyncStunnelPort for env var configuration.
-	DefaultRsyncStunnelPort = "8873"
-
-	// DefaultRsyncDaemonPort is the string form of
-	// RsyncDaemonPort for env var configuration.
-	DefaultRsyncDaemonPort = "8874"
 )

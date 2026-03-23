@@ -379,7 +379,7 @@ func (w *SourceWorker) createFileListAndSync(
 		fmt.Sprintf(
 			"find %s -mindepth 1 -maxdepth 1"+
 				" | sed 's|^%s|/|'",
-			common.DataMountPath, common.DataMountPath,
+			constant.DataMountPath, constant.DataMountPath,
 		),
 	)
 
@@ -419,7 +419,7 @@ func (w *SourceWorker) createFileListAndSync(
 		"--itemize-changes",
 		"--info=stats2,misc2",
 		"--files-from=" + fileListPath,
-		common.DataMountPath + "/",
+		constant.DataMountPath + "/",
 		rsyncTarget,
 	}
 
@@ -466,7 +466,7 @@ func (w *SourceWorker) syncForDeletion(
 		"--delete",
 		"--itemize-changes",
 		"--info=stats2,misc2",
-		common.DataMountPath + "/",
+		constant.DataMountPath + "/",
 		rsyncTarget,
 	}
 
@@ -670,7 +670,7 @@ func (w *SourceWorker) categorizeDir(
 
 		if entry.DirEntry.DType() != cephfs.DTypeReg {
 			fullP := filepath.Join(
-				common.DataMountPath, entryPath,
+				constant.DataMountPath, entryPath,
 			)
 			if _, statErr := os.Stat(fullP); os.IsNotExist(statErr) {
 				select {
@@ -690,7 +690,7 @@ func (w *SourceWorker) categorizeDir(
 		}
 
 		fullP := filepath.Join(
-			common.DataMountPath, entryPath,
+			constant.DataMountPath, entryPath,
 		)
 		fi, statErr := os.Stat(fullP)
 		if os.IsNotExist(statErr) {
@@ -798,7 +798,7 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 	)
 
 	sizeFn := func(path string) (int64, error) {
-		full := common.DataMountPath + "/" + path
+		full := constant.DataMountPath + "/" + path
 		fi, err := os.Stat(full)
 		if err != nil {
 			return 0, err
@@ -868,12 +868,12 @@ func (w *SourceWorker) walkAndStreamDirectories() (
 
 		w.Logger.Info(
 			"Starting directory walk",
-			"sourceDir", common.DataMountPath,
+			"sourceDir", constant.DataMountPath,
 		)
 
 		count := 0
 		err := filepath.WalkDir(
-			common.DataMountPath,
+			constant.DataMountPath,
 			func(
 				path string, d fs.DirEntry,
 				walkErr error,
@@ -893,7 +893,7 @@ func (w *SourceWorker) walkAndStreamDirectories() (
 				}
 
 				relPath, err := filepath.Rel(
-					common.DataMountPath, path,
+					constant.DataMountPath, path,
 				)
 				if err != nil {
 					return fmt.Errorf(
@@ -1149,7 +1149,7 @@ func (w *SourceWorker) rsyncConvergence(
 		"-aAhHSxz",
 		"-d",
 		"--inplace",
-		common.DataMountPath + "/",
+		constant.DataMountPath + "/",
 		state.rsyncTarget,
 	}
 	cmd := exec.Command("rsync", rsyncDirArgs...) //nolint:gosec // G204: command args constructed internally
@@ -1185,7 +1185,7 @@ func (w *SourceWorker) rsyncFromList(
 			"-aAhHSxz",
 			"-r",
 			"--files-from=" + listPath,
-			common.DataMountPath + "/",
+			constant.DataMountPath + "/",
 			target,
 		}
 	} else {
@@ -1193,7 +1193,7 @@ func (w *SourceWorker) rsyncFromList(
 			"-aAhHSxz",
 			"--inplace",
 			"--files-from=" + listPath,
-			common.DataMountPath + "/",
+			constant.DataMountPath + "/",
 			target,
 		}
 	}

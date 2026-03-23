@@ -28,6 +28,7 @@ import (
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 )
 
 // DestinationWorker represents an RBD destination
@@ -57,15 +58,15 @@ func (w *DestinationWorker) Run(
 ) error {
 	dataServer := &RBDDataServer{
 		logger:     w.Logger,
-		devicePath: common.DevicePath,
+		devicePath: constant.DevicePath,
 	}
 	hashServer := &HashServer{
 		logger:     w.Logger,
-		devicePath: common.DevicePath,
+		devicePath: constant.DevicePath,
 	}
 	commitServer := &RBDCommitServer{
 		logger:     w.Logger,
-		devicePath: common.DevicePath,
+		devicePath: constant.DevicePath,
 	}
 	return w.RunWithHashAndCommit(
 		ctx, dataServer, hashServer, commitServer,

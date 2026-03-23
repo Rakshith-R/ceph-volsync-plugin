@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strconv"
 
-	wcommon "github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"github.com/backube/volsync/controllers/mover/rsynctls"
@@ -91,7 +90,7 @@ func (m *Mover) ensureJob(
 		})
 
 		// Add DESTINATION_PORT for stunnel configuration
-		serverPort := wcommon.DefaultServerStunnelPort
+		serverPort := constant.DefaultServerStunnelPort
 		if m.port != nil {
 			serverPort = strconv.Itoa(int(*m.port))
 		}
@@ -115,11 +114,11 @@ func (m *Mover) ensureJob(
 		if m.moverType == MoverTypeCephFS {
 			containerEnv = append(containerEnv, corev1.EnvVar{
 				Name:  constant.EnvRsyncPort,
-				Value: wcommon.DefaultRsyncStunnelPort,
+				Value: constant.DefaultRsyncStunnelPort,
 			})
 			containerEnv = append(containerEnv, corev1.EnvVar{
 				Name:  constant.EnvRsyncDaemonPort,
-				Value: wcommon.DefaultRsyncDaemonPort,
+				Value: constant.DefaultRsyncDaemonPort,
 			})
 		}
 
@@ -172,7 +171,7 @@ func (m *Mover) ensureJob(
 			volumeMounts = append(volumeMounts,
 				corev1.VolumeMount{
 					Name:      dataVolumeName,
-					MountPath: wcommon.DataMountPath,
+					MountPath: constant.DataMountPath,
 				})
 		}
 		volumeMounts = append(volumeMounts,
@@ -202,7 +201,7 @@ func (m *Mover) ensureJob(
 		job.Spec.Template.Spec.Containers[0].VolumeMounts = volumeMounts
 		if blockVolume {
 			job.Spec.Template.Spec.Containers[0].VolumeDevices = []corev1.VolumeDevice{
-				{Name: dataVolumeName, DevicePath: wcommon.DevicePath},
+				{Name: dataVolumeName, DevicePath: constant.DevicePath},
 			}
 		}
 		podSpec.RestartPolicy = corev1.RestartPolicyNever

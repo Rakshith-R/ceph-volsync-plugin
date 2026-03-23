@@ -31,6 +31,7 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/pipeline"
 )
 
@@ -124,11 +125,11 @@ func (w *SourceWorker) Sync(
 	}
 	defer func() { _ = iter.Close() }()
 
-	device, err := os.Open(common.DevicePath)
+	device, err := os.Open(constant.DevicePath)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to open %s: %w",
-			common.DevicePath, err,
+			constant.DevicePath, err,
 		)
 	}
 	defer func() { _ = device.Close() }()
@@ -202,7 +203,7 @@ func (w *SourceWorker) Sync(
 	}
 	if err := commitStream.Send(&apiv1.CommitRequest{
 		Entries: []*apiv1.CommitEntry{{
-			Path:      common.DevicePath,
+			Path:      constant.DevicePath,
 			TotalSize: volSize,
 		}},
 	}); err != nil {
@@ -472,7 +473,7 @@ func (a *rbdIterAdapter) Next() (*pipeline.ChangeBlock, bool) {
 		return nil, false
 	}
 	block := &pipeline.ChangeBlock{
-		FilePath:  common.DevicePath,
+		FilePath:  constant.DevicePath,
 		Offset:    cb.Offset,
 		Len:       cb.Len,
 		ReqID:     a.reqID,

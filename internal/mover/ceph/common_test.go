@@ -19,7 +19,7 @@ package mover
 import (
 	"testing"
 
-	wcommon "github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,11 +60,11 @@ func TestReconcile_CephFS(t *testing.T) {
 	if len(created.Spec.Ports) != 2 {
 		t.Fatalf("len(ports) = %d, want 2", len(created.Spec.Ports))
 	}
-	if created.Spec.Ports[0].Port != wcommon.TLSPort {
-		t.Errorf("port[0] = %d, want %d", created.Spec.Ports[0].Port, wcommon.TLSPort)
+	if created.Spec.Ports[0].Port != constant.TLSPort {
+		t.Errorf("port[0] = %d, want %d", created.Spec.Ports[0].Port, constant.TLSPort)
 	}
-	if created.Spec.Ports[1].Port != wcommon.RsyncStunnelPort {
-		t.Errorf("port[1] = %d, want %d", created.Spec.Ports[1].Port, wcommon.RsyncStunnelPort)
+	if created.Spec.Ports[1].Port != constant.RsyncStunnelPort {
+		t.Errorf("port[1] = %d, want %d", created.Spec.Ports[1].Port, constant.RsyncStunnelPort)
 	}
 	if created.Spec.Ports[0].Name != grpcServerPortName {
 		t.Errorf("port[0].Name = %q, want %q", created.Spec.Ports[0].Name, grpcServerPortName)

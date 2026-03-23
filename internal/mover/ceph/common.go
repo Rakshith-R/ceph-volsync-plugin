@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	wcommon "github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 )
 
 const grpcServerPortName = "grpc-server"
@@ -70,16 +70,16 @@ func (d *svcDescription) Reconcile(l logr.Logger) error {
 		}
 
 		d.Service.Spec.Ports[0].Name = grpcServerPortName
-		d.Service.Spec.Ports[0].Port = wcommon.TLSPort
+		d.Service.Spec.Ports[0].Port = constant.TLSPort
 		d.Service.Spec.Ports[0].Protocol = corev1.ProtocolTCP
-		d.Service.Spec.Ports[0].TargetPort = intstr.FromInt32(wcommon.TLSPort)
+		d.Service.Spec.Ports[0].TargetPort = intstr.FromInt32(constant.TLSPort)
 		d.Service.Spec.Ports[0].NodePort = 0
 
 		if d.MoverType == MoverTypeCephFS {
 			d.Service.Spec.Ports[1].Name = "rsync-server"
-			d.Service.Spec.Ports[1].Port = wcommon.RsyncStunnelPort
+			d.Service.Spec.Ports[1].Port = constant.RsyncStunnelPort
 			d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP
-			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(wcommon.RsyncStunnelPort)
+			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(constant.RsyncStunnelPort)
 		}
 		return nil
 	})

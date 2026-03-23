@@ -41,4 +41,31 @@ const (
 	// CsiSecretUserKeyKey is the secret key for the
 	// ceph user key file.
 	CsiSecretUserKeyKey = "userKey"
+
+	// TLSPort is the stunnel TLS proxy port.
+	TLSPort int32 = 8000
+
+	// RsyncStunnelPort is the rsync stunnel port for
+	// CephFS mover workers.
+	RsyncStunnelPort int32 = 8873
+
+	// DefaultServerStunnelPort is the string form of
+	// TLSPort for env var configuration.
+	DefaultServerStunnelPort = "8000"
+
+	// DefaultRsyncStunnelPort is the string form of
+	// RsyncStunnelPort for env var configuration.
+	DefaultRsyncStunnelPort = "8873"
+
+	// DefaultRsyncDaemonPort is the string form of
+	// RsyncDaemonPort for env var configuration.
+	DefaultRsyncDaemonPort = "8874"
+
+	// DataMountPath is the mount path for the data
+	// PVC inside the mover container.
+	DataMountPath = "/data"
+
+	// DevicePath is the block device path for RBD
+	// volumes inside the mover container.
+	DevicePath = "/dev/block"
 )

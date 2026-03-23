@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/pipeline"
 )
 
@@ -182,7 +182,7 @@ type CephFSReader struct {
 }
 
 // newCephFSReader creates a reader rooted at baseDir.
-// Production code passes common.DataMountPath.
+// Production code passes constant.DataMountPath.
 func newCephFSReader(baseDir string) *CephFSReader {
 	return &CephFSReader{
 		cache: NewReadCache(baseDir),
@@ -190,9 +190,9 @@ func newCephFSReader(baseDir string) *CephFSReader {
 }
 
 // NewCephFSReader creates a reader for production use
-// (rooted at common.DataMountPath).
+// (rooted at constant.DataMountPath).
 func NewCephFSReader() *CephFSReader {
-	return newCephFSReader(common.DataMountPath)
+	return newCephFSReader(constant.DataMountPath)
 }
 
 // ReadAt opens (or reuses) the file at

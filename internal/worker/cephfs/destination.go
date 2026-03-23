@@ -30,6 +30,7 @@ import (
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 )
 
 // DestinationWorker represents a CephFS destination
@@ -58,7 +59,7 @@ func NewDestinationWorker(
 func (w *DestinationWorker) Run(
 	ctx context.Context,
 ) error {
-	cache := NewWriteCache(common.DataMountPath)
+	cache := NewWriteCache(constant.DataMountPath)
 	defer func() { _ = cache.Close() }()
 
 	dataServer := &DataServer{
@@ -247,7 +248,7 @@ func sanitizePath(relPath string) (string, error) {
 	}
 
 	return filepath.Join(
-		common.DataMountPath, cleanPath,
+		constant.DataMountPath, cleanPath,
 	), nil
 }
 
