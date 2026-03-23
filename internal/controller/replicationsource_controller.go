@@ -44,7 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	cephPluginMover "github.com/RamenDR/ceph-volsync-plugin/internal/mover"
+	cephpluginmover "github.com/RamenDR/ceph-volsync-plugin/internal/mover"
 )
 
 const (
@@ -245,7 +245,7 @@ func rsHasMover(rs *volsyncv1alpha1.ReplicationSource) bool {
 
 func newRSMachine(rs *volsyncv1alpha1.ReplicationSource, c client.Client,
 	l logr.Logger, er events.EventRecorder) (*rsMachine, error) {
-	dataMover, err := cephPluginMover.GetSourceMoverFromCatalog(c, l, er, rs, true)
+	dataMover, err := cephpluginmover.GetSourceMoverFromCatalog(c, l, er, rs, true)
 	if err != nil {
 		return nil, err
 	}
