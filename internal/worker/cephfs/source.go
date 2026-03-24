@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -288,6 +289,11 @@ func (w *SourceWorker) rsync() error {
 	rsyncDaemonPort := os.Getenv(
 		constant.EnvRsyncDaemonPort,
 	)
+	if rsyncDaemonPort == "" {
+		rsyncDaemonPort = strconv.Itoa(
+			int(constant.RsyncDaemonPort),
+		)
+	}
 	rsyncTarget := fmt.Sprintf(
 		"rsync://127.0.0.1:%s/data", rsyncDaemonPort,
 	)
@@ -940,6 +946,11 @@ func (w *SourceWorker) initSyncState(
 	rsyncDaemonPort := os.Getenv(
 		constant.EnvRsyncDaemonPort,
 	)
+	if rsyncDaemonPort == "" {
+		rsyncDaemonPort = strconv.Itoa(
+			int(constant.RsyncDaemonPort),
+		)
+	}
 	rsyncTarget := fmt.Sprintf(
 		"rsync://127.0.0.1:%s/data", rsyncDaemonPort,
 	)

@@ -90,7 +90,7 @@ func (m *Mover) ensureJob(
 		})
 
 		// Add DESTINATION_PORT for stunnel configuration
-		serverPort := constant.DefaultServerStunnelPort
+		serverPort := strconv.Itoa(int(constant.TLSPort))
 		if m.port != nil {
 			serverPort = strconv.Itoa(int(*m.port))
 		}
@@ -109,18 +109,6 @@ func (m *Mover) ensureJob(
 			Name:  "MOVER_TYPE",
 			Value: string(m.moverType),
 		})
-
-		// CephFS-specific: rsync port configuration
-		if m.moverType == MoverTypeCephFS {
-			containerEnv = append(containerEnv, corev1.EnvVar{
-				Name:  constant.EnvRsyncPort,
-				Value: constant.DefaultRsyncStunnelPort,
-			})
-			containerEnv = append(containerEnv, corev1.EnvVar{
-				Name:  constant.EnvRsyncDaemonPort,
-				Value: constant.DefaultRsyncDaemonPort,
-			})
-		}
 
 		containerEnv = append(containerEnv, corev1.EnvVar{
 			Name: constant.EnvPodNamespace,

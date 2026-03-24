@@ -43,10 +43,6 @@ const (
 	// size for send and receive.
 	MaxGRPCMessageSize = 8 * 1024 * 1024 // 8MB
 
-	// RsyncDaemonPort is the rsync daemon port for
-	// CephFS mover workers.
-	RsyncDaemonPort int32 = 8874
-
 	// DefaultServerPort is the gRPC server listen
 	// port inside the mover container.
 	DefaultServerPort = "8080"

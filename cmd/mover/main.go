@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/tunnel"
@@ -82,14 +83,17 @@ func loadConfig() Config {
 			constant.EnvLogLevel, "info",
 		),
 		DestinationPort: envOrDefault(
-			constant.EnvDestinationPort, "8000",
+			constant.EnvDestinationPort,
+			strconv.Itoa(int(constant.TLSPort)),
 		),
 		EnableRsyncTunnel: moverType == "cephfs",
 		RsyncPort: envOrDefault(
-			constant.EnvRsyncPort, "8873",
+			constant.EnvRsyncPort,
+			strconv.Itoa(int(constant.RsyncStunnelPort)),
 		),
 		RsyncDaemonPort: envOrDefault(
-			constant.EnvRsyncDaemonPort, "8874",
+			constant.EnvRsyncDaemonPort,
+			strconv.Itoa(int(constant.RsyncDaemonPort)),
 		),
 	}
 }

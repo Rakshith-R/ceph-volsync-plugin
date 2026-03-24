@@ -49,17 +49,9 @@ const (
 	// CephFS mover workers.
 	RsyncStunnelPort int32 = 8873
 
-	// DefaultServerStunnelPort is the string form of
-	// TLSPort for env var configuration.
-	DefaultServerStunnelPort = "8000"
-
-	// DefaultRsyncStunnelPort is the string form of
-	// RsyncStunnelPort for env var configuration.
-	DefaultRsyncStunnelPort = "8873"
-
-	// DefaultRsyncDaemonPort is the string form of
-	// RsyncDaemonPort for env var configuration.
-	DefaultRsyncDaemonPort = "8874"
+	// RsyncDaemonPort is the rsync daemon port for
+	// CephFS mover workers.
+	RsyncDaemonPort int32 = 8874
 
 	// DataMountPath is the mount path for the data
 	// PVC inside the mover container.
