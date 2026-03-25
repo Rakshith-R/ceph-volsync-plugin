@@ -28,7 +28,7 @@ type BlockIterator interface {
 // Called once per DataSendWorker goroutine.
 type StreamFactory func(ctx context.Context) (
 	grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	], error,
 )
 
@@ -39,8 +39,8 @@ type HashStreamFactory func(
 	ctx context.Context,
 ) (
 	grpc.BidiStreamingClient[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	], error,
 )
 

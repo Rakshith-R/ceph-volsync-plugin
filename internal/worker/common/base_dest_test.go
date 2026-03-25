@@ -21,13 +21,18 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"google.golang.org/grpc"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
-type mockDataServer struct {
-	apiv1.UnimplementedDataServiceServer
+type mockWriteHandler struct{}
+
+func (m *mockWriteHandler) Write(
+	stream grpc.BidiStreamingServer[apiv1.WriteRequest, apiv1.WriteResponse],
+) error {
+	return nil
 }
 
 func TestBaseDestWorker_ListensOnPort(
@@ -43,7 +48,8 @@ func TestBaseDestWorker_ListensOnPort(
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- w.Run(ctx, &mockDataServer{})
+		syncServer := common.NewSyncServer(&mockWriteHandler{}, nil, nil, nil)
+		errCh <- w.Run(ctx, syncServer)
 	}()
 
 	cancel()

@@ -19,6 +19,10 @@ package common
 import (
 	"context"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/version/v1"
 )
@@ -40,26 +44,105 @@ func (s *VersionServer) GetVersion(
 	}, nil
 }
 
-// DoneServer implements the DoneService gRPC server
-// shared by all mover types. It signals graceful
-// shutdown via ShutdownChan.
-type DoneServer struct {
-	apiv1.UnimplementedDoneServiceServer
-	ShutdownChan chan struct{}
+// WriteHandler handles Write bidi stream.
+type WriteHandler interface {
+	Write(grpc.BidiStreamingServer[apiv1.WriteRequest, apiv1.WriteResponse]) error
 }
 
-// Done signals completion and triggers graceful
-// shutdown.
-func (s *DoneServer) Done(
+// DeleteHandler handles Delete bidi stream.
+type DeleteHandler interface {
+	Delete(grpc.BidiStreamingServer[apiv1.DeleteRequest, apiv1.DeleteResponse]) error
+}
+
+// HashHandler handles CompareHashes bidi stream.
+type HashHandler interface {
+	CompareHashes(grpc.BidiStreamingServer[apiv1.HashRequest, apiv1.HashResponse]) error
+}
+
+// CommitHandler handles Commit bidi stream.
+type CommitHandler interface {
+	Commit(grpc.BidiStreamingServer[apiv1.CommitRequest, apiv1.CommitResponse]) error
+}
+
+// SyncServer implements the SyncService gRPC server
+// shared by all mover types. It delegates to
+// handler interfaces and signals graceful shutdown.
+type SyncServer struct {
+	apiv1.UnimplementedSyncServiceServer
+	shutdownChan chan struct{}
+	writeH       WriteHandler
+	deleteH      DeleteHandler
+	hashH        HashHandler
+	commitH      CommitHandler
+}
+
+// NewSyncServer creates a SyncServer with the given
+// handlers. Handlers can be nil if not needed.
+func NewSyncServer(
+	writeH WriteHandler,
+	deleteH DeleteHandler,
+	hashH HashHandler,
+	commitH CommitHandler,
+) *SyncServer {
+	return &SyncServer{
+		shutdownChan: make(chan struct{}, 1),
+		writeH:       writeH,
+		deleteH:      deleteH,
+		hashH:        hashH,
+		commitH:      commitH,
+	}
+}
+
+// Write delegates to WriteHandler.
+func (s *SyncServer) Write(
+	stream grpc.BidiStreamingServer[apiv1.WriteRequest, apiv1.WriteResponse],
+) error {
+	if s.writeH == nil {
+		return status.Error(codes.Unimplemented, "write not configured")
+	}
+	return s.writeH.Write(stream)
+}
+
+// Delete delegates to DeleteHandler.
+func (s *SyncServer) Delete(
+	stream grpc.BidiStreamingServer[apiv1.DeleteRequest, apiv1.DeleteResponse],
+) error {
+	if s.deleteH == nil {
+		return status.Error(codes.Unimplemented, "delete not configured")
+	}
+	return s.deleteH.Delete(stream)
+}
+
+// CompareHashes delegates to HashHandler.
+func (s *SyncServer) CompareHashes(
+	stream grpc.BidiStreamingServer[apiv1.HashRequest, apiv1.HashResponse],
+) error {
+	if s.hashH == nil {
+		return status.Error(codes.Unimplemented, "hash not configured")
+	}
+	return s.hashH.CompareHashes(stream)
+}
+
+// Commit delegates to CommitHandler.
+func (s *SyncServer) Commit(
+	stream grpc.BidiStreamingServer[apiv1.CommitRequest, apiv1.CommitResponse],
+) error {
+	if s.commitH == nil {
+		return status.Error(codes.Unimplemented, "commit not configured")
+	}
+	return s.commitH.Commit(stream)
+}
+
+// Done signals completion and triggers graceful shutdown.
+func (s *SyncServer) Done(
 	_ context.Context,
 	_ *apiv1.DoneRequest,
 ) (*apiv1.DoneResponse, error) {
 	go func() {
 		select {
-		case s.ShutdownChan <- struct{}{}:
+		case s.shutdownChan <- struct{}{}:
 		default:
 		}
 	}()
-
 	return &apiv1.DoneResponse{}, nil
 }

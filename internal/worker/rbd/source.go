@@ -134,24 +134,22 @@ func (w *SourceWorker) Sync(
 	}
 	defer func() { _ = device.Close() }()
 
-	dataClient := apiv1.NewDataServiceClient(conn)
-	hashClient := apiv1.NewHashServiceClient(conn)
-	commitClient := apiv1.NewCommitServiceClient(conn)
+	syncClient := apiv1.NewSyncServiceClient(conn)
 
 	newStream := func(
 		ctx context.Context,
 	) (grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	], error) {
-		return dataClient.Sync(ctx)
+		return syncClient.Write(ctx)
 	}
 	newHashStream := func(
 		ctx context.Context,
 	) (grpc.BidiStreamingClient[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	], error) {
-		return hashClient.CompareHashes(ctx)
+		return syncClient.CompareHashes(ctx)
 	}
 
 	cfg := pipeline.Config{}
@@ -197,7 +195,7 @@ func (w *SourceWorker) Sync(
 	}
 
 	// Send commit for the device
-	commitStream, err := commitClient.Commit(ctx)
+	commitStream, err := syncClient.Commit(ctx)
 	if err != nil {
 		return fmt.Errorf("open commit stream: %w", err)
 	}

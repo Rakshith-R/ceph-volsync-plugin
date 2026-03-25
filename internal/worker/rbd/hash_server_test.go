@@ -32,16 +32,16 @@ import (
 // bidi stream for testing.
 type mockHashBidiStream struct {
 	grpc.BidiStreamingServer[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	]
-	req  *apiv1.HashBatchRequest
-	resp *apiv1.HashBatchResponse
+	req  *apiv1.HashRequest
+	resp *apiv1.HashResponse
 	done bool
 }
 
 func (m *mockHashBidiStream) Recv() (
-	*apiv1.HashBatchRequest, error,
+	*apiv1.HashRequest, error,
 ) {
 	if m.done {
 		return nil, io.EOF
@@ -51,7 +51,7 @@ func (m *mockHashBidiStream) Recv() (
 }
 
 func (m *mockHashBidiStream) Send(
-	resp *apiv1.HashBatchResponse,
+	resp *apiv1.HashResponse,
 ) error {
 	m.resp = resp
 	return nil
@@ -75,7 +75,7 @@ func TestHashServer_AllMatch(t *testing.T) {
 	}
 
 	stream := &mockHashBidiStream{
-		req: &apiv1.HashBatchRequest{
+		req: &apiv1.HashRequest{
 			Hashes: []*apiv1.BlockHash{
 				{
 					RequestId: 0,
@@ -116,7 +116,7 @@ func TestHashServer_Mismatch(t *testing.T) {
 	}
 
 	stream := &mockHashBidiStream{
-		req: &apiv1.HashBatchRequest{
+		req: &apiv1.HashRequest{
 			Hashes: []*apiv1.BlockHash{
 				{
 					RequestId: 0,

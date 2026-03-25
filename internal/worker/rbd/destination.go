@@ -53,9 +53,7 @@ func NewDestinationWorker(
 }
 
 // Run starts the RBD destination worker.
-func (w *DestinationWorker) Run(
-	ctx context.Context,
-) error {
+func (w *DestinationWorker) Run(ctx context.Context) error {
 	dataServer := &RBDDataServer{
 		logger:     w.Logger,
 		devicePath: constant.DevicePath,
@@ -68,27 +66,25 @@ func (w *DestinationWorker) Run(
 		logger:     w.Logger,
 		devicePath: constant.DevicePath,
 	}
-	return w.RunWithHashAndCommit(
-		ctx, dataServer, hashServer, commitServer,
-	)
+	syncServer := common.NewSyncServer(dataServer, dataServer, hashServer, commitServer)
+	return w.BaseDestinationWorker.Run(ctx, syncServer)
 }
 
-// RBDDataServer implements DataService for block
-// devices.
+// RBDDataServer implements WriteHandler and
+// DeleteHandler for block devices.
 type RBDDataServer struct {
-	apiv1.UnimplementedDataServiceServer
 	logger     logr.Logger
 	devicePath string
 }
 
-// Sync handles a bidi-streaming RPC for writing to
+// Write handles a bidi-streaming RPC for writing to
 // a block device. The block device is opened lazily on
 // the first WriteRequest and kept open across all
 // writes. After each batch, acknowledged request IDs
 // are sent back to the source.
-func (s *RBDDataServer) Sync(
+func (s *RBDDataServer) Write(
 	stream grpc.BidiStreamingServer[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	],
 ) (err error) {
 	var file *os.File
@@ -121,45 +117,34 @@ func (s *RBDDataServer) Sync(
 			return err
 		}
 
-		switch op := req.Operation.(type) {
-		case *apiv1.SyncRequest_Write:
-			if file == nil {
-				file, err = os.OpenFile(
-					s.devicePath, os.O_RDWR, 0,
+		if file == nil {
+			file, err = os.OpenFile(
+				s.devicePath, os.O_RDWR, 0,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"failed to open block "+
+						"device %s: %w",
+					s.devicePath, err,
 				)
-				if err != nil {
-					return fmt.Errorf(
-						"failed to open block "+
-							"device %s: %w",
-						s.devicePath, err,
-					)
-				}
 			}
+		}
 
-			if err := s.writeBlocks(
-				file, op.Write,
+		if err := s.writeBlocks(
+			file, req,
+		); err != nil {
+			return err
+		}
+
+		ackIDs := collectRequestIDs(req.Blocks)
+		if len(ackIDs) > 0 {
+			if err := stream.Send(
+				&apiv1.WriteResponse{
+					AcknowledgedIds: ackIDs,
+				},
 			); err != nil {
 				return err
 			}
-
-			ackIDs := collectRequestIDs(
-				op.Write.Blocks,
-			)
-			if len(ackIDs) > 0 {
-				if err := stream.Send(
-					&apiv1.SyncResponse{
-						AcknowledgedIds: ackIDs,
-					},
-				); err != nil {
-					return err
-				}
-			}
-
-		default:
-			return fmt.Errorf(
-				"unknown operation type in " +
-					"sync request",
-			)
 		}
 	}
 }
@@ -177,10 +162,9 @@ func collectRequestIDs(
 	return ids
 }
 
-// RBDCommitServer implements CommitServiceServer
+// RBDCommitServer implements CommitHandler
 // for block devices. Commit syncs the block device.
 type RBDCommitServer struct {
-	apiv1.UnimplementedCommitServiceServer
 	logger     logr.Logger
 	devicePath string
 }
@@ -325,7 +309,14 @@ func (s *RBDDataServer) writeBlocks(
 
 // Delete is a no-op for block devices.
 func (s *RBDDataServer) Delete(
-	_ context.Context, _ *apiv1.DeleteRequest,
-) (*apiv1.DeleteResponse, error) {
-	return &apiv1.DeleteResponse{}, nil
+	stream grpc.BidiStreamingServer[apiv1.DeleteRequest, apiv1.DeleteResponse],
+) error {
+	for {
+		if _, err := stream.Recv(); err != nil {
+			return nil
+		}
+		if err := stream.Send(&apiv1.DeleteResponse{}); err != nil {
+			return err
+		}
+	}
 }

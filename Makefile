@@ -220,11 +220,7 @@ proto-generate: proto-image ## Regenerate gRPC stubs from .proto definitions.
 		--go_opt=paths=source_relative \
 		--go-grpc_out=internal/proto \
 		--go-grpc_opt=paths=source_relative \
-		api/v1/commit.proto \
-		api/v1/data.proto \
-		api/v1/done.proto \
-		api/v1/hash.proto \
-		api/v1/metadata.proto \
+		api/v1/sync.proto \
 		version/v1/version.proto
 
 .PHONY: proto-verify

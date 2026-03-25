@@ -46,14 +46,14 @@ func (m *mockIterator) Close() error { return nil }
 
 type pipelineMockStream struct {
 	grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	]
 	mu   sync.Mutex
-	sent []*apiv1.SyncRequest
+	sent []*apiv1.WriteRequest
 }
 
 func (m *pipelineMockStream) Send(
-	req *apiv1.SyncRequest,
+	req *apiv1.WriteRequest,
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -62,7 +62,7 @@ func (m *pipelineMockStream) Send(
 }
 
 func (m *pipelineMockStream) Recv() (
-	*apiv1.SyncResponse, error,
+	*apiv1.WriteResponse, error,
 ) {
 	return nil, io.EOF
 }
@@ -75,15 +75,15 @@ func (m *pipelineMockStream) CloseSend() error {
 // as mismatched, forcing the full pipeline path.
 type allMismatchHashStream struct {
 	grpc.BidiStreamingClient[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	]
 	mu      sync.Mutex
-	pending []*apiv1.HashBatchRequest
+	pending []*apiv1.HashRequest
 }
 
 func (m *allMismatchHashStream) Send(
-	req *apiv1.HashBatchRequest,
+	req *apiv1.HashRequest,
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -92,7 +92,7 @@ func (m *allMismatchHashStream) Send(
 }
 
 func (m *allMismatchHashStream) Recv() (
-	*apiv1.HashBatchResponse, error,
+	*apiv1.HashResponse, error,
 ) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -101,7 +101,7 @@ func (m *allMismatchHashStream) Recv() (
 	}
 	req := m.pending[0]
 	m.pending = m.pending[1:]
-	resp := &apiv1.HashBatchResponse{}
+	resp := &apiv1.HashResponse{}
 	for _, h := range req.Hashes {
 		resp.MismatchedIds = append(
 			resp.MismatchedIds, h.RequestId,
@@ -119,7 +119,7 @@ func newStreamFactory(
 ) StreamFactory {
 	return func(_ context.Context) (
 		grpc.BidiStreamingClient[
-			apiv1.SyncRequest, apiv1.SyncResponse,
+			apiv1.WriteRequest, apiv1.WriteResponse,
 		], error,
 	) {
 		return stream, nil
@@ -129,8 +129,8 @@ func newStreamFactory(
 func newHashStreamFactory() HashStreamFactory {
 	return func(_ context.Context) (
 		grpc.BidiStreamingClient[
-			apiv1.HashBatchRequest,
-			apiv1.HashBatchResponse,
+			apiv1.HashRequest,
+			apiv1.HashResponse,
 		], error,
 	) {
 		return &allMismatchHashStream{}, nil

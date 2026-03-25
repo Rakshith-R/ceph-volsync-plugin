@@ -126,8 +126,8 @@ func hashSender(
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	stream grpc.BidiStreamingClient[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	],
 	batchCh <-chan []HashedChunk,
 	mismatchCh chan<- HashedChunk,
@@ -146,7 +146,7 @@ func hashSender(
 			return ctx.Err()
 		}
 
-		req := &apiv1.HashBatchRequest{
+		req := &apiv1.HashRequest{
 			Hashes: make([]*apiv1.BlockHash, len(batch)),
 		}
 		for i, hc := range batch {

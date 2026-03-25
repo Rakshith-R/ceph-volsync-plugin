@@ -10,13 +10,12 @@ import (
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 )
 
-// CephFSHashServer implements HashServiceServer for
+// CephFSHashServer implements HashHandler for
 // CephFS file-based hash comparison.
 // For each requested block it reads the destination
 // file at the given offset and compares SHA-256.
 // Uses a shared FileCache for concurrent access.
 type CephFSHashServer struct {
-	apiv1.UnimplementedHashServiceServer
 	logger logr.Logger
 	cache  *FileCache
 }
@@ -27,8 +26,8 @@ type CephFSHashServer struct {
 // SHA-256, and returns mismatched request IDs.
 func (s *CephFSHashServer) CompareHashes(
 	stream grpc.BidiStreamingServer[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	],
 ) error {
 	for {
@@ -40,7 +39,7 @@ func (s *CephFSHashServer) CompareHashes(
 			return err
 		}
 
-		resp := &apiv1.HashBatchResponse{}
+		resp := &apiv1.HashResponse{}
 		for _, bh := range req.Hashes {
 			f, err := s.cache.Acquire(
 				bh.FilePath,

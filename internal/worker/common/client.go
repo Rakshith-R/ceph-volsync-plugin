@@ -91,18 +91,12 @@ func SignalDone(
 	logger logr.Logger,
 	conn *grpc.ClientConn,
 ) error {
-	doneClient := apiv1.NewDoneServiceClient(conn)
-	doneCtx, doneCancel := context.WithTimeout(
-		ctx, RPCTimeout,
-	)
+	syncClient := apiv1.NewSyncServiceClient(conn)
+	doneCtx, doneCancel := context.WithTimeout(ctx, RPCTimeout)
 	defer doneCancel()
 
-	if _, err := doneClient.Done(
-		doneCtx, &apiv1.DoneRequest{},
-	); err != nil {
-		return fmt.Errorf(
-			"failed to send Done signal: %w", err,
-		)
+	if _, err := syncClient.Done(doneCtx, &apiv1.DoneRequest{}); err != nil {
+		return fmt.Errorf("failed to send Done signal: %w", err)
 	}
 
 	logger.Info("Successfully sent Done signal")
@@ -114,18 +108,14 @@ func SignalDone(
 // EOF errors by checking the server response.
 func SendBlockWrite(
 	stream grpc.ClientStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	],
 	path string,
 	blocks []*apiv1.ChangedBlock,
 ) error {
-	if err := stream.Send(&apiv1.SyncRequest{
-		Operation: &apiv1.SyncRequest_Write{
-			Write: &apiv1.WriteRequest{
-				Path:   path,
-				Blocks: blocks,
-			},
-		},
+	if err := stream.Send(&apiv1.WriteRequest{
+		Path:   path,
+		Blocks: blocks,
 	}); err != nil {
 		if err == io.EOF {
 			if _, recvErr := stream.CloseAndRecv(); recvErr != nil {

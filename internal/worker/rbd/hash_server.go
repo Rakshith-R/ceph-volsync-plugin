@@ -28,10 +28,9 @@ import (
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 )
 
-// HashServer implements HashServiceServer for RBD
+// HashServer implements HashHandler for RBD
 // block device hash comparison.
 type HashServer struct {
-	apiv1.UnimplementedHashServiceServer
 	logger     logr.Logger
 	devicePath string
 }
@@ -42,8 +41,8 @@ type HashServer struct {
 // and returns mismatched request IDs.
 func (s *HashServer) CompareHashes(
 	stream grpc.BidiStreamingServer[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	],
 ) error {
 	file, err := os.Open(s.devicePath)
@@ -64,7 +63,7 @@ func (s *HashServer) CompareHashes(
 			return err
 		}
 
-		resp := &apiv1.HashBatchResponse{}
+		resp := &apiv1.HashResponse{}
 		for _, bh := range req.Hashes {
 			data := make([]byte, bh.Length)
 			n, readErr := file.ReadAt(

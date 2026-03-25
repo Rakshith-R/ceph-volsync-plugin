@@ -21,8 +21,6 @@ import (
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
-
-	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 )
 
 // BaseDestinationWorker provides shared destination
@@ -33,47 +31,15 @@ type BaseDestinationWorker struct {
 }
 
 // Run starts the gRPC destination server with
-// default MaxRecvMsgSize applied.
+// the given SyncServer. Default MaxRecvMsgSize applied.
 func (w *BaseDestinationWorker) Run(
 	ctx context.Context,
-	dataServer apiv1.DataServiceServer,
+	syncServer *SyncServer,
 ) error {
 	w.Logger.Info("Starting destination worker")
 
 	return RunDestinationServer(
-		ctx, w.Logger,
-		DefaultServerPort, dataServer,
-		grpc.MaxRecvMsgSize(MaxGRPCMessageSize),
-	)
-}
-
-// RunWithHash starts the destination server with an additional HashServiceServer.
-func (w *BaseDestinationWorker) RunWithHash(
-	ctx context.Context,
-	dataServer apiv1.DataServiceServer,
-	hashServer apiv1.HashServiceServer,
-) error {
-	w.Logger.Info("Starting destination worker")
-
-	return RunDestinationServerWithHash(
-		ctx, w.Logger, DefaultServerPort, dataServer, hashServer,
-		grpc.MaxRecvMsgSize(MaxGRPCMessageSize),
-	)
-}
-
-// RunWithHashAndCommit starts the destination server with
-// DataServiceServer, HashServiceServer, and CommitServiceServer.
-func (w *BaseDestinationWorker) RunWithHashAndCommit(
-	ctx context.Context,
-	dataServer apiv1.DataServiceServer,
-	hashServer apiv1.HashServiceServer,
-	commitServer apiv1.CommitServiceServer,
-) error {
-	w.Logger.Info("Starting destination worker")
-
-	return RunDestinationServerFull(
-		ctx, w.Logger, DefaultServerPort,
-		dataServer, hashServer, commitServer,
+		ctx, w.Logger, DefaultServerPort, syncServer,
 		grpc.MaxRecvMsgSize(MaxGRPCMessageSize),
 	)
 }

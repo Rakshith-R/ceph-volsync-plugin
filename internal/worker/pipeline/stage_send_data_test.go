@@ -13,14 +13,14 @@ import (
 
 type mockSyncStream struct {
 	grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	]
 	mu   sync.Mutex
-	sent []*apiv1.SyncRequest
+	sent []*apiv1.WriteRequest
 }
 
 func (m *mockSyncStream) Send(
-	req *apiv1.SyncRequest,
+	req *apiv1.WriteRequest,
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -29,7 +29,7 @@ func (m *mockSyncStream) Send(
 }
 
 func (m *mockSyncStream) Recv() (
-	*apiv1.SyncResponse, error,
+	*apiv1.WriteResponse, error,
 ) {
 	return nil, io.EOF
 }
@@ -71,7 +71,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 	factory := StreamFactory(func(
 		_ context.Context,
 	) (grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	], error) {
 		return &mockSyncStream{
 			sent: nil,
@@ -82,7 +82,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 	wrappedFactory := StreamFactory(func(
 		ctx context.Context,
 	) (grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	], error) {
 		stream, err := factory(ctx)
 		if err != nil {
@@ -110,14 +110,14 @@ func TestStageSendData_SendsAll(t *testing.T) {
 
 type countingSyncStream struct {
 	grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	]
 	mu    *sync.Mutex
 	count *int
 }
 
 func (c *countingSyncStream) Send(
-	req *apiv1.SyncRequest,
+	req *apiv1.WriteRequest,
 ) error {
 	c.mu.Lock()
 	*c.count++
@@ -126,7 +126,7 @@ func (c *countingSyncStream) Send(
 }
 
 func (c *countingSyncStream) Recv() (
-	*apiv1.SyncResponse, error,
+	*apiv1.WriteResponse, error,
 ) {
 	return nil, io.EOF
 }

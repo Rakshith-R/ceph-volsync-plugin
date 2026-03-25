@@ -65,7 +65,7 @@ const (
 // syncState holds the context for the sync operation.
 type syncState struct {
 	differ     *ceph.SnapshotDiffer
-	dataClient apiv1.DataServiceClient
+	syncClient apiv1.SyncServiceClient
 	logger     logr.Logger
 
 	rsyncTarget string
@@ -253,7 +253,7 @@ func (w *SourceWorker) runSnapdiffSync(
 		)
 	}
 
-	dataClient := apiv1.NewDataServiceClient(conn)
+	syncClient := apiv1.NewSyncServiceClient(conn)
 
 	differ, err := ceph.New(
 		mons,
@@ -272,7 +272,7 @@ func (w *SourceWorker) runSnapdiffSync(
 	defer differ.Destroy()
 
 	if err := w.runStatelessSync(
-		ctx, conn, differ, dataClient,
+		ctx, conn, differ, syncClient,
 	); err != nil {
 		return fmt.Errorf(
 			"stateless sync failed: %w", err,
@@ -517,11 +517,11 @@ func (w *SourceWorker) runStatelessSync(
 	ctx context.Context,
 	conn *grpc.ClientConn,
 	differ *ceph.SnapshotDiffer,
-	dataClient apiv1.DataServiceClient,
+	syncClient apiv1.SyncServiceClient,
 ) error {
 	w.Logger.Info("Starting stateless snapshot sync")
 
-	state := w.initSyncState(differ, dataClient)
+	state := w.initSyncState(differ, syncClient)
 
 	g, gctx := errgroup.WithContext(ctx)
 
@@ -772,27 +772,22 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 	reader := NewCephFSReader()
 	defer func() { _ = reader.Close() }()
 
-	dataClient :=
-		apiv1.NewDataServiceClient(conn)
-	hashClient :=
-		apiv1.NewHashServiceClient(conn)
-	commitClient :=
-		apiv1.NewCommitServiceClient(conn)
+	syncClient := apiv1.NewSyncServiceClient(conn)
 
 	newStream := func(
 		ctx context.Context,
 	) (grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	], error) {
-		return dataClient.Sync(ctx)
+		return syncClient.Write(ctx)
 	}
 	newHashStream := func(
 		ctx context.Context,
 	) (grpc.BidiStreamingClient[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	], error) {
-		return hashClient.CompareHashes(ctx)
+		return syncClient.CompareHashes(ctx)
 	}
 
 	cfg := pipeline.Config{ReadWorkers: 2}
@@ -820,7 +815,7 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 		WithBoundaryChan(boundaryCh),
 	)
 
-	commitStream, err := commitClient.Commit(ctx)
+	commitStream, err := syncClient.Commit(ctx)
 	if err != nil {
 		_ = iter.Close()
 		return fmt.Errorf(
@@ -941,7 +936,7 @@ func (w *SourceWorker) walkAndStreamDirectories() (
 // initSyncState initializes the sync state.
 func (w *SourceWorker) initSyncState(
 	differ *ceph.SnapshotDiffer,
-	dataClient apiv1.DataServiceClient,
+	syncClient apiv1.SyncServiceClient,
 ) *syncState {
 	rsyncDaemonPort := os.Getenv(
 		constant.EnvRsyncDaemonPort,
@@ -957,25 +952,32 @@ func (w *SourceWorker) initSyncState(
 
 	return &syncState{
 		differ:      differ,
-		dataClient:  dataClient,
+		syncClient:  syncClient,
 		logger:      w.Logger,
 		rsyncTarget: rsyncTarget,
 	}
 }
 
 // sendDeleteBatch sends a single batched delete
-// request.
+// request on the given stream.
 func (w *SourceWorker) sendDeleteBatch(
-	ctx context.Context, state *syncState,
+	stream grpc.BidiStreamingClient[
+		apiv1.DeleteRequest, apiv1.DeleteResponse,
+	],
 	paths []string,
 ) error {
-	_, err := state.dataClient.Delete(
-		ctx,
+	if err := stream.Send(
 		&apiv1.DeleteRequest{Paths: paths},
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf(
 			"failed to send batched delete "+
+				"(%d paths): %w",
+			len(paths), err,
+		)
+	}
+	if _, err := stream.Recv(); err != nil {
+		return fmt.Errorf(
+			"failed to recv delete ack "+
 				"(%d paths): %w",
 			len(paths), err,
 		)
@@ -1053,12 +1055,21 @@ func (w *SourceWorker) consumeSmallFiles(
 }
 
 // consumeDeletes batches paths from deletedCh and
-// sends batched delete requests.
+// sends batched delete requests via a bidi stream.
 func (w *SourceWorker) consumeDeletes(
 	ctx context.Context,
 	state *syncState,
 	deletedCh <-chan string,
 ) error {
+	stream, err := state.syncClient.Delete(ctx)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to open delete stream: %w",
+			err,
+		)
+	}
+	defer func() { _ = stream.CloseSend() }()
+
 	batch := make([]string, 0, deleteBatchSize)
 
 	for {
@@ -1066,13 +1077,13 @@ func (w *SourceWorker) consumeDeletes(
 		case p, ok := <-deletedCh:
 			if !ok {
 				return w.flushDeletes(
-					ctx, state, batch,
+					stream, batch,
 				)
 			}
 			batch = append(batch, p)
 			if len(batch) >= deleteBatchSize {
 				if err := w.sendDeleteBatch(
-					ctx, state, batch,
+					stream, batch,
 				); err != nil {
 					return err
 				}
@@ -1138,14 +1149,15 @@ func (w *SourceWorker) flushBatch(
 
 // flushDeletes sends remaining delete paths if any.
 func (w *SourceWorker) flushDeletes(
-	ctx context.Context,
-	state *syncState,
+	stream grpc.BidiStreamingClient[
+		apiv1.DeleteRequest, apiv1.DeleteResponse,
+	],
 	batch []string,
 ) error {
 	if len(batch) == 0 {
 		return nil
 	}
-	return w.sendDeleteBatch(ctx, state, batch)
+	return w.sendDeleteBatch(stream, batch)
 }
 
 // rsyncConvergence performs the final rsync pass for

@@ -56,9 +56,7 @@ func NewDestinationWorker(
 }
 
 // Run starts the CephFS destination worker.
-func (w *DestinationWorker) Run(
-	ctx context.Context,
-) error {
+func (w *DestinationWorker) Run(ctx context.Context) error {
 	cache := NewWriteCache(constant.DataMountPath)
 	defer func() { _ = cache.Close() }()
 
@@ -75,26 +73,24 @@ func (w *DestinationWorker) Run(
 		cache:  cache,
 	}
 
-	return w.RunWithHashAndCommit(
-		ctx, dataServer, hashServer, commitServer,
-	)
+	syncServer := common.NewSyncServer(dataServer, dataServer, hashServer, commitServer)
+	return w.BaseDestinationWorker.Run(ctx, syncServer)
 }
 
-// DataServer implements the DataService gRPC server
+// DataServer implements WriteHandler and DeleteHandler
 // for CephFS file-based writes.
 type DataServer struct {
-	apiv1.UnimplementedDataServiceServer
 	logger logr.Logger
 	cache  *FileCache
 }
 
-// Sync handles a bidi-streaming RPC that processes
+// Write handles a bidi-streaming RPC that processes
 // one file at a time. After writing blocks, it sends
 // back acknowledged request IDs. File commits are
-// handled by the separate CommitService.
-func (s *DataServer) Sync(
+// handled by the separate Commit RPC.
+func (s *DataServer) Write(
 	stream grpc.BidiStreamingServer[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	],
 ) (err error) {
 	var file *os.File
@@ -119,48 +115,37 @@ func (s *DataServer) Sync(
 			return err
 		}
 
-		switch op := req.Operation.(type) {
-		case *apiv1.SyncRequest_Write:
-			if file == nil {
-				curPath = op.Write.Path
-				totalSize := int64(0)
-				if len(op.Write.Blocks) > 0 {
-					totalSize = int64( //nolint:gosec // G115
-						op.Write.Blocks[0].TotalSize,
-					)
-				}
-				file, err = s.cache.Acquire(
-					curPath, totalSize,
+		if file == nil {
+			curPath = req.Path
+			totalSize := int64(0)
+			if len(req.Blocks) > 0 {
+				totalSize = int64( //nolint:gosec // G115
+					req.Blocks[0].TotalSize,
 				)
-				if err != nil {
-					return err
-				}
 			}
+			file, err = s.cache.Acquire(
+				curPath, totalSize,
+			)
+			if err != nil {
+				return err
+			}
+		}
 
-			if err := s.writeBlocks(
-				file, curPath, op.Write,
+		if err := s.writeBlocks(
+			file, curPath, req,
+		); err != nil {
+			return err
+		}
+
+		ackIDs := collectRequestIDs(req.Blocks)
+		if len(ackIDs) > 0 {
+			if err := stream.Send(
+				&apiv1.WriteResponse{
+					AcknowledgedIds: ackIDs,
+				},
 			); err != nil {
 				return err
 			}
-
-			ackIDs := collectRequestIDs(
-				op.Write.Blocks,
-			)
-			if len(ackIDs) > 0 {
-				if err := stream.Send(
-					&apiv1.SyncResponse{
-						AcknowledgedIds: ackIDs,
-					},
-				); err != nil {
-					return err
-				}
-			}
-
-		default:
-			return fmt.Errorf(
-				"unknown operation type in " +
-					"sync request",
-			)
 		}
 	}
 }
@@ -178,10 +163,9 @@ func collectRequestIDs(
 	return ids
 }
 
-// CephFSCommitServer implements CommitServiceServer
+// CephFSCommitServer implements CommitHandler
 // for CephFS file-based writes.
 type CephFSCommitServer struct {
-	apiv1.UnimplementedCommitServiceServer
 	logger logr.Logger
 	cache  *FileCache
 }
@@ -323,56 +307,79 @@ func (s *DataServer) writeBlocks(
 // os.RemoveAll operations.
 const deleteParallelism = 16
 
-// Delete handles a unary RPC to delete files or
-// directories.
+// Delete handles a bidi-streaming RPC to delete files
+// or directories.
 func (s *DataServer) Delete(
-	ctx context.Context, req *apiv1.DeleteRequest,
-) (*apiv1.DeleteResponse, error) {
-	s.logger.Info(
-		"Deleting paths", "count", len(req.Paths),
-	)
+	stream grpc.BidiStreamingServer[
+		apiv1.DeleteRequest, apiv1.DeleteResponse,
+	],
+) error {
+	ctx := stream.Context()
 
-	fullPaths := make([]string, 0, len(req.Paths))
-	for _, path := range req.Paths {
-		fullPath, err := sanitizePath(path)
+	for {
+		req, err := stream.Recv()
 		if err != nil {
-			return nil, err
+			return nil
 		}
-		fullPaths = append(fullPaths, fullPath)
-	}
 
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(deleteParallelism)
+		s.logger.Info(
+			"Deleting paths",
+			"count", len(req.Paths),
+		)
 
-	for _, fullPath := range fullPaths {
-		g.Go(func() error {
-			if gctx.Err() != nil {
-				return gctx.Err()
+		fullPaths := make(
+			[]string, 0, len(req.Paths),
+		)
+		for _, path := range req.Paths {
+			fullPath, err := sanitizePath(path)
+			if err != nil {
+				return err
 			}
-			if err := os.RemoveAll(fullPath); err != nil {
-				s.logger.Error(
-					err, "Failed to delete path",
+			fullPaths = append(fullPaths, fullPath)
+		}
+
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(deleteParallelism)
+
+		for _, fullPath := range fullPaths {
+			g.Go(func() error {
+				if gctx.Err() != nil {
+					return gctx.Err()
+				}
+				if err := os.RemoveAll(
+					fullPath,
+				); err != nil {
+					s.logger.Error(
+						err,
+						"Failed to delete path",
+						"path", fullPath,
+					)
+					return fmt.Errorf(
+						"failed to delete "+
+							"path %s: %w",
+						fullPath, err,
+					)
+				}
+				s.logger.V(1).Info(
+					"Deleted path",
 					"path", fullPath,
 				)
-				return fmt.Errorf(
-					"failed to delete path %s: %w",
-					fullPath, err,
-				)
-			}
-			s.logger.V(1).Info(
-				"Deleted path", "path", fullPath,
-			)
-			return nil
-		})
-	}
+				return nil
+			})
+		}
 
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
+		if err := g.Wait(); err != nil {
+			return err
+		}
 
-	s.logger.Info(
-		"Successfully deleted paths",
-		"count", len(req.Paths),
-	)
-	return &apiv1.DeleteResponse{}, nil
+		s.logger.Info(
+			"Successfully deleted paths",
+			"count", len(req.Paths),
+		)
+		if err := stream.Send(
+			&apiv1.DeleteResponse{},
+		); err != nil {
+			return err
+		}
+	}
 }

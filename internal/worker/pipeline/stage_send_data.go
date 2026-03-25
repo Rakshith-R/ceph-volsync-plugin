@@ -43,13 +43,13 @@ func dataSendWorker(
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	stream grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	],
 	inCh <-chan CompressedChunk,
 ) error {
 	g, gctx := errgroup.WithContext(ctx)
 
-	// Ack receiver: reads SyncResponse, releases window
+	// Ack receiver: reads WriteResponse, releases window
 	g.Go(func() error {
 		return ackReceiver(gctx, win, stream)
 	})
@@ -68,7 +68,7 @@ func ackReceiver(
 	_ context.Context,
 	win *WindowSemaphore,
 	stream grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	],
 ) error {
 	for {
@@ -93,7 +93,7 @@ func dataSender(
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	stream grpc.BidiStreamingClient[
-		apiv1.SyncRequest, apiv1.SyncResponse,
+		apiv1.WriteRequest, apiv1.WriteResponse,
 	],
 	inCh <-chan CompressedChunk,
 ) error {
@@ -111,13 +111,9 @@ func dataSender(
 			return nil
 		}
 
-		req := &apiv1.SyncRequest{
-			Operation: &apiv1.SyncRequest_Write{
-				Write: &apiv1.WriteRequest{
-					Path:   curPath,
-					Blocks: blocks,
-				},
-			},
+		req := &apiv1.WriteRequest{
+			Path:   curPath,
+			Blocks: blocks,
 		}
 
 		if err := stream.Send(req); err != nil {

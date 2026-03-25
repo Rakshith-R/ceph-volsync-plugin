@@ -29,229 +29,48 @@ import (
 )
 
 // RunDestinationServer starts a gRPC server with the
-// given DataServiceServer implementation, plus shared
-// VersionService and DoneService. It blocks until the
-// context is cancelled, a server error occurs, or the
-// DoneService signals shutdown.
+// given SyncServer, plus shared VersionService. It blocks
+// until the context is cancelled, a server error occurs,
+// or the SyncServer's Done RPC signals shutdown.
 func RunDestinationServer(
 	ctx context.Context,
 	logger logr.Logger,
 	serverPort string,
-	dataServer apiv1.DataServiceServer,
+	syncServer *SyncServer,
 	opts ...grpc.ServerOption,
 ) error {
 	server := grpc.NewServer(opts...)
 
-	shutdownChan := make(chan struct{}, 1)
-
 	versionServer := &VersionServer{
 		Version: "v1.0.0",
 	}
-	doneServer := &DoneServer{
-		ShutdownChan: shutdownChan,
-	}
 
-	versionv1.RegisterVersionServiceServer(
-		server, versionServer,
-	)
-	apiv1.RegisterDataServiceServer(
-		server, dataServer,
-	)
-	apiv1.RegisterDoneServiceServer(
-		server, doneServer,
-	)
+	versionv1.RegisterVersionServiceServer(server, versionServer)
+	apiv1.RegisterSyncServiceServer(server, syncServer)
 
 	lis, err := net.Listen("tcp", ":"+serverPort)
 	if err != nil {
-		return fmt.Errorf(
-			"failed to listen on port %s: %w",
-			serverPort, err,
-		)
+		return fmt.Errorf("failed to listen on port %s: %w", serverPort, err)
 	}
 
-	logger.Info(
-		"gRPC server listening", "port", serverPort,
-	)
+	logger.Info("gRPC server listening", "port", serverPort)
 
 	serverErr := make(chan error, 1)
 	go func() {
 		if err := server.Serve(lis); err != nil {
-			serverErr <- fmt.Errorf(
-				"gRPC server failed: %w", err,
-			)
+			serverErr <- fmt.Errorf("gRPC server failed: %w", err)
 		}
 	}()
 
 	select {
 	case <-ctx.Done():
-		logger.Info(
-			"Destination worker shutting down " +
-				"due to context cancellation",
-		)
+		logger.Info("Destination worker shutting down due to context cancellation")
 		server.GracefulStop()
 		return ctx.Err()
 	case err := <-serverErr:
 		return err
-	case <-shutdownChan:
-		logger.Info(
-			"Destination worker shutting down " +
-				"after Done request",
-		)
-		server.GracefulStop()
-		return nil
-	}
-}
-
-// RunDestinationServerWithHash starts a gRPC server with DataServiceServer,
-// HashServiceServer, and shared VersionService and DoneService.
-func RunDestinationServerWithHash(
-	ctx context.Context,
-	logger logr.Logger,
-	serverPort string,
-	dataServer apiv1.DataServiceServer,
-	hashServer apiv1.HashServiceServer,
-	opts ...grpc.ServerOption,
-) error {
-	server := grpc.NewServer(opts...)
-
-	shutdownChan := make(chan struct{}, 1)
-
-	versionServer := &VersionServer{
-		Version: "v1.0.0",
-	}
-	doneServer := &DoneServer{
-		ShutdownChan: shutdownChan,
-	}
-
-	versionv1.RegisterVersionServiceServer(
-		server, versionServer,
-	)
-	apiv1.RegisterDataServiceServer(
-		server, dataServer,
-	)
-	apiv1.RegisterDoneServiceServer(
-		server, doneServer,
-	)
-	apiv1.RegisterHashServiceServer(
-		server, hashServer,
-	)
-
-	lis, err := net.Listen("tcp", ":"+serverPort)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to listen on port %s: %w",
-			serverPort, err,
-		)
-	}
-
-	logger.Info(
-		"gRPC server listening", "port", serverPort,
-	)
-
-	serverErr := make(chan error, 1)
-	go func() {
-		if err := server.Serve(lis); err != nil {
-			serverErr <- fmt.Errorf(
-				"gRPC server failed: %w", err,
-			)
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		logger.Info(
-			"Destination worker shutting down " +
-				"due to context cancellation",
-		)
-		server.GracefulStop()
-		return ctx.Err()
-	case err := <-serverErr:
-		return err
-	case <-shutdownChan:
-		logger.Info(
-			"Destination worker shutting down " +
-				"after Done request",
-		)
-		server.GracefulStop()
-		return nil
-	}
-}
-
-// RunDestinationServerFull starts a gRPC server with
-// DataServiceServer, HashServiceServer, CommitServiceServer,
-// and shared VersionService and DoneService.
-func RunDestinationServerFull(
-	ctx context.Context,
-	logger logr.Logger,
-	serverPort string,
-	dataServer apiv1.DataServiceServer,
-	hashServer apiv1.HashServiceServer,
-	commitServer apiv1.CommitServiceServer,
-	opts ...grpc.ServerOption,
-) error {
-	server := grpc.NewServer(opts...)
-
-	shutdownChan := make(chan struct{}, 1)
-
-	versionServer := &VersionServer{
-		Version: "v1.0.0",
-	}
-	doneServer := &DoneServer{
-		ShutdownChan: shutdownChan,
-	}
-
-	versionv1.RegisterVersionServiceServer(
-		server, versionServer,
-	)
-	apiv1.RegisterDataServiceServer(
-		server, dataServer,
-	)
-	apiv1.RegisterDoneServiceServer(
-		server, doneServer,
-	)
-	apiv1.RegisterHashServiceServer(
-		server, hashServer,
-	)
-	apiv1.RegisterCommitServiceServer(
-		server, commitServer,
-	)
-
-	lis, err := net.Listen("tcp", ":"+serverPort)
-	if err != nil {
-		return fmt.Errorf(
-			"failed to listen on port %s: %w",
-			serverPort, err,
-		)
-	}
-
-	logger.Info(
-		"gRPC server listening", "port", serverPort,
-	)
-
-	serverErr := make(chan error, 1)
-	go func() {
-		if err := server.Serve(lis); err != nil {
-			serverErr <- fmt.Errorf(
-				"gRPC server failed: %w", err,
-			)
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		logger.Info(
-			"Destination worker shutting down " +
-				"due to context cancellation",
-		)
-		server.GracefulStop()
-		return ctx.Err()
-	case err := <-serverErr:
-		return err
-	case <-shutdownChan:
-		logger.Info(
-			"Destination worker shutting down " +
-				"after Done request",
-		)
+	case <-syncServer.shutdownChan:
+		logger.Info("Destination worker shutting down after Done request")
 		server.GracefulStop()
 		return nil
 	}

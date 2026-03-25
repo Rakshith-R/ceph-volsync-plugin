@@ -16,16 +16,16 @@ import (
 // matched or all as mismatched.
 type mockHashStream struct {
 	grpc.BidiStreamingClient[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	]
 	allMatch bool
 	mu       sync.Mutex
-	pending  []*apiv1.HashBatchRequest
+	pending  []*apiv1.HashRequest
 }
 
 func (m *mockHashStream) Send(
-	req *apiv1.HashBatchRequest,
+	req *apiv1.HashRequest,
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -34,7 +34,7 @@ func (m *mockHashStream) Send(
 }
 
 func (m *mockHashStream) Recv() (
-	*apiv1.HashBatchResponse, error,
+	*apiv1.HashResponse, error,
 ) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -43,7 +43,7 @@ func (m *mockHashStream) Recv() (
 	}
 	req := m.pending[0]
 	m.pending = m.pending[1:]
-	resp := &apiv1.HashBatchResponse{}
+	resp := &apiv1.HashResponse{}
 	if !m.allMatch {
 		for _, h := range req.Hashes {
 			resp.MismatchedIds = append(
@@ -97,8 +97,8 @@ func TestStageSendHash_AllMatched(t *testing.T) {
 	factory := HashStreamFactory(func(
 		_ context.Context,
 	) (grpc.BidiStreamingClient[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	], error) {
 		return &mockHashStream{allMatch: true}, nil
 	})
@@ -160,8 +160,8 @@ func TestStageSendHash_AllMismatched(t *testing.T) {
 	factory := HashStreamFactory(func(
 		_ context.Context,
 	) (grpc.BidiStreamingClient[
-		apiv1.HashBatchRequest,
-		apiv1.HashBatchResponse,
+		apiv1.HashRequest,
+		apiv1.HashResponse,
 	], error) {
 		return &mockHashStream{allMatch: false}, nil
 	})
