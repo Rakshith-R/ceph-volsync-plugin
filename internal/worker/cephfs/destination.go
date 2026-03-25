@@ -28,9 +28,9 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
+	"github.com/RamenDR/ceph-volsync-plugin/internal/constant"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 )
 
 // DestinationWorker represents a CephFS destination

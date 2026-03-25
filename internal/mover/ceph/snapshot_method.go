@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/constant"
 	"github.com/go-logr/logr"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"

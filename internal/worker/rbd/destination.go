@@ -26,9 +26,9 @@ import (
 	"github.com/pierrec/lz4/v4"
 	"google.golang.org/grpc"
 
+	"github.com/RamenDR/ceph-volsync-plugin/internal/constant"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 )
 
 // DestinationWorker represents an RBD destination

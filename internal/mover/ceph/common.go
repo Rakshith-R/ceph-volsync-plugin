@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/constant"
 )
 
 const grpcServerPortName = "grpc-server"

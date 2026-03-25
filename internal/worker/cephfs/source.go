@@ -36,9 +36,9 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/constant"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/pipeline"
 )
 

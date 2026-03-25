@@ -24,10 +24,10 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/RamenDR/ceph-volsync-plugin/internal/constant"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/tunnel"
 	wcephfs "github.com/RamenDR/ceph-volsync-plugin/internal/worker/cephfs"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	wrbd "github.com/RamenDR/ceph-volsync-plugin/internal/worker/rbd"
 	"github.com/backube/volsync/controllers/utils"
 	"github.com/go-logr/logr"

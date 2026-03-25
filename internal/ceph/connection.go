@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/constant"
 	"github.com/ceph/go-ceph/cephfs"
 	ca "github.com/ceph/go-ceph/cephfs/admin"
 	"github.com/ceph/go-ceph/rados"

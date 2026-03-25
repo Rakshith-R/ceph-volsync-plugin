@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/constant"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/pipeline"
 )
 

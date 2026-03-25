@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/constant"
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"github.com/backube/volsync/controllers/mover/rsynctls"
 	"github.com/backube/volsync/controllers/utils"
