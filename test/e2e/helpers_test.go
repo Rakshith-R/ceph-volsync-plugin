@@ -564,9 +564,9 @@ func writeDataToPVC(ctx context.Context, pvcName string, drv driverConfig, phase
 	if isBlock {
 		switch phase {
 		case 1:
-			command = "dd if=/dev/urandom of=/dev/block bs=4096 count=64 && sync"
+			command = "dd if=/dev/urandom of=/dev/block bs=4096 count=2560 && sync"
 		case 2:
-			command = "dd if=/dev/urandom of=/dev/block bs=4096 count=64 seek=64 && sync"
+			command = "dd if=/dev/urandom of=/dev/block bs=4096 count=2560 seek=2560 && sync"
 		}
 	} else {
 		switch phase {
@@ -578,13 +578,13 @@ func writeDataToPVC(ctx context.Context, pvcName string, drv driverConfig, phase
 				" && echo 'to-delete' > /data/deleteme.txt" +
 				" && mkdir -p /data/removedir" +
 				" && echo 'gone' > /data/removedir/gone.txt" +
-				" && sync"
+				" && dd if=/dev/urandom of=/data/bigfile.bin bs=1M count=10 conv=fsync"
 		case 2:
 			command = "echo 'file1-modified' > /data/file1.txt" +
 				" && echo 'new-file' > /data/newfile.txt" +
 				" && rm -f /data/deleteme.txt" +
 				" && rm -rf /data/removedir" +
-				" && sync"
+				" && dd if=/dev/urandom of=/data/bigfile.bin bs=1M count=5 seek=5 conv=fsync"
 		}
 	}
 
