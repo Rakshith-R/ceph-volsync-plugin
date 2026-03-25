@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package api.v1;
+
+option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1";
+
+// SyncService consolidates all data-path RPCs.
+service SyncService {
+  // Bidi-streaming RPCs
+  rpc Write(stream WriteRequest) returns (stream WriteResponse);
+  rpc CompareHashes(stream HashRequest) returns (stream HashResponse);
+  rpc Commit(stream CommitRequest) returns (stream CommitResponse);
+  rpc Delete(stream DeleteRequest) returns (stream DeleteResponse);
+
+  // Unary RPCs
+  rpc Done(DoneRequest) returns (DoneResponse);
+}
+
+// --------------------
+// Data Transfer Messages
+// --------------------
+
+// ChangedBlock represents a modified data range.
+message ChangedBlock {
+  // Unique ID for deduplication and tracking.
+  uint64 request_id = 1;
+
+  // Path of the file or device being written.
+  string file_path = 2;
+
+  // Total size of the file or device in bytes.
+  uint64 total_size = 3;
+
+  // Byte offset where the write should begin.
+  uint64 offset = 4;
+
+  // Length of the write in bytes.
+  uint64 length = 5;
+
+  // Indicates this write represents a zeroed range.
+  bool is_zero = 6;
+
+  // Data payload. May be empty if is_zero is true.
+  bytes data = 7;
+
+  // Compression algorithm applied to data.
+  CompressionAlgo compression = 8;
+}
+
+// CompressionAlgo specifies the compression format.
+enum CompressionAlgo {
+  COMPRESSION_NONE = 0;
+  COMPRESSION_LZ4 = 1;
+}
+
+// WriteRequest represents a batched write operation.
+message WriteRequest {
+  // List of changed blocks to be written.
+  repeated ChangedBlock blocks = 1;
+}
+
+// WriteResponse carries acknowledged request IDs
+// for window release on the source side.
+message WriteResponse {
+  // Request IDs that the destination has processed.
+  repeated uint64 acknowledged_ids = 1;
+}
+
+// DeleteRequest represents a batch deletion.
+message DeleteRequest {
+  // Paths to delete (recursive by default).
+  repeated string paths = 1;
+}
+
+// DeleteResponse is empty on success.
+message DeleteResponse {}
+
+// --------------------
+// Hash Comparison Messages
+// --------------------
+
+// BlockHash represents a hash of a single block for comparison.
+message BlockHash {
+  // Unique ID for tracking and correlating responses.
+  uint64 request_id = 1;
+
+  // Path of the file or device being compared.
+  string file_path = 2;
+
+  // Total size of the file or device in bytes.
+  uint64 total_size = 3;
+
+  // Byte offset of the block within the file or device.
+  uint64 offset = 4;
+
+  // Length of the block in bytes.
+  uint64 length = 5;
+
+  // SHA-256 hash of the block data.
+  bytes sha256 = 6;
+}
+
+// HashRequest carries a batch of block hashes to compare.
+message HashRequest {
+  // List of block hashes to be compared on the destination.
+  repeated BlockHash hashes = 1;
+}
+
+// HashResponse reports which blocks did not match.
+message HashResponse {
+  // Request IDs of blocks whose hashes did not match.
+  repeated uint64 mismatched_ids = 1;
+}
+
+// --------------------
+// Commit Messages
+// --------------------
+
+// CommitEntry represents a single file to commit.
+message CommitEntry {
+  // Target path of the file to commit.
+  string path = 1;
+
+  // Total size of the file or device in bytes.
+  uint64 total_size = 2;
+}
+
+// CommitRequest contains a batch of files to commit.
+message CommitRequest {
+  repeated CommitEntry entries = 1;
+}
+
+// CommitResponse confirms committed file paths.
+message CommitResponse {
+  repeated string paths = 1;
+}
+
+// --------------------
+// Done Messages
+// --------------------
+
+// DoneRequest signals completion.
+message DoneRequest {}
+
+// DoneResponse is empty on success.
+message DoneResponse {}
