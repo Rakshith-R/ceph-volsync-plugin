@@ -1,0 +1,48 @@
+# Build the protoc code generation tools container.
+# Multi-stage: golang builder for downloading and installing
+# tools, distroless runtime for a minimal (~20MB) final image.
+ARG GOLANG_VERSION=1.25.8
+
+FROM golang:${GOLANG_VERSION} AS builder
+
+ARG PROTOC_VERSION=29.3
+ARG PROTOC_GEN_GO_VERSION=v1.36.11
+ARG PROTOC_GEN_GO_GRPC_VERSION=v1.6.1
+ARG TARGETARCH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    unzip curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Map Go arch names to protoc release archive naming.
+RUN case "${TARGETARCH}" in \
+        amd64)  PROTOC_ARCH=x86_64   ;; \
+        arm64)  PROTOC_ARCH=aarch_64  ;; \
+        s390x)  PROTOC_ARCH=s390_64   ;; \
+        ppc64le) PROTOC_ARCH=ppcle_64 ;; \
+        *) echo "unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -sSL \
+      "https://github.com/protocolbuffers/protobuf/releases/download/\
+v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-${PROTOC_ARCH}.zip" \
+      -o /tmp/protoc.zip && \
+    unzip /tmp/protoc.zip -d /usr/local && \
+    rm /tmp/protoc.zip
+
+# Install protoc plugins into /out/bin for easy COPY.
+RUN GOBIN=/out/bin go install \
+        google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
+    && GOBIN=/out/bin go install \
+        google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
+
+# Minimal runtime: glibc + libstdc++ (required by protoc).
+# Go plugin binaries are statically linked so they work here too.
+FROM gcr.io/distroless/cc-debian12
+
+COPY --from=builder /usr/local/bin/protoc        /usr/local/bin/protoc
+COPY --from=builder /usr/local/include/google    /usr/local/include/google
+COPY --from=builder /out/bin/protoc-gen-go       /usr/local/bin/protoc-gen-go
+COPY --from=builder /out/bin/protoc-gen-go-grpc  /usr/local/bin/protoc-gen-go-grpc
+
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/protoc"]
