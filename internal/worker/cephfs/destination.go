@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	"github.com/pierrec/lz4/v4"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
@@ -85,21 +86,20 @@ type DataServer struct {
 }
 
 // Write handles a bidi-streaming RPC that processes
-// one file at a time. After writing blocks, it sends
-// back acknowledged request IDs. File commits are
-// handled by the separate Commit RPC.
+// blocks from one or more files. After writing blocks,
+// it sends back acknowledged request IDs. File commits
+// are handled by the separate Commit RPC.
 func (s *DataServer) Write(
 	stream grpc.BidiStreamingServer[
 		apiv1.WriteRequest, apiv1.WriteResponse,
 	],
 ) (err error) {
-	var file *os.File
-	var curPath string
+	files := make(map[string]*os.File)
 
 	defer func() {
-		if curPath != "" {
+		for path := range files {
 			if serr := s.cache.SyncAndRelease(
-				curPath,
+				path,
 			); serr != nil && err == nil {
 				err = serr
 			}
@@ -115,24 +115,8 @@ func (s *DataServer) Write(
 			return err
 		}
 
-		if file == nil {
-			curPath = req.Path
-			totalSize := int64(0)
-			if len(req.Blocks) > 0 {
-				totalSize = int64( //nolint:gosec // G115
-					req.Blocks[0].TotalSize,
-				)
-			}
-			file, err = s.cache.Acquire(
-				curPath, totalSize,
-			)
-			if err != nil {
-				return err
-			}
-		}
-
 		if err := s.writeBlocks(
-			file, curPath, req,
+			files, req,
 		); err != nil {
 			return err
 		}
@@ -236,19 +220,31 @@ func sanitizePath(relPath string) (string, error) {
 	), nil
 }
 
-// writeBlocks writes a batch of changed blocks to
-// the file using WriteAt for concurrent safety.
+// writeBlocks writes a batch of changed blocks,
+// looking up or acquiring file handles per block.
 func (s *DataServer) writeBlocks(
-	file *os.File, fullPath string,
+	files map[string]*os.File,
 	req *apiv1.WriteRequest,
 ) error {
 	s.logger.Info(
 		"Writing blocks",
-		"path", req.Path,
 		"block_count", len(req.Blocks),
 	)
 
 	for i, block := range req.Blocks {
+		file, ok := files[block.FilePath]
+		if !ok {
+			var err error
+			file, err = s.cache.Acquire(
+				block.FilePath,
+				int64(block.TotalSize), //nolint:gosec // G115
+			)
+			if err != nil {
+				return err
+			}
+			files[block.FilePath] = file
+		}
+
 		offset := int64(block.Offset) //nolint:gosec // G115: value within safe range
 		if block.IsZero {
 			zeros := make([]byte, block.Length)
@@ -257,7 +253,7 @@ func (s *DataServer) writeBlocks(
 			); err != nil {
 				s.logger.Error(
 					err, "Failed to write zeros",
-					"path", fullPath,
+					"path", block.FilePath,
 					"offset", block.Offset,
 					"length", block.Length,
 					"block_index", i,
@@ -265,37 +261,52 @@ func (s *DataServer) writeBlocks(
 				return fmt.Errorf(
 					"failed to write zeros at "+
 						"offset %d in %s: %w",
-					block.Offset, fullPath, err,
+					block.Offset, block.FilePath, err,
 				)
 			}
 			s.logger.V(1).Info(
 				"Wrote zero block",
-				"path", fullPath,
+				"path", block.FilePath,
 				"offset", block.Offset,
 				"length", block.Length,
 			)
 		} else {
+			writeData := block.Data
+			if block.Compression == apiv1.CompressionAlgo_COMPRESSION_LZ4 {
+				decompressed := make([]byte, block.Length)
+				n, err := lz4.UncompressBlock(block.Data, decompressed)
+				if err != nil {
+					s.logger.Error(err, "Failed to decompress LZ4",
+						"path", block.FilePath, "offset", block.Offset,
+						"block_index", i)
+					return fmt.Errorf("lz4 decompress at offset %d in %s: %w",
+						block.Offset, block.FilePath, err)
+				}
+				writeData = decompressed[:n]
+			}
+
 			if _, err := file.WriteAt(
-				block.Data, offset,
+				writeData, offset,
 			); err != nil {
 				s.logger.Error(
 					err, "Failed to write data",
-					"path", fullPath,
+					"path", block.FilePath,
 					"offset", block.Offset,
-					"length", len(block.Data),
+					"length", len(writeData),
 					"block_index", i,
 				)
 				return fmt.Errorf(
 					"failed to write data at "+
 						"offset %d in %s: %w",
-					block.Offset, fullPath, err,
+					block.Offset, block.FilePath, err,
 				)
 			}
 			s.logger.V(1).Info(
 				"Wrote data block",
-				"path", fullPath,
+				"path", block.FilePath,
 				"offset", block.Offset,
-				"length", len(block.Data),
+				"length", len(writeData),
+				"compressed", block.Compression != apiv1.CompressionAlgo_COMPRESSION_NONE,
 			)
 		}
 	}

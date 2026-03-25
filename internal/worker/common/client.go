@@ -19,7 +19,6 @@ package common
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
@@ -100,36 +99,5 @@ func SignalDone(
 	}
 
 	logger.Info("Successfully sent Done signal")
-	return nil
-}
-
-// SendBlockWrite sends a batch of accumulated blocks
-// as a single WriteRequest on the given stream. Handles
-// EOF errors by checking the server response.
-func SendBlockWrite(
-	stream grpc.ClientStreamingClient[
-		apiv1.WriteRequest, apiv1.WriteResponse,
-	],
-	path string,
-	blocks []*apiv1.ChangedBlock,
-) error {
-	if err := stream.Send(&apiv1.WriteRequest{
-		Path:   path,
-		Blocks: blocks,
-	}); err != nil {
-		if err == io.EOF {
-			if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
-				return fmt.Errorf(
-					"destination error during "+
-						"write for %s: %w",
-					path, recvErr,
-				)
-			}
-		}
-		return fmt.Errorf(
-			"failed to send write blocks for %s: %w",
-			path, err,
-		)
-	}
 	return nil
 }

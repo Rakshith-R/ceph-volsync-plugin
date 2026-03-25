@@ -103,7 +103,6 @@ func dataSender(
 		blocks  []*apiv1.ChangedBlock
 		pending []held
 		accum   int
-		curPath string
 	)
 
 	flush := func() error {
@@ -112,7 +111,6 @@ func dataSender(
 		}
 
 		req := &apiv1.WriteRequest{
-			Path:   curPath,
 			Blocks: blocks,
 		}
 
@@ -148,27 +146,19 @@ func dataSender(
 			return ctx.Err()
 		}
 
-		// File boundary: flush current batch
-		if curPath != "" && cc.FilePath != curPath {
-			if err := flush(); err != nil {
-				return err
-			}
-		}
-
-		curPath = cc.FilePath
-
 		algo := apiv1.CompressionAlgo_COMPRESSION_LZ4
 		if cc.IsRaw {
 			algo = apiv1.CompressionAlgo_COMPRESSION_NONE
 		}
 
 		block := &apiv1.ChangedBlock{
+			RequestId:   cc.ReqID,
+			FilePath:    cc.FilePath,
+			TotalSize:   uint64(cc.TotalSize),          //nolint:gosec // G115: non-negative size
 			Offset:      uint64(cc.Offset),             //nolint:gosec // G115: non-negative offset
 			Length:      uint64(cc.UncompressedLength), //nolint:gosec // G115: non-negative length
 			Data:        cc.Data,
-			RequestId:   cc.ReqID,
 			Compression: algo,
-			TotalSize:   uint64(cc.TotalSize), //nolint:gosec // G115: non-negative size
 		}
 
 		blocks = append(blocks, block)
