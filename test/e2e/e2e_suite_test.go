@@ -48,36 +48,24 @@ var (
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	_, _ = fmt.Fprintf(GinkgoWriter, "Starting ceph-volsync-plugin-operator integration test suite\n")
-	suiteConfig, reporterConfig :=
-		GinkgoConfiguration()
+	suiteConfig, reporterConfig := GinkgoConfiguration()
 	suiteConfig.FailFast = true
-	RunSpecs(t, "e2e suite",
-		suiteConfig, reporterConfig,
-	)
+	RunSpecs(t, "e2e suite", suiteConfig, reporterConfig)
 }
 
 var _ = BeforeSuite(func() {
 	By("setting up controller-runtime client")
 	scheme := runtime.NewScheme()
-	Expect(
-		clientgoscheme.AddToScheme(scheme),
-	).To(Succeed())
-	Expect(
-		volsyncv1alpha1.AddToScheme(scheme),
-	).To(Succeed())
-	Expect(
-		snapv1.AddToScheme(scheme),
-	).To(Succeed())
+	Expect(clientgoscheme.AddToScheme(scheme)).To(Succeed())
+	Expect(volsyncv1alpha1.AddToScheme(scheme)).To(Succeed())
+	Expect(snapv1.AddToScheme(scheme)).To(Succeed())
 
 	cfg := ctrl.GetConfigOrDie()
 	var err error
-	k8sClient, err = client.New(
-		cfg, client.Options{Scheme: scheme},
-	)
+	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	k8sClientSet, err =
-		kubernetes.NewForConfig(cfg)
+	k8sClientSet, err = kubernetes.NewForConfig(cfg)
 	Expect(err).NotTo(HaveOccurred())
 })

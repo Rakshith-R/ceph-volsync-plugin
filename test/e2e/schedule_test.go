@@ -31,560 +31,351 @@ const (
 	interval = 2 * time.Minute
 )
 
-var _ = Describe(
-	"Schedule Replication",
-	func() {
-		for _, drv := range drivers {
-			scheduleSnapshotTest(drv)
-			scheduleDirectTest(drv)
-			scheduleSnapshotNoRDTriggerTest(drv)
-			scheduleDirectNoRDTriggerTest(drv)
-		}
-	},
-)
+var _ = Describe("Schedule Replication", func() {
+	for _, drv := range drivers {
+		scheduleSnapshotTest(drv)
+		scheduleDirectTest(drv)
+		scheduleSnapshotNoRDTriggerTest(drv)
+		scheduleDirectNoRDTriggerTest(drv)
+	}
+})
 
 func scheduleSnapshotTest(drv driverConfig) {
-	Context(drv.name+" Snapshot", Ordered,
-		func() {
-			srcPVC := drv.name + "-ss-src"
-			destPVC := drv.name + "-ss-dest"
-			rdName := drv.name + "-ss-rd"
-			rsName := drv.name + "-ss-rs"
+	Context(drv.name+" Snapshot", Ordered, func() {
+		srcPVC := drv.name + "-ss-src"
+		destPVC := drv.name + "-ss-dest"
+		rdName := drv.name + "-ss-rd"
+		rsName := drv.name + "-ss-rs"
 
-			var (
-				rdAddr   string
-				rdKey    string
-				waitTill *metav1.Time
-			)
+		var (
+			rdAddr   string
+			rdKey    string
+			waitTill *metav1.Time
+		)
 
-			ctx := context.TODO()
+		ctx := context.TODO()
 
-			AfterAll(func() {
-				cleanupReplication(
-					ctx, rsName, rdName,
-					[]string{
-						srcPVC, destPVC,
-						drv.name + "-ss-v1-temp",
-						drv.name + "-ss-v2-temp",
-					},
-				)
+		AfterAll(func() {
+			cleanupReplication(ctx, rsName, rdName, []string{
+				srcPVC, destPVC,
+				drv.name + "-ss-v1-temp",
+				drv.name + "-ss-v2-temp",
 			})
+		})
 
-			AfterEach(debugAfterEach)
+		AfterEach(debugAfterEach)
 
-			It("should create PVCs", func() {
-				createAndWaitForPVC(
-					ctx, srcPVC, drv,
-				)
-				createAndWaitForPVC(
-					ctx, destPVC, drv,
-				)
-			})
+		It("should create PVCs", func() {
+			createAndWaitForPVC(ctx, srcPVC, drv)
+			createAndWaitForPVC(ctx, destPVC, drv)
+		})
 
-			It("should create RD", func() {
-				rdAddr, rdKey =
-					createRDAndWaitForAddress(
-						ctx, rdName, destPVC,
-						&volsyncv1alpha1.ReplicationDestinationTriggerSpec{
-							Schedule: ptr.To(
-								schedule,
-							),
-						},
-						drv,
-						map[string]string{
-							"copyMethod": "Snapshot",
-						},
-					)
-			})
-
-			It("should write initial data",
-				func() {
-					writeDataToPVC(
-						ctx, srcPVC, drv, 1,
-					)
+		It("should create RD", func() {
+			rdAddr, rdKey = createRDAndWaitForAddress(
+				ctx, rdName, destPVC,
+				&volsyncv1alpha1.ReplicationDestinationTriggerSpec{
+					Schedule: ptr.To(schedule),
+				},
+				drv,
+				map[string]string{
+					"copyMethod": "Snapshot",
 				},
 			)
+		})
 
-			It("should create RS", func() {
-				createRS(
-					ctx, rsName, srcPVC,
-					&volsyncv1alpha1.ReplicationSourceTriggerSpec{
-						Schedule: ptr.To(
-							schedule,
-						),
-					},
-					rdAddr, rdKey,
-					drv,
-					map[string]string{
-						"copyMethod": "Snapshot",
-					},
-				)
-			})
+		It("should write initial data", func() {
+			writeDataToPVC(ctx, srcPVC, drv, 1)
+		})
 
-			It("should complete first sync",
-				func() {
-					waitForSyncTime(
-						ctx, rsName,
-					)
-					waitForRDSyncTime(
-						ctx, rdName,
-					)
-					setRSPaused(
-						ctx, rsName, true,
-					)
+		It("should create RS", func() {
+			createRS(
+				ctx, rsName, srcPVC,
+				&volsyncv1alpha1.ReplicationSourceTriggerSpec{
+					Schedule: ptr.To(schedule),
+				},
+				rdAddr, rdKey, drv,
+				map[string]string{
+					"copyMethod": "Snapshot",
 				},
 			)
+		})
 
-			It("should validate first sync",
-				func() {
-					validateSyncedData(
-						ctx, srcPVC,
-						destPVC, drv,
-						"Snapshot", rdName,
-						drv.name+"-ss-v1",
-					)
-				},
-			)
+		It("should complete first sync", func() {
+			waitForSyncTime(ctx, rsName)
+			waitForRDSyncTime(ctx, rdName)
+			setRSPaused(ctx, rsName, true)
+		})
 
-			It("should write more data",
-				func() {
-					writeDataToPVC(
-						ctx, srcPVC, drv, 2,
-					)
-					// waitTill 2x the interval.
-					waitTill = &metav1.Time{
-						Time: time.Now().Add(interval * 2),
-					}
-					setRSPaused(
-						ctx, rsName, false,
-					)
-				},
-			)
+		It("should validate first sync", func() {
+			validateSyncedData(ctx, srcPVC, destPVC, drv, "Snapshot", rdName, drv.name+"-ss-v1")
+		})
 
-			It("should complete second sync"+
-				" and match data",
-				func() {
-					waitForDataMatch(
-						ctx, srcPVC,
-						destPVC, drv,
-						"Snapshot", rdName,
-						drv.name+"-ss-v2",
-						waitTill,
-					)
-				},
-			)
-		},
-	)
+		It("should write more data", func() {
+			writeDataToPVC(ctx, srcPVC, drv, 2)
+			// waitTill 2x the interval.
+			waitTill = &metav1.Time{
+				Time: time.Now().Add(interval * 2),
+			}
+			setRSPaused(ctx, rsName, false)
+		})
+
+		It("should complete second sync and match data", func() {
+			waitForDataMatch(ctx, srcPVC, destPVC, drv, "Snapshot", rdName, drv.name+"-ss-v2", waitTill)
+		})
+	})
 }
 
 func scheduleSnapshotNoRDTriggerTest(drv driverConfig) {
-	Context(drv.name+" Snapshot No RD Trigger",
-		Ordered,
-		func() {
-			srcPVC := drv.name + "-ssn-src"
-			destPVC := drv.name + "-ssn-dest"
-			rdName := drv.name + "-ssn-rd"
-			rsName := drv.name + "-ssn-rs"
+	Context(drv.name+" Snapshot No RD Trigger", Ordered, func() {
+		srcPVC := drv.name + "-ssn-src"
+		destPVC := drv.name + "-ssn-dest"
+		rdName := drv.name + "-ssn-rd"
+		rsName := drv.name + "-ssn-rs"
 
-			var (
-				rdAddr   string
-				rdKey    string
-				waitTill *metav1.Time
-			)
+		var (
+			rdAddr   string
+			rdKey    string
+			waitTill *metav1.Time
+		)
 
-			ctx := context.TODO()
+		ctx := context.TODO()
 
-			AfterAll(func() {
-				cleanupReplication(
-					ctx, rsName, rdName,
-					[]string{
-						srcPVC, destPVC,
-						drv.name + "-ssn-v1-temp",
-						drv.name + "-ssn-v2-temp",
-					},
-				)
+		AfterAll(func() {
+			cleanupReplication(ctx, rsName, rdName, []string{
+				srcPVC, destPVC,
+				drv.name + "-ssn-v1-temp",
+				drv.name + "-ssn-v2-temp",
 			})
+		})
 
-			AfterEach(debugAfterEach)
+		AfterEach(debugAfterEach)
 
-			It("should create PVCs", func() {
-				createAndWaitForPVC(
-					ctx, srcPVC, drv,
-				)
-				createAndWaitForPVC(
-					ctx, destPVC, drv,
-				)
-			})
+		It("should create PVCs", func() {
+			createAndWaitForPVC(ctx, srcPVC, drv)
+			createAndWaitForPVC(ctx, destPVC, drv)
+		})
 
-			It("should create RD", func() {
-				rdAddr, rdKey =
-					createRDAndWaitForAddress(
-						ctx, rdName, destPVC,
-						nil,
-						drv,
-						map[string]string{
-							"copyMethod": "Snapshot",
-						},
-					)
-			})
-
-			It("should write initial data",
-				func() {
-					writeDataToPVC(
-						ctx, srcPVC, drv, 1,
-					)
+		It("should create RD", func() {
+			rdAddr, rdKey = createRDAndWaitForAddress(
+				ctx, rdName, destPVC, nil, drv,
+				map[string]string{
+					"copyMethod": "Snapshot",
 				},
 			)
+		})
 
-			It("should create RS", func() {
-				createRS(
-					ctx, rsName, srcPVC,
-					&volsyncv1alpha1.ReplicationSourceTriggerSpec{
-						Schedule: ptr.To(
-							schedule,
-						),
-					},
-					rdAddr, rdKey,
-					drv,
-					map[string]string{
-						"copyMethod": "Snapshot",
-					},
-				)
-			})
+		It("should write initial data", func() {
+			writeDataToPVC(ctx, srcPVC, drv, 1)
+		})
 
-			It("should complete first sync",
-				func() {
-					waitForSyncTime(
-						ctx, rsName,
-					)
-					waitForRDSyncTime(
-						ctx, rdName,
-					)
-					setRSPaused(
-						ctx, rsName, true,
-					)
+		It("should create RS", func() {
+			createRS(
+				ctx, rsName, srcPVC,
+				&volsyncv1alpha1.ReplicationSourceTriggerSpec{
+					Schedule: ptr.To(schedule),
+				},
+				rdAddr, rdKey, drv,
+				map[string]string{
+					"copyMethod": "Snapshot",
 				},
 			)
+		})
 
-			It("should validate first sync",
-				func() {
-					validateSyncedData(
-						ctx, srcPVC,
-						destPVC, drv,
-						"Snapshot", rdName,
-						drv.name+"-ssn-v1",
-					)
-				},
-			)
+		It("should complete first sync", func() {
+			waitForSyncTime(ctx, rsName)
+			waitForRDSyncTime(ctx, rdName)
+			setRSPaused(ctx, rsName, true)
+		})
 
-			It("should write more data",
-				func() {
-					writeDataToPVC(
-						ctx, srcPVC, drv, 2,
-					)
-					// waitTill 2x the interval.
-					waitTill = &metav1.Time{
-						Time: time.Now().Add(interval * 2),
-					}
-					setRSPaused(
-						ctx, rsName, false,
-					)
-				},
-			)
+		It("should validate first sync", func() {
+			validateSyncedData(ctx, srcPVC, destPVC, drv, "Snapshot", rdName, drv.name+"-ssn-v1")
+		})
 
-			It("should complete second sync"+
-				" and match data",
-				func() {
-					waitForDataMatch(
-						ctx, srcPVC,
-						destPVC, drv,
-						"Snapshot", rdName,
-						drv.name+"-ssn-v2",
-						waitTill,
-					)
-				},
-			)
-		},
-	)
+		It("should write more data", func() {
+			writeDataToPVC(ctx, srcPVC, drv, 2)
+			// waitTill 2x the interval.
+			waitTill = &metav1.Time{
+				Time: time.Now().Add(interval * 2),
+			}
+			setRSPaused(ctx, rsName, false)
+		})
+
+		It("should complete second sync and match data", func() {
+			waitForDataMatch(ctx, srcPVC, destPVC, drv, "Snapshot", rdName, drv.name+"-ssn-v2", waitTill)
+		})
+	})
 }
 
 func scheduleDirectTest(drv driverConfig) {
-	Context(drv.name+" Direct", Ordered,
-		func() {
-			srcPVC := drv.name + "-sd-src"
-			destPVC := drv.name + "-sd-dest"
-			rdName := drv.name + "-sd-rd"
-			rsName := drv.name + "-sd-rs"
+	Context(drv.name+" Direct", Ordered, func() {
+		srcPVC := drv.name + "-sd-src"
+		destPVC := drv.name + "-sd-dest"
+		rdName := drv.name + "-sd-rd"
+		rsName := drv.name + "-sd-rs"
 
-			var (
-				rdAddr   string
-				rdKey    string
-				waitTill *metav1.Time
-			)
+		var (
+			rdAddr   string
+			rdKey    string
+			waitTill *metav1.Time
+		)
 
-			ctx := context.TODO()
+		ctx := context.TODO()
 
-			AfterAll(func() {
-				cleanupReplication(
-					ctx, rsName, rdName,
-					[]string{
-						srcPVC, destPVC,
-						drv.name + "-sd-v1-temp",
-						drv.name + "-sd-v2-temp",
-					},
-				)
-				cleanupSnapshots(
-					ctx, []string{
-						drv.name + "-sd-v1-validate",
-						drv.name + "-sd-v2-validate",
-					},
-				)
+		AfterAll(func() {
+			cleanupReplication(ctx, rsName, rdName, []string{
+				srcPVC, destPVC,
+				drv.name + "-sd-v1-temp",
+				drv.name + "-sd-v2-temp",
 			})
-
-			AfterEach(debugAfterEach)
-
-			It("should create PVCs", func() {
-				createAndWaitForPVC(
-					ctx, srcPVC, drv,
-				)
-				createAndWaitForPVC(
-					ctx, destPVC, drv,
-				)
+			cleanupSnapshots(ctx, []string{
+				drv.name + "-sd-v1-validate",
+				drv.name + "-sd-v2-validate",
 			})
+		})
 
-			It("should create RD", func() {
-				rdAddr, rdKey =
-					createRDAndWaitForAddress(
-						ctx, rdName, destPVC,
-						&volsyncv1alpha1.ReplicationDestinationTriggerSpec{
-							Schedule: ptr.To(
-								schedule,
-							),
-						},
-						drv,
-						map[string]string{
-							"copyMethod": "Direct",
-						},
-					)
-			})
+		AfterEach(debugAfterEach)
 
-			It("should write initial data",
-				func() {
-					writeDataToPVC(
-						ctx, srcPVC, drv, 1,
-					)
+		It("should create PVCs", func() {
+			createAndWaitForPVC(ctx, srcPVC, drv)
+			createAndWaitForPVC(ctx, destPVC, drv)
+		})
+
+		It("should create RD", func() {
+			rdAddr, rdKey = createRDAndWaitForAddress(
+				ctx, rdName, destPVC,
+				&volsyncv1alpha1.ReplicationDestinationTriggerSpec{
+					Schedule: ptr.To(schedule),
+				},
+				drv,
+				map[string]string{
+					"copyMethod": "Direct",
 				},
 			)
+		})
 
-			It("should create RS", func() {
-				createRS(
-					ctx, rsName, srcPVC,
-					&volsyncv1alpha1.ReplicationSourceTriggerSpec{
-						Schedule: ptr.To(
-							schedule,
-						),
-					},
-					rdAddr, rdKey,
-					drv,
-					map[string]string{
-						"copyMethod": "Snapshot",
-					},
-				)
-			})
+		It("should write initial data", func() {
+			writeDataToPVC(ctx, srcPVC, drv, 1)
+		})
 
-			It("should complete first sync",
-				func() {
-					waitForSyncTime(
-						ctx, rsName,
-					)
-					waitForRDSyncTime(
-						ctx, rdName,
-					)
-					setRSPaused(
-						ctx, rsName, true,
-					)
+		It("should create RS", func() {
+			createRS(
+				ctx, rsName, srcPVC,
+				&volsyncv1alpha1.ReplicationSourceTriggerSpec{
+					Schedule: ptr.To(schedule),
+				},
+				rdAddr, rdKey, drv,
+				map[string]string{
+					"copyMethod": "Snapshot",
 				},
 			)
+		})
 
-			It("should validate first sync",
-				func() {
-					validateSyncedData(
-						ctx, srcPVC,
-						destPVC, drv,
-						"Direct", rdName,
-						drv.name+"-sd-v1",
-					)
-				},
-			)
+		It("should complete first sync", func() {
+			waitForSyncTime(ctx, rsName)
+			waitForRDSyncTime(ctx, rdName)
+			setRSPaused(ctx, rsName, true)
+		})
 
-			It("should write more data",
-				func() {
-					writeDataToPVC(
-						ctx, srcPVC, drv, 2,
-					)
-					// waitTill 2x the interval.
-					waitTill = &metav1.Time{
-						Time: time.Now().Add(interval * 2),
-					}
-					setRSPaused(
-						ctx, rsName, false,
-					)
-				},
-			)
+		It("should validate first sync", func() {
+			validateSyncedData(ctx, srcPVC, destPVC, drv, "Direct", rdName, drv.name+"-sd-v1")
+		})
 
-			It("should complete second sync"+
-				" and match data",
-				func() {
-					waitForDataMatch(
-						ctx, srcPVC,
-						destPVC, drv,
-						"Direct", rdName,
-						drv.name+"-sd-v2",
-						waitTill,
-					)
-				},
-			)
-		},
-	)
+		It("should write more data", func() {
+			writeDataToPVC(ctx, srcPVC, drv, 2)
+			// waitTill 2x the interval.
+			waitTill = &metav1.Time{
+				Time: time.Now().Add(interval * 2),
+			}
+			setRSPaused(ctx, rsName, false)
+		})
+
+		It("should complete second sync and match data", func() {
+			waitForDataMatch(ctx, srcPVC, destPVC, drv, "Direct", rdName, drv.name+"-sd-v2", waitTill)
+		})
+	})
 }
 
-func scheduleDirectNoRDTriggerTest(
-	drv driverConfig,
-) {
-	Context(drv.name+" Direct No RD Trigger",
-		Ordered,
-		func() {
-			srcPVC := drv.name + "-sdn-src"
-			destPVC := drv.name + "-sdn-dest"
-			rdName := drv.name + "-sdn-rd"
-			rsName := drv.name + "-sdn-rs"
+func scheduleDirectNoRDTriggerTest(drv driverConfig) {
+	Context(drv.name+" Direct No RD Trigger", Ordered, func() {
+		srcPVC := drv.name + "-sdn-src"
+		destPVC := drv.name + "-sdn-dest"
+		rdName := drv.name + "-sdn-rd"
+		rsName := drv.name + "-sdn-rs"
 
-			var (
-				rdAddr   string
-				rdKey    string
-				waitTill *metav1.Time
-			)
+		var (
+			rdAddr   string
+			rdKey    string
+			waitTill *metav1.Time
+		)
 
-			ctx := context.TODO()
+		ctx := context.TODO()
 
-			AfterAll(func() {
-				cleanupReplication(
-					ctx, rsName, rdName,
-					[]string{
-						srcPVC, destPVC,
-						drv.name + "-sdn-v1-temp",
-						drv.name + "-sdn-v2-temp",
-					},
-				)
-				cleanupSnapshots(
-					ctx, []string{
-						drv.name + "-sdn-v1-validate",
-						drv.name + "-sdn-v2-validate",
-					},
-				)
+		AfterAll(func() {
+			cleanupReplication(ctx, rsName, rdName, []string{
+				srcPVC, destPVC,
+				drv.name + "-sdn-v1-temp",
+				drv.name + "-sdn-v2-temp",
 			})
-
-			AfterEach(debugAfterEach)
-
-			It("should create PVCs", func() {
-				createAndWaitForPVC(
-					ctx, srcPVC, drv,
-				)
-				createAndWaitForPVC(
-					ctx, destPVC, drv,
-				)
+			cleanupSnapshots(ctx, []string{
+				drv.name + "-sdn-v1-validate",
+				drv.name + "-sdn-v2-validate",
 			})
+		})
 
-			It("should create RD", func() {
-				rdAddr, rdKey =
-					createRDAndWaitForAddress(
-						ctx, rdName, destPVC,
-						nil,
-						drv,
-						map[string]string{
-							"copyMethod": "Direct",
-						},
-					)
-			})
+		AfterEach(debugAfterEach)
 
-			It("should write initial data",
-				func() {
-					writeDataToPVC(
-						ctx, srcPVC, drv, 1,
-					)
+		It("should create PVCs", func() {
+			createAndWaitForPVC(ctx, srcPVC, drv)
+			createAndWaitForPVC(ctx, destPVC, drv)
+		})
+
+		It("should create RD", func() {
+			rdAddr, rdKey = createRDAndWaitForAddress(
+				ctx, rdName, destPVC, nil, drv,
+				map[string]string{
+					"copyMethod": "Direct",
 				},
 			)
+		})
 
-			It("should create RS", func() {
-				createRS(
-					ctx, rsName, srcPVC,
-					&volsyncv1alpha1.ReplicationSourceTriggerSpec{
-						Schedule: ptr.To(
-							schedule,
-						),
-					},
-					rdAddr, rdKey,
-					drv,
-					map[string]string{
-						"copyMethod": "Snapshot",
-					},
-				)
-			})
+		It("should write initial data", func() {
+			writeDataToPVC(ctx, srcPVC, drv, 1)
+		})
 
-			It("should complete first sync",
-				func() {
-					waitForSyncTime(
-						ctx, rsName,
-					)
-					waitForRDSyncTime(
-						ctx, rdName,
-					)
-					setRSPaused(
-						ctx, rsName, true,
-					)
+		It("should create RS", func() {
+			createRS(
+				ctx, rsName, srcPVC,
+				&volsyncv1alpha1.ReplicationSourceTriggerSpec{
+					Schedule: ptr.To(schedule),
+				},
+				rdAddr, rdKey, drv,
+				map[string]string{
+					"copyMethod": "Snapshot",
 				},
 			)
+		})
 
-			It("should validate first sync",
-				func() {
-					validateSyncedData(
-						ctx, srcPVC,
-						destPVC, drv,
-						"Direct", rdName,
-						drv.name+"-sdn-v1",
-					)
-				},
-			)
+		It("should complete first sync", func() {
+			waitForSyncTime(ctx, rsName)
+			waitForRDSyncTime(ctx, rdName)
+			setRSPaused(ctx, rsName, true)
+		})
 
-			It("should write more data",
-				func() {
-					writeDataToPVC(
-						ctx, srcPVC, drv, 2,
-					)
-					// waitTill 2x the interval.
-					waitTill = &metav1.Time{
-						Time: time.Now().Add(
-							interval * 2,
-						),
-					}
-					setRSPaused(
-						ctx, rsName, false,
-					)
-				},
-			)
+		It("should validate first sync", func() {
+			validateSyncedData(ctx, srcPVC, destPVC, drv, "Direct", rdName, drv.name+"-sdn-v1")
+		})
 
-			It("should complete second sync"+
-				" and match data",
-				func() {
-					waitForDataMatch(
-						ctx, srcPVC,
-						destPVC, drv,
-						"Direct", rdName,
-						drv.name+"-sdn-v2",
-						waitTill,
-					)
-				},
-			)
-		},
-	)
+		It("should write more data", func() {
+			writeDataToPVC(ctx, srcPVC, drv, 2)
+			// waitTill 2x the interval.
+			waitTill = &metav1.Time{
+				Time: time.Now().Add(interval * 2),
+			}
+			setRSPaused(ctx, rsName, false)
+		})
+
+		It("should complete second sync and match data", func() {
+			waitForDataMatch(ctx, srcPVC, destPVC, drv, "Direct", rdName, drv.name+"-sdn-v2", waitTill)
+		})
+	})
 }
