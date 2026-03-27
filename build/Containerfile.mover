@@ -1,34 +1,26 @@
 #-- Build the mover binary with go-ceph support
 ARG CEPH_BASE_IMAGE=quay.io/ceph/ceph:v20
-
-FROM ${CEPH_BASE_IMAGE} AS updated_base
 ARG CEPH_VERSION=tentacle
-
-# TODO: remove the reinstall, when issues
-# https://github.com/ceph/ceph-container/issues/2034
-# https://github.com/ceph/ceph-container/issues/2141
-# are fixed.
-RUN echo ${CEPH_VERSION} \
-    && dnf -y reinstall \
-       https://download.ceph.com/rpm-${CEPH_VERSION}/el9/noarch/ceph-release-1-1.el9.noarch.rpm \
-    && dnf -y update --nobest --nodocs \
-    && dnf clean all 
-
-FROM updated_base AS builder
-
 ARG GOLANG_VERSION=1.25.8
+
+FROM ${CEPH_BASE_IMAGE} AS builder
+
+ARG CEPH_VERSION
+ARG GOLANG_VERSION
 ARG TARGETOS
 ARG TARGETARCH
 
-# Install Go and build dependencies
-RUN dnf -y install --nodocs \
-    librados-devel librbd-devel libcephfs-devel \
-    /usr/bin/cc \
+# Install Ceph repo, devel libraries, and Go
+# Note: ceph-release reinstall required due to https://github.com/ceph/ceph-container/issues/2034
+RUN dnf -y reinstall --nodocs \
+        https://download.ceph.com/rpm-${CEPH_VERSION}/el9/noarch/ceph-release-1-1.el9.noarch.rpm \
+    && dnf -y install --nodocs \
+        librados-devel librbd-devel libcephfs-devel \
+        /usr/bin/cc \
     && mkdir -p /usr/local/go \
     && curl -L \
-      https://go.dev/dl/go${GOLANG_VERSION}.linux-${TARGETARCH}.tar.gz \
-      | tar xzf - -C /usr/local/go \
-        --strip-components=1
+        https://go.dev/dl/go${GOLANG_VERSION}.linux-${TARGETARCH}.tar.gz \
+        | tar xzf - -C /usr/local/go --strip-components=1
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 ENV GOROOT="/usr/local/go"
@@ -56,7 +48,7 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} \
 
 #-- Final container with Ceph runtime libraries
 #   (required for go-ceph CGO bindings)
-FROM updated_base
+FROM ${CEPH_BASE_IMAGE}
 
 # Allow specifying rsync & stunnel version
 ARG RSYNC_VERSION=""
