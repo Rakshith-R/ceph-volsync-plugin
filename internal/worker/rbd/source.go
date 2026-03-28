@@ -26,8 +26,9 @@ import (
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/connection"
+	cephrbd "github.com/RamenDR/ceph-volsync-plugin/internal/ceph/rbd"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
@@ -90,11 +91,11 @@ func (w *SourceWorker) Sync(
 		return err
 	}
 
-	parentSpec := ceph.RBDImageSpec(
+	parentSpec := cephrbd.RBDImageSpec(
 		sc.parentPoolName, sc.parentNS,
 		sc.parentImageName,
 	)
-	parentImage, err := ceph.NewImage(cc, parentSpec)
+	parentImage, err := cephrbd.NewImage(cc, parentSpec)
 	if err != nil {
 		return fmt.Errorf(
 			"failed to open parent image %s: %w",
@@ -111,7 +112,7 @@ func (w *SourceWorker) Sync(
 	}
 	_ = parentImage.Close()
 
-	iter, err := ceph.NewRBDBlockDiffIterator(
+	iter, err := cephrbd.NewRBDBlockDiffIterator(
 		sc.mons,
 		sc.parentPoolID, sc.parentNS,
 		sc.parentImageName,
@@ -221,7 +222,7 @@ func (w *SourceWorker) Sync(
 // and an active ClusterConnection that the caller must
 // destroy.
 func (w *SourceWorker) resolveSourceConfig() (
-	*sourceContext, *ceph.ClusterConnection, error,
+	*sourceContext, *connection.ClusterConnection, error,
 ) {
 	volumeHandle := os.Getenv("VOLUME_HANDLE")
 
@@ -254,7 +255,7 @@ func (w *SourceWorker) resolveSourceConfig() (
 		)
 	}
 
-	cc, err := ceph.NewClusterConnection(mons)
+	cc, err := cephrbd.NewClusterConnection(mons)
 	if err != nil {
 		return nil, nil, fmt.Errorf(
 			"failed to connect to cluster: %w", err,
@@ -273,7 +274,7 @@ func (w *SourceWorker) resolveSourceConfig() (
 // resolveParentImage determines the parent image, pool,
 // namespace, and snapshot IDs based on snapshot handles.
 func (w *SourceWorker) resolveParentImage(
-	cc *ceph.ClusterConnection, sc *sourceContext,
+	cc *connection.ClusterConnection, sc *sourceContext,
 ) error {
 	baseSnapshotHandle := os.Getenv(
 		"BASE_SNAPSHOT_HANDLE",
@@ -296,14 +297,14 @@ func (w *SourceWorker) resolveParentImage(
 // resolveFullDiffFromVolume sets up sourceContext for a
 // full diff (no snapshots) from the volume image.
 func (w *SourceWorker) resolveFullDiffFromVolume(
-	cc *ceph.ClusterConnection, sc *sourceContext,
+	cc *connection.ClusterConnection, sc *sourceContext,
 ) error {
 	sc.parentPoolID = sc.volumeID.LocationID
 	sc.parentNS = sc.radosNS
 	sc.parentImageName = "csi-vol-" +
 		sc.volumeID.ObjectUUID
 
-	poolName, err := ceph.PoolNameByID(
+	poolName, err := cephrbd.PoolNameByID(
 		cc, sc.volumeID.LocationID,
 	)
 	if err != nil {
@@ -326,7 +327,7 @@ func (w *SourceWorker) resolveFullDiffFromVolume(
 //
 //nolint:cyclop // snapshot resolution with incremental diff
 func (w *SourceWorker) resolveSnapshotDiff(
-	cc *ceph.ClusterConnection, sc *sourceContext,
+	cc *connection.ClusterConnection, sc *sourceContext,
 	baseSnapshotHandle, targetSnapshotHandle string,
 ) error {
 	targetSnapCSI := &volid.CSIIdentifier{}
@@ -357,7 +358,7 @@ func (w *SourceWorker) resolveSnapshotDiff(
 	targetSnapName := "csi-snap-" +
 		targetSnapCSI.ObjectUUID
 
-	targetPoolName, err := ceph.PoolNameByID(
+	targetPoolName, err := cephrbd.PoolNameByID(
 		cc, targetSnapCSI.LocationID,
 	)
 	if err != nil {
@@ -369,10 +370,10 @@ func (w *SourceWorker) resolveSnapshotDiff(
 
 	targetImageName := "csi-snap-" +
 		targetSnapCSI.ObjectUUID
-	targetSpec := ceph.RBDImageSpec(
+	targetSpec := cephrbd.RBDImageSpec(
 		targetPoolName, sc.radosNS, targetImageName,
 	)
-	targetImage, err := ceph.NewImage(
+	targetImage, err := cephrbd.NewImage(
 		cc, targetSpec,
 	)
 	if err != nil {
@@ -407,11 +408,11 @@ func (w *SourceWorker) resolveSnapshotDiff(
 		baseSnapName := "csi-snap-" +
 			baseSnapCSI.ObjectUUID
 
-		baseSpec := ceph.RBDImageSpec(
+		baseSpec := cephrbd.RBDImageSpec(
 			sc.parentPoolName, sc.parentNS,
 			baseSnapName,
 		)
-		baseImage, err := ceph.NewImage(
+		baseImage, err := cephrbd.NewImage(
 			cc, baseSpec,
 		)
 		if err != nil {
@@ -458,9 +459,9 @@ func (w *SourceWorker) resolveSnapshotDiff(
 	return nil
 }
 
-// rbdIterAdapter adapts ceph.RBDBlockDiffIterator to pipeline.BlockIterator.
+// rbdIterAdapter adapts cephrbd.RBDBlockDiffIterator to pipeline.BlockIterator.
 type rbdIterAdapter struct {
-	iter      *ceph.RBDBlockDiffIterator
+	iter      *cephrbd.RBDBlockDiffIterator
 	reqID     uint64
 	totalSize int64
 }

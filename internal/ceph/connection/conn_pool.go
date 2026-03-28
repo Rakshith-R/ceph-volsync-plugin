@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ceph
+package connection
 
 import (
 	"fmt"
@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/cephconf"
 	"github.com/ceph/go-ceph/rados"
 )
 
@@ -78,7 +79,7 @@ func (cp *ConnPool) Destroy() {
 func (cp *ConnPool) Get(
 	monitors, user, keyfile string,
 ) (*rados.Conn, error) {
-	err := WriteCephConfig()
+	err := cephconf.WriteCephConfig()
 	if err != nil {
 		return nil, fmt.Errorf(
 			"failed to write ceph config: %w", err,
@@ -120,11 +121,11 @@ func (cp *ConnPool) Get(
 	}
 
 	if err = conn.ReadConfigFile(
-		CephConfigPath,
+		cephconf.CephConfigPath,
 	); err != nil {
 		return nil, fmt.Errorf(
 			"failed to read config file %q: %w",
-			CephConfigPath, err,
+			cephconf.CephConfigPath, err,
 		)
 	}
 

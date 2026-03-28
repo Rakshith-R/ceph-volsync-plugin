@@ -14,14 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ceph
+package cephfs
 
 import (
 	"fmt"
 	"path"
 	"strings"
 
-	"github.com/ceph/go-ceph/cephfs"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/connection"
+	cepherr "github.com/RamenDR/ceph-volsync-plugin/internal/ceph/errors"
+	gocephfs "github.com/ceph/go-ceph/cephfs"
 	ca "github.com/ceph/go-ceph/cephfs/admin"
 )
 
@@ -30,7 +32,7 @@ import (
 //
 // Usage:
 //
-//	differ, err := ceph.New(mons, creds, fsName, subVolumeGroup, subVolumeName, "snap1", "snap2")
+//	differ, err := cephfs.New(mons, creds, fsName, subVolumeGroup, subVolumeName, "snap1", "snap2")
 //	if err != nil { return err }
 //	defer differ.Destroy()
 //
@@ -44,8 +46,8 @@ import (
 //	    // Process entry
 //	}
 type SnapshotDiffer struct {
-	conn           *ClusterConnection
-	mountInfo      *cephfs.MountInfo
+	conn           *connection.ClusterConnection
+	mountInfo      *gocephfs.MountInfo
 	rootPath       string
 	relPath        string
 	baseSnapName   string
@@ -66,7 +68,7 @@ func New(
 	targetSnapName string,
 ) (*SnapshotDiffer, error) {
 	// Create and connect to cluster
-	cc := &ClusterConnection{}
+	cc := &connection.ClusterConnection{}
 	if err := cc.Connect(mons); err != nil {
 		return nil, fmt.Errorf("failed to connect to cluster: %w", err)
 	}
@@ -137,7 +139,7 @@ func (sd *SnapshotDiffer) Destroy() {
 type SnapDiffIterator struct {
 	differ   *SnapshotDiffer
 	relPath  string
-	diffInfo *cephfs.SnapDiffInfo
+	diffInfo *gocephfs.SnapDiffInfo
 }
 
 // NewSnapDiffIterator creates a new iterator for the given directory path.
@@ -146,7 +148,7 @@ type SnapDiffIterator struct {
 // The iterator must be cleaned up with Close() when done.
 func (sd *SnapshotDiffer) NewSnapDiffIterator(relPath string) (*SnapDiffIterator, error) {
 	relPath = path.Join(sd.relPath, relPath)
-	diffConfig := cephfs.SnapDiffConfig{
+	diffConfig := gocephfs.SnapDiffConfig{
 		CMount:   sd.mountInfo,
 		RootPath: sd.rootPath,
 		RelPath:  relPath,
@@ -154,7 +156,7 @@ func (sd *SnapshotDiffer) NewSnapDiffIterator(relPath string) (*SnapDiffIterator
 		Snap2:    sd.targetSnapName,
 	}
 
-	diffInfo, err := cephfs.OpenSnapDiff(diffConfig)
+	diffInfo, err := gocephfs.OpenSnapDiff(diffConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open snap diff for %s: %w", relPath, err)
 	}
@@ -168,7 +170,7 @@ func (sd *SnapshotDiffer) NewSnapDiffIterator(relPath string) (*SnapDiffIterator
 
 // Read retrieves the next entry from the directory.
 // Returns nil when there are no more entries.
-func (s *SnapDiffIterator) Read() (*cephfs.SnapDiffEntry, error) {
+func (s *SnapDiffIterator) Read() (*gocephfs.SnapDiffEntry, error) {
 	entry, err := s.diffInfo.Readdir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snap diff entry: %w", err)
@@ -202,7 +204,7 @@ func (s *SnapDiffIterator) Close() error {
 type BlockDiffIterator struct {
 	differ    *SnapshotDiffer
 	relPath   string
-	blockDiff *cephfs.FileBlockDiffInfo
+	blockDiff *gocephfs.FileBlockDiffInfo
 }
 
 // NewBlockDiffIterator creates a new iterator for block-level differences
@@ -212,7 +214,7 @@ type BlockDiffIterator struct {
 // The iterator must be cleaned up with Close() when done.
 func (sd *SnapshotDiffer) NewBlockDiffIterator(relPath string) (*BlockDiffIterator, error) {
 	relPath = path.Join(sd.relPath, relPath)
-	blockDiff, err := cephfs.FileBlockDiffInit(
+	blockDiff, err := gocephfs.FileBlockDiffInit(
 		sd.mountInfo,
 		sd.rootPath,
 		relPath,
@@ -237,7 +239,7 @@ func (b *BlockDiffIterator) More() bool {
 
 // Read retrieves the next set of changed blocks.
 // Returns the changed blocks or an error if the read fails.
-func (b *BlockDiffIterator) Read() (*cephfs.FileBlockDiffChangedBlocks, error) {
+func (b *BlockDiffIterator) Read() (*gocephfs.FileBlockDiffChangedBlocks, error) {
 	blocks, err := b.blockDiff.Read()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read block diff for %s: %w", b.relPath, err)
@@ -269,5 +271,5 @@ func GetFSName(fsa *ca.FSAdmin, locationID int64) (string, error) {
 		}
 	}
 
-	return "", ErrKeyNotFound
+	return "", cepherr.ErrKeyNotFound
 }

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ceph
+package connection
 
 import (
 	"errors"
@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	cepherr "github.com/RamenDR/ceph-volsync-plugin/internal/ceph/errors"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 	"github.com/ceph/go-ceph/cephfs"
 	ca "github.com/ceph/go-ceph/cephfs/admin"
@@ -99,7 +100,7 @@ func (cc *ClusterConnection) GetIoctx(
 		if errors.Is(err, rados.ErrNotFound) {
 			err = fmt.Errorf(
 				"failed as %w (internal %w)",
-				ErrPoolNotFound, err,
+				cepherr.ErrPoolNotFound, err,
 			)
 		} else {
 			err = fmt.Errorf(

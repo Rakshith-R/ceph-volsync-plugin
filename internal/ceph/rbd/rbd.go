@@ -14,13 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ceph
+package rbd
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/ceph/go-ceph/rbd"
+	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/connection"
+	gorbd "github.com/ceph/go-ceph/rbd"
 )
 
 // ChangeBlock represents a changed block region.
@@ -33,8 +34,8 @@ type ChangeBlock struct {
 // using the provided monitors, user, and key.
 func NewClusterConnection(
 	monitors string,
-) (*ClusterConnection, error) {
-	cc := &ClusterConnection{}
+) (*connection.ClusterConnection, error) {
+	cc := &connection.ClusterConnection{}
 	if err := cc.Connect(monitors); err != nil {
 		return nil, fmt.Errorf(
 			"failed to connect to cluster: %w", err,
@@ -46,8 +47,8 @@ func NewClusterConnection(
 // NewImage parses the imageSpec, connects to the pool,
 // and returns an rbd.Image object.
 func NewImage(
-	cc *ClusterConnection, imageSpec string,
-) (*rbd.Image, error) {
+	cc *connection.ClusterConnection, imageSpec string,
+) (*gorbd.Image, error) {
 	parts := strings.Split(imageSpec, "/")
 	if len(parts) != 2 && len(parts) != 3 {
 		return nil, fmt.Errorf(
@@ -74,8 +75,8 @@ func NewImage(
 		ioctx.SetNamespace(namespace)
 	}
 
-	image, err := rbd.OpenImage(
-		ioctx, imageName, rbd.NoSnapshot,
+	image, err := gorbd.OpenImage(
+		ioctx, imageName, gorbd.NoSnapshot,
 	)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -88,8 +89,8 @@ func NewImage(
 
 // NewImageBySpec opens an RBD image from an rbd.ImageSpec.
 func NewImageBySpec(
-	cc *ClusterConnection, spec rbd.ImageSpec,
-) (*rbd.Image, error) {
+	cc *connection.ClusterConnection, spec gorbd.ImageSpec,
+) (*gorbd.Image, error) {
 	imageSpec := fmt.Sprintf(
 		"%s/%s", spec.PoolName, spec.ImageName,
 	)
@@ -106,7 +107,7 @@ func NewImageBySpec(
 
 // PoolNameByID resolves a Ceph pool ID to its name.
 func PoolNameByID(
-	cc *ClusterConnection, poolID int64,
+	cc *connection.ClusterConnection, poolID int64,
 ) (string, error) {
 	name, err := cc.GetPoolByID(poolID)
 	if err != nil {
@@ -133,7 +134,7 @@ func RBDImageSpec(
 // SnapshotIDByName finds the snapshot ID for a named
 // snapshot on an RBD image.
 func SnapshotIDByName(
-	image *rbd.Image, snapName string,
+	image *gorbd.Image, snapName string,
 ) (uint64, error) {
 	snaps, err := image.GetSnapshotNames()
 	if err != nil {
@@ -154,8 +155,8 @@ func SnapshotIDByName(
 // RBDBlockDiffIterator iterates over changed blocks
 // between two snapshots of an RBD image.
 type RBDBlockDiffIterator struct {
-	conn       *ClusterConnection
-	image      *rbd.Image
+	conn       *connection.ClusterConnection
+	image      *gorbd.Image
 	blocksChan chan ChangeBlock
 	doneChan   chan error
 }
@@ -212,11 +213,11 @@ func NewRBDBlockDiffIterator(
 	blocksChan := make(chan ChangeBlock, 64)
 	doneChan := make(chan error, 1)
 
-	diffCfg := rbd.DiffIterateByIDConfig{
+	diffCfg := gorbd.DiffIterateByIDConfig{
 		Offset:        0,
 		Length:        volSize,
-		IncludeParent: rbd.IncludeParent,
-		WholeObject:   rbd.EnableWholeObject,
+		IncludeParent: gorbd.IncludeParent,
+		WholeObject:   gorbd.EnableWholeObject,
 		Callback: func(
 			offset uint64,
 			length uint64,

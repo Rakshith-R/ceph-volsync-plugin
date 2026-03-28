@@ -33,7 +33,7 @@ import (
 
 	"github.com/ceph/go-ceph/cephfs"
 
-	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph"
+	cephfsdiffer "github.com/RamenDR/ceph-volsync-plugin/internal/ceph/cephfs"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/config"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/volid"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
@@ -64,17 +64,17 @@ const (
 
 // syncState holds the context for the sync operation.
 type syncState struct {
-	differ     *ceph.SnapshotDiffer
+	differ     *cephfsdiffer.SnapshotDiffer
 	syncClient apiv1.SyncServiceClient
 	logger     logr.Logger
 
 	rsyncTarget string
 }
 
-// cephBlockDiffAdapter bridges *ceph.BlockDiffIterator
+// cephBlockDiffAdapter bridges *cephfsdiffer.BlockDiffIterator
 // to the cephfs-package fileDiffIterator interface.
 type cephBlockDiffAdapter struct {
-	inner *ceph.BlockDiffIterator
+	inner *cephfsdiffer.BlockDiffIterator
 }
 
 func (a *cephBlockDiffAdapter) More() bool {
@@ -255,7 +255,7 @@ func (w *SourceWorker) runSnapdiffSync(
 
 	syncClient := apiv1.NewSyncServiceClient(conn)
 
-	differ, err := ceph.New(
+	differ, err := cephfsdiffer.New(
 		mons,
 		volumeID.LocationID,
 		subVolumeGroup,
@@ -516,7 +516,7 @@ func (w *SourceWorker) syncForDeletion(
 func (w *SourceWorker) runStatelessSync(
 	ctx context.Context,
 	conn *grpc.ClientConn,
-	differ *ceph.SnapshotDiffer,
+	differ *cephfsdiffer.SnapshotDiffer,
 	syncClient apiv1.SyncServiceClient,
 ) error {
 	w.Logger.Info("Starting stateless snapshot sync")
@@ -734,7 +734,7 @@ func (w *SourceWorker) categorizeDir(
 //nolint:funlen // pipeline setup with commit drainer
 func (w *SourceWorker) runSnapdiffBlockPipeline(
 	ctx context.Context,
-	differ *ceph.SnapshotDiffer,
+	differ *cephfsdiffer.SnapshotDiffer,
 	conn *grpc.ClientConn,
 	largeCh <-chan string,
 	committedCh chan<- string,
@@ -935,7 +935,7 @@ func (w *SourceWorker) walkAndStreamDirectories() (
 
 // initSyncState initializes the sync state.
 func (w *SourceWorker) initSyncState(
-	differ *ceph.SnapshotDiffer,
+	differ *cephfsdiffer.SnapshotDiffer,
 	syncClient apiv1.SyncServiceClient,
 ) *syncState {
 	rsyncDaemonPort := os.Getenv(
