@@ -19,6 +19,7 @@ package rbd
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/ceph/connection"
 	gorbd "github.com/ceph/go-ceph/rbd"
@@ -159,6 +160,8 @@ type RBDBlockDiffIterator struct {
 	image      *gorbd.Image
 	blocksChan chan ChangeBlock
 	doneChan   chan error
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // NewRBDBlockDiffIterator creates a new iterator that
@@ -175,9 +178,7 @@ func NewRBDBlockDiffIterator(
 ) (*RBDBlockDiffIterator, error) {
 	conn, err := NewClusterConnection(monitors)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"failed to connect to cluster: %w", err,
-		)
+		return nil, err
 	}
 
 	poolName, err := PoolNameByID(conn, poolID)
@@ -264,26 +265,30 @@ func (it *RBDBlockDiffIterator) Next() (
 // cluster connection. Must be called even on error
 // to avoid goroutine/image leaks.
 func (it *RBDBlockDiffIterator) Close() error {
-	// Drain blocksChan so the diff goroutine can
-	// finish if it's blocked on a channel send.
-	for range it.blocksChan {
-	}
+	it.closeOnce.Do(func() {
+		// Drain blocksChan so the diff goroutine can
+		// finish if it's blocked on a channel send.
+		for range it.blocksChan {
+		}
 
-	// Wait for the diff goroutine to complete.
-	iterErr := <-it.doneChan
+		// Wait for the diff goroutine to complete.
+		iterErr := <-it.doneChan
 
-	var closeErr error
-	if it.image != nil {
-		closeErr = it.image.Close()
-	}
-	if it.conn != nil {
-		it.conn.Destroy()
-	}
+		var closeErr error
+		if it.image != nil {
+			closeErr = it.image.Close()
+		}
+		if it.conn != nil {
+			it.conn.Destroy()
+		}
 
-	if iterErr != nil {
-		return fmt.Errorf(
-			"diff iteration error: %w", iterErr,
-		)
-	}
-	return closeErr
+		if iterErr != nil {
+			it.closeErr = fmt.Errorf(
+				"diff iteration error: %w", iterErr,
+			)
+		} else {
+			it.closeErr = closeErr
+		}
+	})
+	return it.closeErr
 }

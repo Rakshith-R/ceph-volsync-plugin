@@ -1,3 +1,19 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package pipeline
 
 import (
@@ -53,8 +69,8 @@ func hashBatcher(
 	var batch []HashedChunk
 	pressure := win.PressureSignal(cfg.WinPressureThresh)
 
-	zeroBuf := make([]byte, cfg.ChunkSize)
-	zeroHash := sha256.Sum256(zeroBuf)
+	// zeroHash is computed per-chunk below, since trailing
+	// blocks may have Length < ChunkSize.
 
 	flush := func() error {
 		if len(batch) == 0 {
@@ -93,13 +109,15 @@ func hashBatcher(
 				zeroOpen = false
 				continue
 			}
+			zeroBuf := make([]byte, zc.Length)
+			zHash := sha256.Sum256(zeroBuf)
 			batch = append(batch, HashedChunk{
 				ReqID:     zc.ReqID,
 				FilePath:  zc.FilePath,
 				Offset:    zc.Offset,
 				Length:    zc.Length,
 				Data:      nil,
-				Hash:      zeroHash,
+				Hash:      zHash,
 				TotalSize: zc.TotalSize,
 				Held:      zc.Held,
 			})
@@ -174,11 +192,15 @@ func hashSender(
 			mismatched[id] = struct{}{}
 		}
 
-		for _, hc := range batch {
+		for i, hc := range batch {
 			if _, isMiss := mismatched[hc.ReqID]; isMiss {
 				select {
 				case mismatchCh <- hc:
 				case <-ctx.Done():
+					hc.Held.release(memRaw, win)
+					for _, rem := range batch[i+1:] {
+						rem.Held.release(memRaw, win)
+					}
 					return ctx.Err()
 				}
 			} else {

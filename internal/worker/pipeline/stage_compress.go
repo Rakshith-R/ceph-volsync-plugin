@@ -1,3 +1,19 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package pipeline
 
 import (
@@ -48,21 +64,36 @@ func compressWorker(
 		}
 
 		uncompLen := int64(len(hc.Data))
-
-		maxDst := lz4.CompressBlockBound(len(hc.Data))
-		dst := make([]byte, maxDst)
-		n, err := lz4.CompressBlock(hc.Data, dst, nil)
-
-		isRaw := false
-		if err != nil || n == 0 || n >= len(hc.Data) {
-			dst = hc.Data
-			n = len(hc.Data)
-			isRaw = true
-		} else {
-			dst = dst[:n]
+		if uncompLen == 0 && hc.Length > 0 {
+			// Zero-filled chunk: no data to compress,
+			// but preserve the actual block length.
+			uncompLen = hc.Length
 		}
 
-		saved := uncompLen - int64(n)
+		var dst []byte
+		var n int
+		isRaw := false
+
+		if len(hc.Data) == 0 {
+			// Nothing to compress (zero chunk).
+			dst = nil
+			isRaw = true
+		} else {
+			maxDst := lz4.CompressBlockBound(len(hc.Data))
+			dst = make([]byte, maxDst)
+			var err error
+			n, err = lz4.CompressBlock(hc.Data, dst, nil)
+
+			if err != nil || n == 0 || n >= len(hc.Data) {
+				dst = hc.Data
+				n = len(hc.Data)
+				isRaw = true
+			} else {
+				dst = dst[:n]
+			}
+		}
+
+		saved := int64(len(hc.Data)) - int64(n)
 		if saved > 0 {
 			hc.Held.partialReleaseMemRaw(memRaw, saved)
 		}

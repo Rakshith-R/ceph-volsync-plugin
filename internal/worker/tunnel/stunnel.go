@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -139,7 +139,6 @@ func (s *Stunnel) Stop() {
 			err, "Failed to send SIGTERM to stunnel",
 			"pid", s.pid,
 		)
-		return
 	}
 
 	_, _ = proc.Wait()
@@ -182,6 +181,8 @@ func (s *Stunnel) generateConfig() error {
 			"Configuring stunnel as client (source)",
 		)
 		s.writeSourceConfig(&b)
+	default:
+		return fmt.Errorf("unsupported worker type: %s", s.config.WorkerType)
 	}
 
 	s.logger.Info(

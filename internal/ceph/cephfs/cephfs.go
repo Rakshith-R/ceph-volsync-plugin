@@ -72,16 +72,17 @@ func New(
 	if err := cc.Connect(mons); err != nil {
 		return nil, fmt.Errorf("failed to connect to cluster: %w", err)
 	}
-	defer cc.Destroy() // Ensure cleanup if any step fails
 
 	// Get FSAdmin to resolve subvolume path
 	fsa, err := cc.GetFSAdmin()
 	if err != nil {
+		cc.Destroy()
 		return nil, fmt.Errorf("failed to get FSAdmin: %w", err)
 	}
 
 	fsName, err := GetFSName(fsa, fsID)
 	if err != nil {
+		cc.Destroy()
 		return nil, fmt.Errorf("failed to get filesystem name for ID %d: %w", fsID, err)
 	}
 
@@ -105,6 +106,7 @@ func New(
 	// who only have access to this specific subvolume
 	err = mountInfo.MountWithRoot(rootPath)
 	if err != nil {
+		_ = mountInfo.Release()
 		cc.Destroy()
 		return nil, fmt.Errorf("failed to mount at subvolume path %s: %w", subVolumePath, err)
 	}

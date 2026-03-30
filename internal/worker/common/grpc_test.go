@@ -20,41 +20,35 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-logr/logr"
-	"google.golang.org/grpc"
-
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 )
 
-type mockWriteHandler struct{}
+func TestDoneSignalsShutdownChan(t *testing.T) {
+	s := NewSyncServer(nil, nil, nil, nil)
 
-func (m *mockWriteHandler) Write(
-	stream grpc.BidiStreamingServer[apiv1.WriteRequest, apiv1.WriteResponse],
-) error {
-	return nil
-}
-
-func TestBaseDestWorker_ListensOnPort(
-	t *testing.T,
-) {
-	w := BaseDestinationWorker{
-		Logger: logr.Discard(),
+	if _, err := s.Done(context.Background(), &apiv1.DoneRequest{}); err != nil {
+		t.Fatalf("Done() returned error: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(
-		context.Background(),
-	)
+	select {
+	case <-s.shutdownChan:
+	default:
+		t.Fatal("expected shutdownChan to have a signal after Done()")
+	}
+}
 
-	errCh := make(chan error, 1)
-	go func() {
-		syncServer := NewSyncServer(&mockWriteHandler{}, nil, nil, nil)
-		errCh <- w.Run(ctx, syncServer)
-	}()
+func TestDoneIdempotent(t *testing.T) {
+	s := NewSyncServer(nil, nil, nil, nil)
 
-	cancel()
+	for i := 0; i < 3; i++ {
+		if _, err := s.Done(context.Background(), &apiv1.DoneRequest{}); err != nil {
+			t.Fatalf("Done() call %d returned error: %v", i, err)
+		}
+	}
 
-	if err := <-errCh; err != nil &&
-		err != context.Canceled {
-		t.Fatalf("unexpected error: %v", err)
+	select {
+	case <-s.shutdownChan:
+	default:
+		t.Fatal("expected shutdownChan to have a signal")
 	}
 }

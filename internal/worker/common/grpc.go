@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -138,11 +138,9 @@ func (s *SyncServer) Done(
 	_ context.Context,
 	_ *apiv1.DoneRequest,
 ) (*apiv1.DoneResponse, error) {
-	go func() {
-		select {
-		case s.shutdownChan <- struct{}{}:
-		default:
-		}
-	}()
+	select {
+	case s.shutdownChan <- struct{}{}:
+	default:
+	}
 	return &apiv1.DoneResponse{}, nil
 }

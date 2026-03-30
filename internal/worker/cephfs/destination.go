@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -100,8 +100,12 @@ func (s *DataServer) Write(
 		for path := range files {
 			if serr := s.cache.SyncAndRelease(
 				path,
-			); serr != nil && err == nil {
-				err = serr
+			); serr != nil {
+				if err == nil {
+					err = serr
+				} else {
+					s.logger.Error(serr, "SyncAndRelease failed during cleanup", "path", path)
+				}
 			}
 		}
 	}()
@@ -226,6 +230,10 @@ func (s *DataServer) writeBlocks(
 	files map[string]*os.File,
 	req *apiv1.WriteRequest,
 ) error {
+	if len(req.Blocks) == 0 {
+		return nil
+	}
+
 	s.logger.Info(
 		"Writing blocks",
 		"path", req.Blocks[0].FilePath,
@@ -285,6 +293,12 @@ func (s *DataServer) writeBlocks(
 						block.Offset, filePath, err)
 				}
 				writeData = decompressed[:n]
+				if n != int(block.Length) {
+					return fmt.Errorf(
+						"lz4 decompressed size mismatch at offset %d in %s: got %d, expected %d",
+						block.Offset, filePath, n, block.Length,
+					)
+				}
 			}
 
 			if _, err := file.WriteAt(
@@ -331,8 +345,11 @@ func (s *DataServer) Delete(
 
 	for {
 		req, err := stream.Recv()
-		if err != nil {
+		if err == io.EOF {
 			return nil
+		}
+		if err != nil {
+			return err
 		}
 
 		s.logger.Info(

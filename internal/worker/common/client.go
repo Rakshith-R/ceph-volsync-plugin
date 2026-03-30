@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -41,6 +41,8 @@ func ConnectToDestination(
 	dialOpts := make(
 		[]grpc.DialOption, 0, 1+len(opts),
 	)
+	// TLS is handled at the transport layer by stunnel;
+	// the gRPC connection runs over the stunnel tunnel.
 	dialOpts = append(dialOpts,
 		grpc.WithTransportCredentials(
 			insecure.NewCredentials(),

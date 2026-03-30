@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -67,6 +67,7 @@ func (r *RsyncDaemon) Start() error {
 		"--daemon",
 		"--config="+rsyncdConf,
 		"--port="+r.port,
+		"--address=127.0.0.1",
 		"--no-detach",
 	)
 	r.cmd.Stdout = os.Stdout
@@ -82,8 +83,8 @@ func (r *RsyncDaemon) Start() error {
 	time.Sleep(2 * time.Second)
 
 	// Check if it's still running
-	if r.cmd.ProcessState != nil && r.cmd.ProcessState.Exited() {
-		return fmt.Errorf("rsync daemon exited prematurely")
+	if err := r.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+		return fmt.Errorf("rsync daemon exited prematurely: %w", err)
 	}
 
 	r.logger.Info(
@@ -109,7 +110,6 @@ func (r *RsyncDaemon) Stop() {
 		r.logger.Error(
 			err, "Failed to send SIGTERM to rsync daemon",
 		)
-		return
 	}
 
 	_ = r.cmd.Wait()

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package common_test
+package common
 
 import (
 	"context"
@@ -22,8 +22,6 @@ import (
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
-
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
 type mockSyncer struct {
@@ -39,9 +37,9 @@ func (m *mockSyncer) Sync(
 }
 
 func TestBaseSourceWorker_EmptyAddress(t *testing.T) {
-	w := common.BaseSourceWorker{
+	w := BaseSourceWorker{
 		Logger: logr.Discard(),
-		Config: common.SourceConfig{},
+		Config: SourceConfig{},
 	}
 	syncer := &mockSyncer{}
 

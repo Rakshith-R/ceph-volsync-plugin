@@ -14,13 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package common_test
+package common
 
 import (
 	"context"
 	"testing"
-
-	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 )
 
 type testWorker struct{}
@@ -33,5 +31,5 @@ func (w *testWorker) Run(
 
 // Compile-time check: testWorker satisfies Worker.
 func TestWorkerInterface(t *testing.T) {
-	var _ common.Worker = &testWorker{}
+	var _ Worker = &testWorker{}
 }

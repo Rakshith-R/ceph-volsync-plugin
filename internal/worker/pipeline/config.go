@@ -1,3 +1,19 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package pipeline
 
 import (
@@ -109,6 +125,9 @@ func (c *Config) validate() error {
 	if c.ChunkSize < minChunkSize || c.ChunkSize > maxChunkSize {
 		return fmt.Errorf("ChunkSize %d outside [%d, %d]", c.ChunkSize, minChunkSize, maxChunkSize)
 	}
+	if c.ChunkSize > c.MaxRawMemoryBytes {
+		return fmt.Errorf("ChunkSize %d > MaxRawMemoryBytes %d (would deadlock)", c.ChunkSize, c.MaxRawMemoryBytes)
+	}
 	if c.MaxWindow < minMaxWindow || c.MaxWindow > maxMaxWindow {
 		return fmt.Errorf("MaxWindow %d outside [%d, %d]", c.MaxWindow, minMaxWindow, maxMaxWindow)
 	}
@@ -132,6 +151,18 @@ func (c *Config) validate() error {
 			"HashBatchMaxCount %d outside [%d, %d]",
 			c.HashBatchMaxCount, minBatchCount, maxBatchCount,
 		)
+	}
+	if c.DataBatchMaxCount < minBatchCount || c.DataBatchMaxCount > maxBatchCount {
+		return fmt.Errorf(
+			"DataBatchMaxCount %d outside [%d, %d]",
+			c.DataBatchMaxCount, minBatchCount, maxBatchCount,
+		)
+	}
+	if c.HashWorkers < 1 {
+		return fmt.Errorf("HashWorkers %d < 1", c.HashWorkers)
+	}
+	if c.CompressWorkers < 1 {
+		return fmt.Errorf("CompressWorkers %d < 1", c.CompressWorkers)
 	}
 	if c.WinPressureThresh < 0.50 || c.WinPressureThresh > 0.90 {
 		return fmt.Errorf("WinPressureThresh %.2f outside [0.50, 0.90]", c.WinPressureThresh)

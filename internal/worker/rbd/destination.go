@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -278,6 +278,12 @@ func (s *RBDDataServer) writeBlocks(
 					return fmt.Errorf("lz4 decompress at offset %d: %w", block.Offset, err)
 				}
 				writeData = decompressed[:n]
+				if n != int(block.Length) {
+					return fmt.Errorf(
+						"lz4 decompressed size mismatch at offset %d: got %d, expected %d",
+						block.Offset, n, block.Length,
+					)
+				}
 			}
 
 			if _, err := file.WriteAt(

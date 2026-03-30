@@ -96,9 +96,9 @@ func (cp *ConnPool) Get(
 		)
 	}
 
-	cp.lock.RLock()
+	cp.lock.Lock()
 	conn := cp.getConn(unique)
-	cp.lock.RUnlock()
+	cp.lock.Unlock()
 	if conn != nil {
 		return conn, nil
 	}

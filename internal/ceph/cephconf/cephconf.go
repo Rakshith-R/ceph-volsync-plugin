@@ -62,7 +62,7 @@ func WriteCephConfig() error {
 func createKeyRingFile() error {
 	var err error
 	if _, err = os.Stat(keyRing); os.IsNotExist(err) {
-		_, err = os.Create(keyRing) //nolint:gosec
+		err = os.WriteFile(keyRing, nil, 0o600)
 	}
 
 	return err

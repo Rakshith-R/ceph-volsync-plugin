@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -35,8 +35,8 @@ const (
 	WritePayloadMinSize = 2 * 1024 * 1024 // 2MB
 
 	// WritePayloadMaxSize is the maximum accumulated
-	// data payload size. Prevents exceeding the 4MB
-	// gRPC default server max receive message size.
+	// data payload size. Must stay below the 8MB
+	// MaxGRPCMessageSize limit.
 	WritePayloadMaxSize = 3 * 1024 * 1024 // 3MB
 
 	// MaxGRPCMessageSize is the maximum gRPC message

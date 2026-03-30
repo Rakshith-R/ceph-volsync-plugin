@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
@@ -85,9 +86,9 @@ func (w *SourceWorker) Sync(
 	if err != nil {
 		return err
 	}
-	defer cc.Destroy()
 
 	if err := w.resolveParentImage(cc, sc); err != nil {
+		cc.Destroy()
 		return err
 	}
 
@@ -97,6 +98,7 @@ func (w *SourceWorker) Sync(
 	)
 	parentImage, err := cephrbd.NewImage(cc, parentSpec)
 	if err != nil {
+		cc.Destroy()
 		return fmt.Errorf(
 			"failed to open parent image %s: %w",
 			parentSpec, err,
@@ -106,11 +108,13 @@ func (w *SourceWorker) Sync(
 	volSize, err := parentImage.GetSize()
 	if err != nil {
 		_ = parentImage.Close()
+		cc.Destroy()
 		return fmt.Errorf(
 			"failed to get volume size: %w", err,
 		)
 	}
 	_ = parentImage.Close()
+	cc.Destroy()
 
 	iter, err := cephrbd.NewRBDBlockDiffIterator(
 		sc.mons,
@@ -187,6 +191,7 @@ func (w *SourceWorker) Sync(
 	lastReqID--
 	for !win.IsReleased(lastReqID) {
 		runtime.Gosched()
+		time.Sleep(100 * time.Microsecond)
 		if ctx.Err() != nil {
 			return fmt.Errorf(
 				"waiting for acks: %w",

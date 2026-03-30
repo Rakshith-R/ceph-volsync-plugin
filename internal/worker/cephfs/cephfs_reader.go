@@ -1,3 +1,19 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package cephfs
 
 import (
@@ -5,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
@@ -64,6 +81,14 @@ func NewWriteCache(baseDir string) *FileCache {
 func (fc *FileCache) Acquire(
 	relPath string, totalSize int64,
 ) (*os.File, error) {
+	clean := filepath.Clean(relPath)
+	if strings.Contains(clean, "..") {
+		return nil, fmt.Errorf(
+			"invalid path: path traversal not allowed: %s",
+			relPath,
+		)
+	}
+
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
@@ -143,17 +168,26 @@ func (fc *FileCache) SyncAndRelease(
 ) error {
 	fc.mu.Lock()
 	entry, ok := fc.files[relPath]
-	fc.mu.Unlock()
-
 	if !ok {
+		fc.mu.Unlock()
 		return nil
 	}
-	if err := entry.file.Sync(); err != nil {
+	entry.refCount++
+	fc.mu.Unlock()
+
+	syncErr := entry.file.Sync()
+
+	// Release the guard ref that prevented close.
+	_ = fc.Release(relPath)
+	// Release the caller's actual ref.
+	releaseErr := fc.Release(relPath)
+
+	if syncErr != nil {
 		return fmt.Errorf(
-			"sync %s: %w", relPath, err,
+			"sync %s: %w", relPath, syncErr,
 		)
 	}
-	return fc.Release(relPath)
+	return releaseErr
 }
 
 // Close releases all cached file handles.
@@ -178,14 +212,16 @@ func (fc *FileCache) Close() error {
 // access. CloseFile releases the handle after a
 // CommitRequest via drainPending.
 type CephFSReader struct {
-	cache *FileCache
+	cache    *FileCache
+	acquired map[string]struct{}
 }
 
 // newCephFSReader creates a reader rooted at baseDir.
 // Production code passes constant.DataMountPath.
 func newCephFSReader(baseDir string) *CephFSReader {
 	return &CephFSReader{
-		cache: NewReadCache(baseDir),
+		cache:    NewReadCache(baseDir),
+		acquired: make(map[string]struct{}),
 	}
 }
 
@@ -204,8 +240,12 @@ func (r *CephFSReader) ReadAt(
 	if err != nil {
 		return nil, err
 	}
-	// Do NOT release here — file stays open
-	// until CloseFile via drainPending.
+
+	if _, already := r.acquired[filePath]; already {
+		_ = r.cache.Release(filePath)
+	} else {
+		r.acquired[filePath] = struct{}{}
+	}
 
 	data := make([]byte, length)
 	n, err := f.ReadAt(data, offset)
@@ -223,6 +263,7 @@ func (r *CephFSReader) ReadAt(
 func (r *CephFSReader) CloseFile(
 	filePath string,
 ) error {
+	delete(r.acquired, filePath)
 	return r.cache.Release(filePath)
 }
 
