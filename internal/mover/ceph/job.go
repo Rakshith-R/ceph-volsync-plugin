@@ -145,7 +145,10 @@ func (m *Mover) ensureJob(
 				Capabilities: &corev1.Capabilities{
 					Drop: []corev1.Capability{"ALL"},
 				},
-				Privileged:             ptr.To(m.privileged),
+				// container does not need to be privileged
+				// but needs privilegeesclation to set necessary
+				// capabilities file related operations.
+				Privileged:             ptr.To(false),
 				ReadOnlyRootFilesystem: ptr.To(true),
 				RunAsUser:              ptr.To[int64](0), // Run as root for stunnel and rsync
 			},
@@ -189,6 +192,12 @@ func (m *Mover) ensureJob(
 			}
 		}
 		podSpec.RestartPolicy = corev1.RestartPolicyNever
+		if m.isSource {
+			// hostnetworking is required for the source mover to connect to
+			// ceph daemons running on hostnetwork.
+			podSpec.HostNetwork = true
+			podSpec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
+		}
 		podSpec.ServiceAccountName = sa.Name
 		podSpec.Volumes = []corev1.Volume{
 			{Name: dataVolumeName,

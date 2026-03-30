@@ -66,6 +66,7 @@ ARG STUNNEL_VERSION=""
 RUN dnf -y install --nodocs \
     stunnel${STUNNEL_VERSION:+-$STUNNEL_VERSION} \
     rsync${RSYNC_VERSION:+-$RSYNC_VERSION} \
+    socat \
     bash \
     && dnf clean all
 
