@@ -502,9 +502,10 @@ func runPodWithPVC(ctx context.Context, podName, pvcName string, drv driverConfi
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
-					Name:    "worker",
-					Image:   "busybox",
-					Command: []string{"/bin/sh", "-c", command},
+					Name:            "worker",
+					Image:           "busybox",
+					ImagePullPolicy: corev1.PullAlways,
+					Command:         []string{"/bin/sh", "-c", command},
 				},
 			},
 			Volumes: []corev1.Volume{
@@ -619,9 +620,10 @@ func compareDataInPod(ctx context.Context, podName, srcPVC, dstPVC string, drv d
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
-					Name:    "compare",
-					Image:   "busybox",
-					Command: []string{"/bin/sh", "-c", command},
+					Name:            "compare",
+					Image:           "busybox",
+					ImagePullPolicy: corev1.PullAlways,
+					Command:         []string{"/bin/sh", "-c", command},
 				},
 			},
 			Volumes: []corev1.Volume{
@@ -924,8 +926,8 @@ func tryCompareDataInPod(ctx context.Context, podName, srcPVC, dstPVC string, dr
 				{
 					Name:            "compare",
 					Image:           "busybox",
-					Command:         []string{"/bin/sh", "-c", command},
 					ImagePullPolicy: corev1.PullAlways,
+					Command:         []string{"/bin/sh", "-c", command},
 				},
 			},
 			Volumes: []corev1.Volume{
