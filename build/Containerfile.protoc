@@ -1,7 +1,7 @@
 # Build the protoc code generation tools container.
 # Multi-stage: golang builder for downloading and installing
 # tools, distroless runtime for a minimal (~20MB) final image.
-ARG GOLANG_VERSION=1.25.8
+ARG GOLANG_VERSION=1.25.7
 
 FROM golang:${GOLANG_VERSION} AS builder
 
