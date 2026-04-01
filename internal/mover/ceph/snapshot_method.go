@@ -328,6 +328,8 @@ func (m *Mover) getVolumeEnvVars(
 				Value: targetSnapshotHandle,
 			},
 		)
+
+		return envVars, nil
 	}
 
 	previousSnapList, err := m.listSnapshotsWithStatus(ctx, snapshotStatusPrevious)
