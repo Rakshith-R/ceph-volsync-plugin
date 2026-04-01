@@ -105,7 +105,7 @@ func (m *Mover) ensureServiceAndPublishAddress(ctx context.Context) (bool, error
 
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      m.namePrefix + m.direction + "-" + m.owner.GetName(),
+			Name:      cephVolsyncPrefix + m.direction + "-" + m.owner.GetName(),
 			Namespace: m.owner.GetNamespace(),
 		},
 	}
