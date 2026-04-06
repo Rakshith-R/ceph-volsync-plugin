@@ -212,6 +212,7 @@ func (fc *FileCache) Close() error {
 // access. CloseFile releases the handle after a
 // CommitRequest via drainPending.
 type CephFSReader struct {
+	mu       sync.Mutex
 	cache    *FileCache
 	acquired map[string]struct{}
 }
@@ -241,11 +242,13 @@ func (r *CephFSReader) ReadAt(
 		return nil, err
 	}
 
+	r.mu.Lock()
 	if _, already := r.acquired[filePath]; already {
 		_ = r.cache.Release(filePath)
 	} else {
 		r.acquired[filePath] = struct{}{}
 	}
+	r.mu.Unlock()
 
 	data := make([]byte, length)
 	n, err := f.ReadAt(data, offset)
@@ -263,7 +266,9 @@ func (r *CephFSReader) ReadAt(
 func (r *CephFSReader) CloseFile(
 	filePath string,
 ) error {
+	r.mu.Lock()
 	delete(r.acquired, filePath)
+	r.mu.Unlock()
 	return r.cache.Release(filePath)
 }
 

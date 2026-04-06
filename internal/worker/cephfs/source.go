@@ -58,7 +58,7 @@ const (
 
 	// smallBatchSize is the number of paths per
 	// batched rsync request for small files.
-	smallBatchSize = 500
+	smallBatchSize = 10000
 )
 
 // setRsyncUDSEnv configures the rsync command to connect
