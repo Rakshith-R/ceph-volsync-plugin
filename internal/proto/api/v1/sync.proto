@@ -14,6 +14,7 @@ service SyncService {
 
   // Unary RPCs
   rpc Done(DoneRequest) returns (DoneResponse);
+  rpc ExchangeCerts(ExchangeCertsRequest) returns (ExchangeCertsResponse);
 }
 
 // --------------------
@@ -144,3 +145,19 @@ message DoneRequest {}
 
 // DoneResponse is empty on success.
 message DoneResponse {}
+
+// --------------------
+// Certificate Exchange Messages
+// --------------------
+
+// ExchangeCertsRequest sends the source's ephemeral certificate.
+message ExchangeCertsRequest {
+  bytes client_cert_pem = 1;
+}
+
+// ExchangeCertsResponse returns the destination's ephemeral certificate
+// and the port where the direct TLS listener accepts connections.
+message ExchangeCertsResponse {
+  bytes server_cert_pem = 1;
+  int32 direct_tls_port = 2;
+}

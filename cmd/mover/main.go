@@ -187,6 +187,7 @@ func newRBDWorker(
 	}
 }
 
+
 func setupLogger(level string) (logr.Logger, error) {
 	var zapLevel zapcore.Level
 

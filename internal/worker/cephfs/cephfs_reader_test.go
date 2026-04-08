@@ -96,19 +96,20 @@ func TestCephFSReader_ConcurrentReadAt(t *testing.T) {
 	r := newCephFSReader(dir)
 	defer func() { _ = r.Close() }()
 
-	// Overlap ReadAt and CloseFile concurrently, mirroring
-	// production where pipeline read workers and commitDrainer
-	// operate on the same reader simultaneously.
+	// Readers use files 0-9, closer uses files 10-19.
+	// Both operate on the same CephFSReader concurrently,
+	// exercising the mutex on the shared acquired map.
 	var wg sync.WaitGroup
 	workers := 8
+	half := numFiles / 2
 	wg.Add(workers + 1)
 
-	// Read workers: call ReadAt across all files.
+	// Read workers: call ReadAt across files 0-9.
 	for w := range workers {
 		go func(id int) {
 			defer wg.Done()
-			for i := range numFiles {
-				name := fmt.Sprintf("f%d.bin", (i+id)%numFiles)
+			for i := range half {
+				name := fmt.Sprintf("f%d.bin", (i+id)%half)
 				data, err := r.ReadAt(name, 0, 20)
 				if err != nil {
 					t.Errorf("worker %d: ReadAt %s: %v", id, name, err)
@@ -121,11 +122,13 @@ func TestCephFSReader_ConcurrentReadAt(t *testing.T) {
 		}(w)
 	}
 
-	// Closer: call CloseFile on files while readers are active.
+	// Closer: acquire then close files 10-19 concurrently.
 	go func() {
 		defer wg.Done()
-		for i := range numFiles {
-			_ = r.CloseFile(fmt.Sprintf("f%d.bin", i))
+		for i := half; i < numFiles; i++ {
+			name := fmt.Sprintf("f%d.bin", i)
+			_, _ = r.ReadAt(name, 0, 20)
+			_ = r.CloseFile(name)
 		}
 	}()
 

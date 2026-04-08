@@ -18,6 +18,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"golang.org/x/sync/errgroup"
@@ -132,12 +133,14 @@ func hashSender(
 			Hashes: make([]*apiv1.BlockHash, len(batch)),
 		}
 		for i, hc := range batch {
+			hashBytes := make([]byte, 8)
+			binary.LittleEndian.PutUint64(hashBytes, hc.Hash)
 			req.Hashes[i] = &apiv1.BlockHash{
 				RequestId: hc.ReqID,
 				FilePath:  hc.FilePath,
 				Offset:    uint64(hc.Offset), //nolint:gosec // G115: non-negative offset
 				Length:    uint64(hc.Length), //nolint:gosec // G115: non-negative length
-				Sha256:    hc.Hash[:],
+				Sha256:    hashBytes,
 				TotalSize: uint64(hc.TotalSize), //nolint:gosec // G115: non-negative size
 			}
 		}

@@ -18,12 +18,15 @@ package common
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/version/v1"
@@ -51,6 +54,11 @@ func ConnectToDestination(
 		grpc.WithTransportCredentials(
 			insecure.NewCredentials(),
 		),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                30 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
 	)
 	dialOpts = append(dialOpts, opts...)
 
@@ -113,6 +121,27 @@ func versionHandshake(
 			backoff = maxRetryBackoff
 		}
 	}
+}
+
+// ConnectDirectTLS establishes a gRPC connection over
+// native TLS using the provided config for mTLS with
+// fingerprint pinning.
+func ConnectDirectTLS(
+	ctx context.Context, logger logr.Logger,
+	address string, tlsConfig *tls.Config,
+) (*grpc.ClientConn, error) {
+	creds := credentials.NewTLS(tlsConfig)
+	conn, err := grpc.NewClient(address,
+		grpc.WithTransportCredentials(creds),
+		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(MaxGRPCMessageSize)),
+		grpc.WithWriteBufferSize(4*1024*1024),
+		grpc.WithReadBufferSize(4*1024*1024),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("direct TLS dial %s: %w", address, err)
+	}
+	logger.Info("Connected via direct TLS", "address", address)
+	return conn, nil
 }
 
 // SignalDone sends the Done RPC to the destination,

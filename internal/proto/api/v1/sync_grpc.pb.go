@@ -24,6 +24,7 @@ const (
 	SyncService_Commit_FullMethodName        = "/api.v1.SyncService/Commit"
 	SyncService_Delete_FullMethodName        = "/api.v1.SyncService/Delete"
 	SyncService_Done_FullMethodName          = "/api.v1.SyncService/Done"
+	SyncService_ExchangeCerts_FullMethodName = "/api.v1.SyncService/ExchangeCerts"
 )
 
 // SyncServiceClient is the client API for SyncService service.
@@ -39,6 +40,7 @@ type SyncServiceClient interface {
 	Delete(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[DeleteRequest, DeleteResponse], error)
 	// Unary RPCs
 	Done(ctx context.Context, in *DoneRequest, opts ...grpc.CallOption) (*DoneResponse, error)
+	ExchangeCerts(ctx context.Context, in *ExchangeCertsRequest, opts ...grpc.CallOption) (*ExchangeCertsResponse, error)
 }
 
 type syncServiceClient struct {
@@ -111,6 +113,16 @@ func (c *syncServiceClient) Done(ctx context.Context, in *DoneRequest, opts ...g
 	return out, nil
 }
 
+func (c *syncServiceClient) ExchangeCerts(ctx context.Context, in *ExchangeCertsRequest, opts ...grpc.CallOption) (*ExchangeCertsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExchangeCertsResponse)
+	err := c.cc.Invoke(ctx, SyncService_ExchangeCerts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SyncServiceServer is the server API for SyncService service.
 // All implementations must embed UnimplementedSyncServiceServer
 // for forward compatibility.
@@ -124,6 +136,7 @@ type SyncServiceServer interface {
 	Delete(grpc.BidiStreamingServer[DeleteRequest, DeleteResponse]) error
 	// Unary RPCs
 	Done(context.Context, *DoneRequest) (*DoneResponse, error)
+	ExchangeCerts(context.Context, *ExchangeCertsRequest) (*ExchangeCertsResponse, error)
 	mustEmbedUnimplementedSyncServiceServer()
 }
 
@@ -148,6 +161,9 @@ func (UnimplementedSyncServiceServer) Delete(grpc.BidiStreamingServer[DeleteRequ
 }
 func (UnimplementedSyncServiceServer) Done(context.Context, *DoneRequest) (*DoneResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Done not implemented")
+}
+func (UnimplementedSyncServiceServer) ExchangeCerts(context.Context, *ExchangeCertsRequest) (*ExchangeCertsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExchangeCerts not implemented")
 }
 func (UnimplementedSyncServiceServer) mustEmbedUnimplementedSyncServiceServer() {}
 func (UnimplementedSyncServiceServer) testEmbeddedByValue()                     {}
@@ -216,6 +232,24 @@ func _SyncService_Done_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SyncService_ExchangeCerts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExchangeCertsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SyncServiceServer).ExchangeCerts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SyncService_ExchangeCerts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SyncServiceServer).ExchangeCerts(ctx, req.(*ExchangeCertsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SyncService_ServiceDesc is the grpc.ServiceDesc for SyncService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -226,6 +260,10 @@ var SyncService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Done",
 			Handler:    _SyncService_Done_Handler,
+		},
+		{
+			MethodName: "ExchangeCerts",
+			Handler:    _SyncService_ExchangeCerts_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

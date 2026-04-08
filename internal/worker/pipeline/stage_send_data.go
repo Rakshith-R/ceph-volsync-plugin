@@ -143,7 +143,7 @@ func dataSender(
 		}
 
 		blocks = nil
-		pending = nil
+		pending = pending[:0]
 		accum = 0
 		return nil
 	}
@@ -188,15 +188,19 @@ func dataSender(
 			Compression: algo,
 		}
 
-		blocks = append(blocks, block)
-		pending = append(pending, cc.Held)
-		accum += len(cc.Data)
-
-		if accum >= int(cfg.DataBatchMaxBytes) ||
-			len(blocks) >= cfg.DataBatchMaxCount {
+		// Flush before appending if this block would
+		// exceed the batch size limit.
+		if len(blocks) > 0 &&
+			(accum+len(cc.Data) >= int(cfg.DataBatchMaxBytes) ||
+				len(blocks) >= cfg.DataBatchMaxCount) {
 			if err := flush(); err != nil {
+				cc.Held.release(memRaw, win)
 				return err
 			}
 		}
+
+		blocks = append(blocks, block)
+		pending = append(pending, cc.Held)
+		accum += len(cc.Data)
 	}
 }

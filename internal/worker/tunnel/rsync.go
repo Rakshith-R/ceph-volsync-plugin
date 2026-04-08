@@ -37,6 +37,7 @@ type RsyncDaemon struct {
 	port   string
 	cmd    *exec.Cmd
 	logger logr.Logger
+	exitCh chan error
 }
 
 // NewRsyncDaemon creates a new RsyncDaemon manager.
@@ -79,12 +80,24 @@ func (r *RsyncDaemon) Start() error {
 		)
 	}
 
+	// Background goroutine reaps the daemon process,
+	// preventing zombies if it exits before Stop().
+	r.exitCh = make(chan error, 1)
+	go func() {
+		r.exitCh <- r.cmd.Wait()
+	}()
+
 	// Wait for rsync daemon to initialize
 	time.Sleep(2 * time.Second)
 
-	// Check if it's still running
-	if err := r.cmd.Process.Signal(syscall.Signal(0)); err != nil {
-		return fmt.Errorf("rsync daemon exited prematurely: %w", err)
+	// Check if it exited during startup
+	select {
+	case err := <-r.exitCh:
+		if err != nil {
+			return fmt.Errorf("rsync daemon exited prematurely: %w", err)
+		}
+		return fmt.Errorf("rsync daemon exited prematurely")
+	default:
 	}
 
 	r.logger.Info(
@@ -112,7 +125,14 @@ func (r *RsyncDaemon) Stop() {
 		)
 	}
 
-	_ = r.cmd.Wait()
+	if r.exitCh != nil {
+		// Non-blocking: exitCh may already be drained if
+		// daemon exited prematurely during startup check.
+		select {
+		case <-r.exitCh:
+		default:
+		}
+	}
 }
 
 func (r *RsyncDaemon) generateConfig() error {
@@ -130,6 +150,7 @@ lock file = /tmp/rsyncd.lock
     comment = Data volume
     read only = false
     list = yes
+    fake super = yes
     # No authentication - stunnel already provides PSK authentication
 `
 	return os.WriteFile(rsyncdConf, []byte(conf), 0600)

@@ -74,6 +74,7 @@ type SyncServer struct {
 	deleteH      DeleteHandler
 	hashH        HashHandler
 	commitH      CommitHandler
+	certHandler  *CertExchangeHandler
 }
 
 // NewSyncServer creates a SyncServer with the given
@@ -143,4 +144,29 @@ func (s *SyncServer) Done(
 	default:
 	}
 	return &apiv1.DoneResponse{}, nil
+}
+
+// SetCertHandler sets the certificate exchange handler
+// for direct TLS connections.
+func (s *SyncServer) SetCertHandler(h *CertExchangeHandler) {
+	s.certHandler = h
+}
+
+// ExchangeCerts delegates to the CertExchangeHandler.
+func (s *SyncServer) ExchangeCerts(
+	ctx context.Context,
+	req *apiv1.ExchangeCertsRequest,
+) (*apiv1.ExchangeCertsResponse, error) {
+	if s.certHandler == nil {
+		return nil, status.Error(codes.Unimplemented, "cert exchange not configured")
+	}
+	return s.certHandler.ExchangeCerts(ctx, req)
+}
+
+// StopDirectTLS stops the direct TLS listener if one
+// was started by the CertExchangeHandler.
+func (s *SyncServer) StopDirectTLS() {
+	if s.certHandler != nil {
+		s.certHandler.StopDirectTLS()
+	}
 }

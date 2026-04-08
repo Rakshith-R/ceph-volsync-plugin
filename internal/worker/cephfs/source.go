@@ -20,10 +20,13 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -50,21 +53,37 @@ const (
 
 	// smallFileMaxSize is files this size or smaller
 	// that use rsync instead of block diff.
-	smallFileMaxSize = 64 * 1024 // 64KB
+	smallFileMaxSize = 32 * 1024 * 1024 // 32MB
 
 	// deleteBatchSize is the number of paths per
 	// batched delete request.
-	deleteBatchSize = 2000
+	deleteBatchSize = 10000
 
 	// smallBatchSize is the number of paths per
 	// batched rsync request for small files.
-	smallBatchSize = 10000
+	smallBatchSize = 500
+
+	// rsyncWorkers is the number of parallel rsync
+	// processes for small file and metadata sync.
+	// Matches rsync daemon max connections.
+	rsyncWorkers = 4
 )
 
 // setRsyncUDSEnv configures the rsync command to connect
 // through a Unix domain socket via socat, bypassing TCP.
 func setRsyncUDSEnv(cmd *exec.Cmd) {
 	cmd.Env = append(os.Environ(), "RSYNC_CONNECT_PROG=socat - UNIX-CONNECT:/tmp/stunnel/rsync.sock")
+}
+
+// setRsyncSysProcAttr configures the rsync process so
+// socat/sh children receive SIGTERM when rsync exits.
+// Setpgid is intentionally omitted: CommandContext sends
+// SIGKILL by PID, and with Setpgid the children would
+// survive in a separate process group.
+func setRsyncSysProcAttr(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Pdeathsig: syscall.SIGTERM,
+	}
 }
 
 // syncState holds the context for the sync operation.
@@ -136,10 +155,36 @@ func (w *SourceWorker) Run(
 
 // Sync implements common.Syncer. It performs CephFS
 // snapdiff sync or falls back to rsync.
+//
+//nolint:funlen // cert exchange + dispatch logic
 func (w *SourceWorker) Sync(
 	ctx context.Context,
 	conn *grpc.ClientConn,
 ) error {
+	// Exchange certs over stunnel
+	syncClient := apiv1.NewSyncServiceClient(conn)
+	clientCert, err := common.GenerateEphemeralCert()
+	if err != nil {
+		return fmt.Errorf("generate client cert: %w", err)
+	}
+	resp, err := syncClient.ExchangeCerts(ctx, &apiv1.ExchangeCertsRequest{
+		ClientCertPem: clientCert.CertPEM,
+	})
+	if err != nil {
+		return fmt.Errorf("exchange certs: %w", err)
+	}
+	tlsConfig, err := common.NewClientTLSConfig(clientCert, resp.ServerCertPem)
+	if err != nil {
+		return fmt.Errorf("build TLS config: %w", err)
+	}
+	destAddr := os.Getenv(constant.EnvDestinationAddress)
+	directAddr := net.JoinHostPort(destAddr, strconv.Itoa(int(resp.DirectTlsPort)))
+	dataConn, err := common.ConnectDirectTLS(ctx, w.Logger, directAddr, tlsConfig)
+	if err != nil {
+		return fmt.Errorf("direct TLS connect: %w", err)
+	}
+	defer dataConn.Close()
+
 	baseSnapshotHandle := os.Getenv(
 		constant.EnvBaseSnapshotHandle,
 	)
@@ -157,11 +202,11 @@ func (w *SourceWorker) Sync(
 			"Snapshot handles not set, " +
 				"using rsync on /data",
 		)
-		return w.runRsyncFallback(ctx, conn)
+		return w.runRsyncFallback(ctx, dataConn)
 	}
 
 	return w.runSnapdiffSync(
-		ctx, conn,
+		ctx, dataConn,
 		baseSnapshotHandle,
 		targetSnapshotHandle,
 		volumeHandle,
@@ -173,7 +218,7 @@ func (w *SourceWorker) Sync(
 func (w *SourceWorker) runRsyncFallback(
 	ctx context.Context, conn *grpc.ClientConn,
 ) error {
-	err := w.rsync()
+	err := w.rsync(ctx)
 	if err != nil {
 		w.Logger.Error(err, "rsync failed")
 		return fmt.Errorf("rsync failed: %w", err)
@@ -315,7 +360,7 @@ func (w *SourceWorker) runSnapdiffSync(
 
 // rsync performs the rsync synchronization with retry
 // logic.
-func (w *SourceWorker) rsync() error {
+func (w *SourceWorker) rsync(ctx context.Context) error {
 	startTime := time.Now()
 	rsyncTarget := "rsync://localhost/data"
 
@@ -336,7 +381,7 @@ func (w *SourceWorker) rsync() error {
 			"maxRetries", maxRetries,
 		)
 
-		rcA, err := w.createFileListAndSync(rsyncTarget)
+		rcA, err := w.createFileListAndSync(ctx, rsyncTarget)
 		if err != nil {
 			w.Logger.Error(
 				err,
@@ -349,7 +394,7 @@ func (w *SourceWorker) rsync() error {
 			time.Sleep(1 * time.Second)
 		}
 
-		rcB := w.syncForDeletion(rsyncTarget)
+		rcB := w.syncForDeletion(ctx, rsyncTarget)
 
 		rc = rcA*100 + rcB
 
@@ -399,9 +444,9 @@ func (w *SourceWorker) rsync() error {
 // createFileListAndSync generates the file list and
 // performs the first rsync pass.
 func (w *SourceWorker) createFileListAndSync(
-	rsyncTarget string,
+	ctx context.Context, rsyncTarget string,
 ) (int, error) {
-	findCmd := exec.Command( //nolint:gosec // G204: command args constructed internally
+	findCmd := exec.CommandContext(ctx, //nolint:gosec // G204: command args constructed internally
 		"sh", "-c",
 		fmt.Sprintf(
 			"find %s -mindepth 1 -maxdepth 1"+
@@ -409,6 +454,7 @@ func (w *SourceWorker) createFileListAndSync(
 			constant.DataMountPath, constant.DataMountPath,
 		),
 	)
+	setRsyncSysProcAttr(findCmd)
 
 	output, err := findCmd.Output()
 	if err != nil {
@@ -455,8 +501,9 @@ func (w *SourceWorker) createFileListAndSync(
 		"args", strings.Join(rsyncArgs, " "),
 	)
 
-	cmd := exec.Command("rsync", rsyncArgs...) //nolint:gosec // G204: command args constructed internally
+	cmd := exec.CommandContext(ctx, "rsync", rsyncArgs...) //nolint:gosec // G204: command args constructed internally
 	setRsyncUDSEnv(cmd)
+	setRsyncSysProcAttr(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -484,7 +531,7 @@ func (w *SourceWorker) createFileListAndSync(
 // syncForDeletion performs the second rsync pass to
 // delete extra files on destination.
 func (w *SourceWorker) syncForDeletion(
-	rsyncTarget string,
+	ctx context.Context, rsyncTarget string,
 ) int {
 	rsyncArgs := []string{
 		"-rx",
@@ -503,8 +550,9 @@ func (w *SourceWorker) syncForDeletion(
 		"args", strings.Join(rsyncArgs, " "),
 	)
 
-	cmd := exec.Command("rsync", rsyncArgs...) //nolint:gosec // G204: command args constructed internally
+	cmd := exec.CommandContext(ctx, "rsync", rsyncArgs...) //nolint:gosec // G204: command args constructed internally
 	setRsyncUDSEnv(cmd)
+	setRsyncSysProcAttr(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -590,7 +638,7 @@ func (w *SourceWorker) runStatelessSync(
 	}
 
 	// Convergence rsync (directory metadata)
-	if err := w.rsyncConvergence(state); err != nil {
+	if err := w.rsyncConvergence(ctx, state); err != nil {
 		return fmt.Errorf(
 			"convergence rsync: %w", err,
 		)
@@ -813,7 +861,7 @@ func (w *SourceWorker) runSnapdiffBlockPipeline(
 		return syncClient.CompareHashes(ctx)
 	}
 
-	cfg := pipeline.Config{ReadWorkers: 2}
+	cfg := pipeline.Config{}
 	cfg.SetDefaults()
 
 	win := pipeline.NewWindowSemaphore(cfg.MaxWindow)
@@ -1001,6 +1049,7 @@ func (w *SourceWorker) sendDeleteBatch(
 // rsyncBatch writes paths to a temp file and runs
 // rsync against it.
 func (w *SourceWorker) rsyncBatch(
+	ctx context.Context,
 	paths []string, target string,
 	includeContent bool,
 ) error {
@@ -1029,34 +1078,76 @@ func (w *SourceWorker) rsyncBatch(
 	}
 
 	return w.rsyncFromList(
-		tmpPath, target, includeContent,
+		ctx, tmpPath, target, includeContent,
 	)
 }
 
-// consumeSmallFiles batches paths from smallCh and
-// runs rsync for each batch.
+// consumeSmallFiles fans out rsyncWorkers goroutines
+// that drain smallCh in parallel, each batching up to
+// smallBatchSize paths before invoking rsync.
 func (w *SourceWorker) consumeSmallFiles(
 	ctx context.Context,
 	smallCh <-chan string,
 	target string,
 ) error {
+	return w.runParallelRsyncWorkers(
+		ctx, smallCh, target, true,
+	)
+}
+
+// runParallelRsyncWorkers spawns rsyncWorkers
+// goroutines that each drain paths from ch, batch
+// them, and run rsync concurrently over the same
+// stunnel endpoint.
+func (w *SourceWorker) runParallelRsyncWorkers(
+	ctx context.Context,
+	ch <-chan string,
+	target string,
+	includeContent bool,
+) error {
+	g, gctx := errgroup.WithContext(ctx)
+
+	for i := range rsyncWorkers {
+		g.Go(func() error {
+			return w.rsyncWorkerLoop(
+				gctx, i, ch, target, includeContent,
+			)
+		})
+	}
+
+	return g.Wait()
+}
+
+// rsyncWorkerLoop is a single rsync worker that drains
+// paths from ch, accumulates a batch, and fires rsync
+// when the batch is full or the channel closes.
+func (w *SourceWorker) rsyncWorkerLoop(
+	ctx context.Context,
+	workerID int,
+	ch <-chan string,
+	target string,
+	includeContent bool,
+) error {
 	batch := make([]string, 0, smallBatchSize)
 
 	for {
 		select {
-		case p, ok := <-smallCh:
+		case p, ok := <-ch:
 			if !ok {
 				return w.flushBatch(
-					batch, target, true,
+					ctx, batch, target,
+					includeContent,
 				)
 			}
 			batch = append(batch, p)
 			if len(batch) >= smallBatchSize {
 				if err := w.rsyncBatch(
-					batch, target, true,
+					ctx, batch, target,
+					includeContent,
 				); err != nil {
 					return fmt.Errorf(
-						"small file rsync: %w", err,
+						"rsync worker %d: %w",
+						workerID, err,
 					)
 				}
 				batch = batch[:0]
@@ -1108,42 +1199,22 @@ func (w *SourceWorker) consumeDeletes(
 	}
 }
 
-// consumeMetaRsync batches committed large file paths
-// and runs metadata-only rsync for each batch.
+// consumeMetaRsync fans out rsyncWorkers goroutines
+// that drain committedCh in parallel, each batching
+// metadata-only rsync invocations.
 func (w *SourceWorker) consumeMetaRsync(
 	ctx context.Context,
 	committedCh <-chan string,
 	target string,
 ) error {
-	batch := make([]string, 0, smallBatchSize)
-
-	for {
-		select {
-		case p, ok := <-committedCh:
-			if !ok {
-				return w.flushBatch(
-					batch, target, false,
-				)
-			}
-			batch = append(batch, p)
-			if len(batch) >= smallBatchSize {
-				if err := w.rsyncBatch(
-					batch, target, false,
-				); err != nil {
-					return fmt.Errorf(
-						"meta rsync: %w", err,
-					)
-				}
-				batch = batch[:0]
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
+	return w.runParallelRsyncWorkers(
+		ctx, committedCh, target, false,
+	)
 }
 
 // flushBatch sends remaining paths via rsync if any.
 func (w *SourceWorker) flushBatch(
+	ctx context.Context,
 	batch []string, target string,
 	includeContent bool,
 ) error {
@@ -1151,7 +1222,7 @@ func (w *SourceWorker) flushBatch(
 		return nil
 	}
 	if err := w.rsyncBatch(
-		batch, target, includeContent,
+		ctx, batch, target, includeContent,
 	); err != nil {
 		return fmt.Errorf(
 			"rsync flush: %w", err,
@@ -1176,7 +1247,7 @@ func (w *SourceWorker) flushDeletes(
 // rsyncConvergence performs the final rsync pass for
 // directory metadata.
 func (w *SourceWorker) rsyncConvergence(
-	state *syncState,
+	ctx context.Context, state *syncState,
 ) error {
 	w.Logger.Info(
 		"Rsync convergence: syncing directory metadata",
@@ -1188,8 +1259,9 @@ func (w *SourceWorker) rsyncConvergence(
 		constant.DataMountPath + "/",
 		state.rsyncTarget,
 	}
-	cmd := exec.Command("rsync", rsyncDirArgs...) //nolint:gosec // G204: command args constructed internally
+	cmd := exec.CommandContext(ctx, "rsync", rsyncDirArgs...) //nolint:gosec // G204: command args constructed internally
 	setRsyncUDSEnv(cmd)
+	setRsyncSysProcAttr(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -1204,6 +1276,7 @@ func (w *SourceWorker) rsyncConvergence(
 
 // rsyncFromList runs rsync with file list.
 func (w *SourceWorker) rsyncFromList(
+	ctx context.Context,
 	listPath, target string, includeContent bool,
 ) error {
 	info, err := os.Stat(listPath)
@@ -1235,8 +1308,9 @@ func (w *SourceWorker) rsyncFromList(
 		}
 	}
 
-	cmd := exec.Command("rsync", rsyncArgs...) //nolint:gosec // G204: command args constructed internally
+	cmd := exec.CommandContext(ctx, "rsync", rsyncArgs...) //nolint:gosec // G204: command args constructed internally
 	setRsyncUDSEnv(cmd)
+	setRsyncSysProcAttr(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

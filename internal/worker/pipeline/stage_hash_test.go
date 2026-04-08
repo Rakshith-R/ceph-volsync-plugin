@@ -18,8 +18,9 @@ package pipeline
 
 import (
 	"context"
-	"crypto/sha256"
 	"testing"
+
+	"github.com/cespare/xxhash/v2"
 )
 
 func TestStageHash_CorrectHash(t *testing.T) {
@@ -29,7 +30,7 @@ func TestStageHash_CorrectHash(t *testing.T) {
 	cfg.HashWorkers = 1
 
 	data := []byte("hello world block data")
-	expected := sha256.Sum256(data)
+	expected := xxhash.Sum64(data)
 
 	inCh := make(chan ReadChunk, 1)
 	inCh <- ReadChunk{ReqID: 0, Offset: 0, Data: data}

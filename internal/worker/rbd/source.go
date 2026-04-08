@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -139,14 +141,38 @@ func (w *SourceWorker) Sync(
 	}
 	defer func() { _ = device.Close() }()
 
+	// Exchange certs over stunnel
 	syncClient := apiv1.NewSyncServiceClient(conn)
+	clientCert, err := common.GenerateEphemeralCert()
+	if err != nil {
+		return fmt.Errorf("generate client cert: %w", err)
+	}
+	resp, err := syncClient.ExchangeCerts(ctx, &apiv1.ExchangeCertsRequest{
+		ClientCertPem: clientCert.CertPEM,
+	})
+	if err != nil {
+		return fmt.Errorf("exchange certs: %w", err)
+	}
+	tlsConfig, err := common.NewClientTLSConfig(clientCert, resp.ServerCertPem)
+	if err != nil {
+		return fmt.Errorf("build TLS config: %w", err)
+	}
+	destAddr := os.Getenv(constant.EnvDestinationAddress)
+	directAddr := net.JoinHostPort(destAddr, strconv.Itoa(int(resp.DirectTlsPort)))
+	dataConn, err := common.ConnectDirectTLS(ctx, w.Logger, directAddr, tlsConfig)
+	if err != nil {
+		return fmt.Errorf("direct TLS connect: %w", err)
+	}
+	defer dataConn.Close()
+
+	dataSyncClient := apiv1.NewSyncServiceClient(dataConn)
 
 	newStream := func(
 		ctx context.Context,
 	) (grpc.BidiStreamingClient[
 		apiv1.WriteRequest, apiv1.WriteResponse,
 	], error) {
-		return syncClient.Write(ctx)
+		return dataSyncClient.Write(ctx)
 	}
 	newHashStream := func(
 		ctx context.Context,
@@ -154,16 +180,17 @@ func (w *SourceWorker) Sync(
 		apiv1.HashRequest,
 		apiv1.HashResponse,
 	], error) {
-		return syncClient.CompareHashes(ctx)
+		return dataSyncClient.CompareHashes(ctx)
 	}
 
-	cfg := pipeline.Config{}
+	cfg := pipeline.Config{ReadWorkers: 16}
 	cfg.SetDefaults()
 
 	win := pipeline.NewWindowSemaphore(cfg.MaxWindow)
 	adapter := &rbdIterAdapter{
 		iter:      iter,
 		totalSize: int64(volSize), //nolint:gosec // G115: volume size within range
+		chunkSize: cfg.ChunkSize,
 	}
 
 	p := pipeline.New(cfg)
@@ -186,7 +213,7 @@ func (w *SourceWorker) Sync(
 			"No changed blocks in diff," +
 				" skipping commit",
 		)
-		return w.closeAndSignalDone(ctx, conn)
+		return w.closeAndSignalDone(ctx, dataConn)
 	}
 	lastReqID--
 	for !win.IsReleased(lastReqID) {
@@ -201,7 +228,7 @@ func (w *SourceWorker) Sync(
 	}
 
 	// Send commit for the device
-	commitStream, err := syncClient.Commit(ctx)
+	commitStream, err := dataSyncClient.Commit(ctx)
 	if err != nil {
 		return fmt.Errorf("open commit stream: %w", err)
 	}
@@ -218,7 +245,7 @@ func (w *SourceWorker) Sync(
 	}
 	_ = commitStream.CloseSend()
 
-	return w.closeAndSignalDone(ctx, conn)
+	return w.closeAndSignalDone(ctx, dataConn)
 }
 
 // resolveSourceConfig reads environment variables,
@@ -465,25 +492,49 @@ func (w *SourceWorker) resolveSnapshotDiff(
 }
 
 // rbdIterAdapter adapts cephrbd.RBDBlockDiffIterator to pipeline.BlockIterator.
+// Large extents from the RBD diff are split into chunkSize-sized pieces
+// to stay within the gRPC message size limit.
 type rbdIterAdapter struct {
 	iter      *cephrbd.RBDBlockDiffIterator
 	reqID     uint64
 	totalSize int64
+	chunkSize int64
+	// remainder tracks a partially consumed extent.
+	remOffset int64
+	remLen    int64
+	hasRem    bool
 }
 
 func (a *rbdIterAdapter) Next() (*pipeline.ChangeBlock, bool) {
-	cb, ok := a.iter.Next()
-	if !ok {
-		return nil, false
+	if !a.hasRem {
+		cb, ok := a.iter.Next()
+		if !ok {
+			return nil, false
+		}
+		a.remOffset = cb.Offset
+		a.remLen = cb.Len
+		a.hasRem = true
 	}
+
+	emitLen := a.remLen
+	if a.chunkSize > 0 && emitLen > a.chunkSize {
+		emitLen = a.chunkSize
+	}
+
 	block := &pipeline.ChangeBlock{
 		FilePath:  constant.DevicePath,
-		Offset:    cb.Offset,
-		Len:       cb.Len,
+		Offset:    a.remOffset,
+		Len:       emitLen,
 		ReqID:     a.reqID,
 		TotalSize: a.totalSize,
 	}
 	a.reqID++
+	a.remOffset += emitLen
+	a.remLen -= emitLen
+	if a.remLen <= 0 {
+		a.hasRem = false
+	}
+
 	return block, true
 }
 

@@ -72,6 +72,8 @@ func (w *BaseSourceWorker) Run(
 				MaxGRPCMessageSize,
 			),
 		),
+		grpc.WithWriteBufferSize(4*1024*1024),
+		grpc.WithReadBufferSize(4*1024*1024),
 	)
 	if err != nil {
 		return err

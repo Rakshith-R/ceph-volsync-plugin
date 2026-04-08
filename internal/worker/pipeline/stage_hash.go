@@ -18,12 +18,26 @@ package pipeline
 
 import (
 	"context"
-	"crypto/sha256"
+	"sync"
 
+	"github.com/cespare/xxhash/v2"
 	"golang.org/x/sync/errgroup"
 )
 
-// StageHash spawns HashWorkers goroutines that compute SHA-256 of each ReadChunk.
+// zeroHashCache caches xxhash-64 hashes of zero-filled
+// buffers keyed by length, avoiding per-chunk allocation.
+var zeroHashCache sync.Map
+
+func zeroHash(length int64) uint64 {
+	if v, ok := zeroHashCache.Load(length); ok {
+		return v.(uint64)
+	}
+	h := xxhash.Sum64(make([]byte, length))
+	zeroHashCache.Store(length, h)
+	return h
+}
+
+// StageHash spawns HashWorkers goroutines that compute xxhash-64 of each ReadChunk.
 func StageHash(
 	ctx context.Context,
 	cfg *Config,
@@ -62,12 +76,11 @@ func hashWorker(
 			return ctx.Err()
 		}
 
-		var hash [32]byte
+		var hash uint64
 		if rc.IsZero {
-			zeroBuf := make([]byte, rc.Length)
-			hash = sha256.Sum256(zeroBuf)
+			hash = zeroHash(rc.Length)
 		} else {
-			hash = sha256.Sum256(rc.Data)
+			hash = xxhash.Sum64(rc.Data)
 		}
 
 		length := rc.Length

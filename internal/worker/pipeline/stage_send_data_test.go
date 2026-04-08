@@ -18,11 +18,11 @@ package pipeline
 
 import (
 	"context"
-	"crypto/sha256"
 	"io"
 	"sync"
 	"testing"
 
+	"github.com/cespare/xxhash/v2"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"google.golang.org/grpc"
 )
@@ -63,7 +63,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 	win := NewWindowSemaphore(cfg.MaxWindow)
 
 	data := []byte("compressed data!")
-	hash := sha256.Sum256(data)
+	hash := xxhash.Sum64(data)
 
 	inCh := make(chan CompressedChunk, 2)
 	for i := range uint64(2) {
@@ -127,7 +127,7 @@ func TestStageSendData_MultiFileBatch(t *testing.T) {
 	win := NewWindowSemaphore(cfg.MaxWindow)
 
 	data := []byte("test")
-	hash := sha256.Sum256(data)
+	hash := xxhash.Sum64(data)
 
 	inCh := make(chan CompressedChunk, 2)
 	paths := []string{"/data/file-a", "/data/file-b"}

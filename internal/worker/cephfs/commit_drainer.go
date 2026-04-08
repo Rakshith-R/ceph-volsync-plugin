@@ -19,7 +19,6 @@ package cephfs
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"time"
 
 	"google.golang.org/grpc"
@@ -27,6 +26,11 @@ import (
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/pipeline"
 )
+
+// commitBatchSize bounds the number of entries per
+// CommitRequest. Set to amortize gRPC overhead while
+// keeping destination commit latency bounded.
+const commitBatchSize = 1000
 
 // commitDrainer monitors file boundary events from the
 // iterator and sends batched CommitRequests when files
@@ -72,7 +76,8 @@ func (d *commitDrainer) Run(
 }
 
 // drainQualified sends commits for files that satisfy
-// both the distance check and ack check.
+// both the distance check and ack check, capped at
+// commitBatchSize per gRPC round-trip.
 func (d *commitDrainer) drainQualified(
 	ctx context.Context,
 	pending *[]fileBoundary,
@@ -100,6 +105,17 @@ func (d *commitDrainer) drainQualified(
 		_ = d.reader.CloseFile(head.path)
 		committed = append(committed, head.path)
 		*pending = (*pending)[1:]
+
+		if len(batch) >= commitBatchSize {
+			if err := d.sendCommitBatch(ctx, batch); err != nil {
+				return err
+			}
+			if err := d.notifyCommitted(ctx, committed); err != nil {
+				return err
+			}
+			batch = batch[:0]
+			committed = committed[:0]
+		}
 	}
 
 	if len(batch) == 0 {
@@ -113,31 +129,48 @@ func (d *commitDrainer) drainQualified(
 	return d.notifyCommitted(ctx, committed)
 }
 
-// flushAll waits for all pending files to be acked,
-// then sends a final batched commit.
+// flushAll waits for each pending file to be acked and
+// sends bounded batched commits as entries become ready.
 func (d *commitDrainer) flushAll(
 	ctx context.Context,
 	pending []fileBoundary,
 ) error {
-	for i := range pending {
-		for !d.win.IsReleased(pending[i].lastReqID) {
-			runtime.Gosched()
-			time.Sleep(100 * time.Microsecond)
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-		}
+	if len(pending) == 0 {
+		return nil
 	}
+
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
 
 	var batch []*apiv1.CommitEntry
 	var committed []string
-	for _, fb := range pending {
+
+	for i := range pending {
+		for !d.win.IsReleased(pending[i].lastReqID) {
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
 		batch = append(batch, &apiv1.CommitEntry{
-			Path:      fb.path,
-			TotalSize: uint64(fb.totalSize), //nolint:gosec // G115: non-negative size
+			Path:      pending[i].path,
+			TotalSize: uint64(pending[i].totalSize), //nolint:gosec // G115: non-negative size
 		})
-		_ = d.reader.CloseFile(fb.path)
-		committed = append(committed, fb.path)
+		_ = d.reader.CloseFile(pending[i].path)
+		committed = append(committed, pending[i].path)
+
+		if len(batch) >= commitBatchSize {
+			if err := d.sendCommitBatch(ctx, batch); err != nil {
+				return err
+			}
+			if err := d.notifyCommitted(ctx, committed); err != nil {
+				return err
+			}
+			batch = batch[:0]
+			committed = committed[:0]
+		}
 	}
 
 	if len(batch) == 0 {

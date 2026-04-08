@@ -19,9 +19,9 @@ package pipeline
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"testing"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/pierrec/lz4/v4"
 )
 
@@ -34,7 +34,7 @@ func TestStageCompress_LZ4_Compresses(t *testing.T) {
 	mem := NewMemSemaphore(cfg.MaxRawMemoryBytes)
 
 	data := bytes.Repeat([]byte{0xAA}, 4096)
-	hash := sha256.Sum256(data)
+	hash := xxhash.Sum64(data)
 
 	inCh := make(chan HashedChunk, 1)
 	_ = mem.Acquire(ctx, cfg.ChunkSize)
@@ -89,7 +89,7 @@ func TestStageCompress_LZ4_Incompressible(t *testing.T) {
 	for i := range data {
 		data[i] = byte(i)
 	}
-	hash := sha256.Sum256(data)
+	hash := xxhash.Sum64(data)
 
 	inCh := make(chan HashedChunk, 1)
 	_ = mem.Acquire(ctx, cfg.ChunkSize)

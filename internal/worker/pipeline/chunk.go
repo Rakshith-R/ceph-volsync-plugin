@@ -38,14 +38,14 @@ type ReadChunk struct {
 	Held      held
 }
 
-// HashedChunk adds SHA-256 to a ReadChunk.
+// HashedChunk adds xxhash-64 to a ReadChunk.
 type HashedChunk struct {
 	ReqID     uint64
 	FilePath  string
 	Offset    int64
 	Length    int64 // original block length
 	Data      []byte
-	Hash      [32]byte
+	Hash      uint64
 	IsZero    bool
 	TotalSize int64
 	Held      held
@@ -57,7 +57,7 @@ type CompressedChunk struct {
 	FilePath           string
 	Offset             int64
 	Data               []byte
-	Hash               [32]byte
+	Hash               uint64
 	UncompressedLength int64
 	IsRaw              bool // true if incompressible
 	IsZero             bool

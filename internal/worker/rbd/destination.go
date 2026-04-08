@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/go-logr/logr"
 	"github.com/pierrec/lz4/v4"
@@ -30,6 +31,19 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/common"
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 )
+
+// sharedZeroBuf is a pre-allocated zero-filled buffer used for writing zero
+// blocks without per-block allocation. Sized to maxChunkSize (8 MB).
+var sharedZeroBuf [8 * 1024 * 1024]byte
+
+// decompBufPool pools LZ4 decompression buffers to reduce GC pressure.
+// Buffer is sized to maxChunkSize (8 MB).
+var decompBufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 8*1024*1024)
+		return &buf
+	},
+}
 
 // DestinationWorker represents an RBD destination
 // worker instance.
@@ -67,6 +81,11 @@ func (w *DestinationWorker) Run(ctx context.Context) error {
 		devicePath: constant.DevicePath,
 	}
 	syncServer := common.NewSyncServer(dataServer, dataServer, hashServer, commitServer)
+	certHandler := &common.CertExchangeHandler{
+		ServerCtx:  ctx,
+		SyncServer: syncServer,
+	}
+	syncServer.SetCertHandler(certHandler)
 	return w.BaseDestinationWorker.Run(ctx, syncServer)
 }
 
@@ -209,10 +228,6 @@ func (s *RBDCommitServer) Commit(
 					s.devicePath, err,
 				)
 			}
-			s.logger.Info(
-				"Committed block device writes",
-				"path", entry.Path,
-			)
 			paths = append(paths, entry.Path)
 		}
 
@@ -239,16 +254,10 @@ func (s *RBDCommitServer) Commit(
 func (s *RBDDataServer) writeBlocks(
 	file *os.File, req *apiv1.WriteRequest,
 ) error {
-	s.logger.Info(
-		"Writing blocks to device",
-		"block_count", len(req.Blocks),
-	)
-
 	for i, block := range req.Blocks {
 		if block.IsZero {
-			zeros := make([]byte, block.Length)
 			if _, err := file.WriteAt(
-				zeros, int64(block.Offset), //nolint:gosec // G115: value within safe range
+				sharedZeroBuf[:block.Length], int64(block.Offset), //nolint:gosec // G115: value within safe range
 			); err != nil {
 				s.logger.Error(
 					err, "Failed to write zeros",
@@ -269,26 +278,32 @@ func (s *RBDDataServer) writeBlocks(
 			)
 		} else {
 			writeData := block.Data
+			var decompBufPtr *[]byte
 			if block.Compression == apiv1.CompressionAlgo_COMPRESSION_LZ4 {
-				decompressed := make([]byte, block.Length)
-				n, err := lz4.UncompressBlock(block.Data, decompressed)
+				decompBufPtr = decompBufPool.Get().(*[]byte)
+				n, err := lz4.UncompressBlock(block.Data, *decompBufPtr)
 				if err != nil {
+					decompBufPool.Put(decompBufPtr)
 					s.logger.Error(err, "Failed to decompress LZ4",
 						"offset", block.Offset, "block_index", i)
 					return fmt.Errorf("lz4 decompress at offset %d: %w", block.Offset, err)
 				}
-				writeData = decompressed[:n]
 				if n != int(block.Length) { //nolint:gosec // block.Length is bounded by pipeline chunk size
+					decompBufPool.Put(decompBufPtr)
 					return fmt.Errorf(
 						"lz4 decompressed size mismatch at offset %d: got %d, expected %d",
 						block.Offset, n, block.Length,
 					)
 				}
+				writeData = (*decompBufPtr)[:n]
 			}
 
 			if _, err := file.WriteAt(
 				writeData, int64(block.Offset), //nolint:gosec // G115: value within safe range
 			); err != nil {
+				if decompBufPtr != nil {
+					decompBufPool.Put(decompBufPtr)
+				}
 				s.logger.Error(
 					err, "Failed to write data",
 					"offset", block.Offset,
@@ -300,6 +315,9 @@ func (s *RBDDataServer) writeBlocks(
 						"offset %d: %w",
 					block.Offset, err,
 				)
+			}
+			if decompBufPtr != nil {
+				decompBufPool.Put(decompBufPtr)
 			}
 			s.logger.V(1).Info(
 				"Wrote data block",

@@ -75,6 +75,11 @@ func (w *DestinationWorker) Run(ctx context.Context) error {
 	}
 
 	syncServer := common.NewSyncServer(dataServer, dataServer, hashServer, commitServer)
+	certHandler := &common.CertExchangeHandler{
+		ServerCtx:  ctx,
+		SyncServer: syncServer,
+	}
+	syncServer.SetCertHandler(certHandler)
 	return w.BaseDestinationWorker.Run(ctx, syncServer)
 }
 
@@ -179,19 +184,11 @@ func (s *CephFSCommitServer) Commit(
 			[]string, 0, len(req.Entries),
 		)
 		for _, entry := range req.Entries {
-			s.logger.Info(
-				"Committing file",
-				"path", entry.Path,
-			)
 			if err := s.cache.SyncAndRelease(
 				entry.Path,
 			); err != nil {
 				return err
 			}
-			s.logger.Info(
-				"Successfully committed file",
-				"path", entry.Path,
-			)
 			paths = append(paths, entry.Path)
 		}
 
@@ -233,12 +230,6 @@ func (s *DataServer) writeBlocks(
 	if len(req.Blocks) == 0 {
 		return nil
 	}
-
-	s.logger.Info(
-		"Writing blocks",
-		"path", req.Blocks[0].FilePath,
-		"block_count", len(req.Blocks),
-	)
 
 	filePath := req.Blocks[0].FilePath
 	file, ok := files[filePath]

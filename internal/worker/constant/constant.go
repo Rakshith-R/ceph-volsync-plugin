@@ -78,6 +78,10 @@ const (
 	// TLSPort is the stunnel TLS proxy port.
 	TLSPort int32 = 8000
 
+	// DirectTLSPort is the port for direct TLS gRPC
+	// connections (non-stunnel).
+	DirectTLSPort int32 = 8081
+
 	// RsyncStunnelPort is the rsync stunnel port for
 	// CephFS mover workers.
 	RsyncStunnelPort int32 = 8873

@@ -33,7 +33,7 @@ func TestConfig_SetDefaults_ZeroValue(t *testing.T) {
 	if cfg.HashSendWorkers != 2 {
 		t.Fatalf("HashSendWorkers: got %d", cfg.HashSendWorkers)
 	}
-	if cfg.DataSendWorkers != 4 {
+	if cfg.DataSendWorkers != 8 {
 		t.Fatalf("DataSendWorkers: got %d", cfg.DataSendWorkers)
 	}
 }

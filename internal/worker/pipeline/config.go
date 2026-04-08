@@ -74,13 +74,14 @@ func (c *Config) SetDefaults() {
 		c.HashWorkers = max(1, ncpu/2)
 	}
 	if c.CompressWorkers == 0 {
-		c.CompressWorkers = 1
+		ncpu := runtime.NumCPU()
+		c.CompressWorkers = max(1, ncpu/2)
 	}
 	if c.HashSendWorkers == 0 {
 		c.HashSendWorkers = 2
 	}
 	if c.DataSendWorkers == 0 {
-		c.DataSendWorkers = 4
+		c.DataSendWorkers = 8
 	}
 	if c.MaxWindow == 0 {
 		c.MaxWindow = 64
@@ -101,19 +102,19 @@ func (c *Config) SetDefaults() {
 		c.DataBatchMaxCount = 16
 	}
 	if c.DataBatchMaxBytes == 0 {
-		c.DataBatchMaxBytes = 8 * 1024 * 1024
+		c.DataBatchMaxBytes = 6 * 1024 * 1024
 	}
 	if c.ReadChanBuf == 0 {
-		c.ReadChanBuf = c.ReadWorkers
+		c.ReadChanBuf = c.ReadWorkers * 2
 	}
 	if c.HashChanBuf == 0 {
-		c.HashChanBuf = c.HashWorkers
+		c.HashChanBuf = c.HashWorkers * 2
 	}
 	if c.MismatchChanBuf == 0 {
 		c.MismatchChanBuf = c.HashWorkers
 	}
 	if c.CompressChanBuf == 0 {
-		c.CompressChanBuf = c.CompressWorkers * 2
+		c.CompressChanBuf = c.CompressWorkers * 4
 	}
 }
 

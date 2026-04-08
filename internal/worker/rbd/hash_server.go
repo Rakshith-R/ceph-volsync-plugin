@@ -17,11 +17,12 @@ limitations under the License.
 package rbd
 
 import (
-	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
 
@@ -76,9 +77,9 @@ func (s *HashServer) CompareHashes(
 				)
 			}
 
-			localHash := sha256.Sum256(data[:n])
-			if len(bh.Sha256) != 32 ||
-				localHash != [32]byte(bh.Sha256) {
+			localHash := xxhash.Sum64(data[:n])
+			if len(bh.Sha256) != 8 ||
+				localHash != binary.LittleEndian.Uint64(bh.Sha256) {
 				resp.MismatchedIds = append(
 					resp.MismatchedIds,
 					bh.RequestId,

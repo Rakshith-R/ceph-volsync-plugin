@@ -21,8 +21,11 @@ import (
 	"fmt"
 	"net"
 
+	"time"
+
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	versionv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/version/v1"
@@ -39,6 +42,16 @@ func RunDestinationServer(
 	syncServer *SyncServer,
 	opts ...grpc.ServerOption,
 ) error {
+	opts = append(opts,
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             20 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    60 * time.Second,
+			Timeout: 10 * time.Second,
+		}),
+	)
 	server := grpc.NewServer(opts...)
 
 	versionServer := &VersionServer{
@@ -66,12 +79,15 @@ func RunDestinationServer(
 	case <-ctx.Done():
 		logger.Info("Destination worker shutting down due to context cancellation")
 		server.GracefulStop()
+		syncServer.StopDirectTLS()
 		return ctx.Err()
 	case err := <-serverErr:
+		syncServer.StopDirectTLS()
 		return err
 	case <-syncServer.shutdownChan:
 		logger.Info("Destination worker shutting down after Done request")
 		server.GracefulStop()
+		syncServer.StopDirectTLS()
 		return nil
 	}
 }

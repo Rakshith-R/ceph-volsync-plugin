@@ -17,11 +17,12 @@ limitations under the License.
 package rbd
 
 import (
-	"crypto/sha256"
+	"encoding/binary"
 	"io"
 	"os"
 	"testing"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
 
@@ -68,7 +69,8 @@ func TestHashServer_AllMatch(t *testing.T) {
 	_, _ = f.Write(data)
 	_ = f.Close()
 
-	hash := sha256.Sum256(data)
+	hashBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(hashBytes, xxhash.Sum64(data))
 	srv := &HashServer{
 		logger:     logr.Discard(),
 		devicePath: f.Name(),
@@ -81,7 +83,7 @@ func TestHashServer_AllMatch(t *testing.T) {
 					RequestId: 0,
 					Offset:    0,
 					Length:    16,
-					Sha256:    hash[:],
+					Sha256:    hashBytes,
 				},
 			},
 		},
@@ -109,7 +111,8 @@ func TestHashServer_Mismatch(t *testing.T) {
 	_, _ = f.Write(data)
 	_ = f.Close()
 
-	wrongHash := sha256.Sum256([]byte("wrong"))
+	wrongHashBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(wrongHashBytes, xxhash.Sum64([]byte("wrong")))
 	srv := &HashServer{
 		logger:     logr.Discard(),
 		devicePath: f.Name(),
@@ -122,7 +125,7 @@ func TestHashServer_Mismatch(t *testing.T) {
 					RequestId: 0,
 					Offset:    0,
 					Length:    16,
-					Sha256:    wrongHash[:],
+					Sha256:    wrongHashBytes,
 				},
 			},
 		},

@@ -17,7 +17,9 @@ limitations under the License.
 package cephfs
 
 import (
-	"crypto/sha256"
+	"encoding/binary"
+
+	"github.com/cespare/xxhash/v2"
 	"io"
 	"os"
 	"path/filepath"
@@ -113,7 +115,9 @@ func TestCephFSHashServer_Match(t *testing.T) {
 		cache:  cache,
 	}
 
-	h := sha256.Sum256(content)
+	h := xxhash.Sum64(content)
+	var hBytes [8]byte
+	binary.LittleEndian.PutUint64(hBytes[:], h)
 	stream := &mockHashBidiStream{
 		req: &apiv1.HashRequest{
 			Hashes: []*apiv1.BlockHash{
@@ -122,7 +126,7 @@ func TestCephFSHashServer_Match(t *testing.T) {
 					FilePath:  "file.bin",
 					Offset:    0,
 					Length:    uint64(len(content)),
-					Sha256:    h[:],
+					Sha256:    hBytes[:],
 				},
 			},
 		},

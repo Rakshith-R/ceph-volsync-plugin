@@ -18,11 +18,11 @@ package pipeline
 
 import (
 	"context"
-	"crypto/sha256"
 	"io"
 	"sync"
 	"testing"
 
+	"github.com/cespare/xxhash/v2"
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"google.golang.org/grpc"
 )
@@ -85,7 +85,7 @@ func TestStageSendHash_AllMatched(t *testing.T) {
 	win := NewWindowSemaphore(cfg.MaxWindow)
 
 	data := []byte("test data here!!")
-	hash := sha256.Sum256(data)
+	hash := xxhash.Sum64(data)
 
 	hashedCh := make(chan HashedChunk, 2)
 	for i := range uint64(2) {
@@ -145,7 +145,7 @@ func TestStageSendHash_AllMismatched(t *testing.T) {
 	win := NewWindowSemaphore(cfg.MaxWindow)
 
 	data := []byte("test data here!!")
-	hash := sha256.Sum256(data)
+	hash := xxhash.Sum64(data)
 
 	hashedCh := make(chan HashedChunk, 2)
 	for i := range uint64(2) {

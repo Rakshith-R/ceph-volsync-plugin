@@ -18,10 +18,20 @@ package pipeline
 
 import (
 	"context"
+	"sync"
 
 	"github.com/pierrec/lz4/v4"
 	"golang.org/x/sync/errgroup"
 )
+
+// compressBufPool pools compression output buffers to reduce GC pressure.
+// Buffer is sized to the worst-case output for an 8MB (maxChunkSize) input.
+var compressBufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, lz4.CompressBlockBound(8*1024*1024))
+		return &buf
+	},
+}
 
 func StageCompress(
 	ctx context.Context,
@@ -80,16 +90,23 @@ func compressWorker(
 			isRaw = true
 		} else {
 			maxDst := lz4.CompressBlockBound(len(hc.Data))
-			dst = make([]byte, maxDst)
+			bufPtr := compressBufPool.Get().(*[]byte)
 			var err error
-			n, err = lz4.CompressBlock(hc.Data, dst, nil)
+			n, err = lz4.CompressBlock(hc.Data, (*bufPtr)[:maxDst], nil)
 
 			if err != nil || n == 0 || n >= len(hc.Data) {
+				// Compression didn't help; return buffer immediately and use
+				// the original data slice.
+				compressBufPool.Put(bufPtr)
 				dst = hc.Data
 				n = len(hc.Data)
 				isRaw = true
 			} else {
-				dst = dst[:n]
+				// Copy compressed bytes to a right-sized slice and return the
+				// pooled buffer so it can be reused by the next iteration.
+				dst = make([]byte, n)
+				copy(dst, (*bufPtr)[:n])
+				compressBufPool.Put(bufPtr)
 			}
 		}
 

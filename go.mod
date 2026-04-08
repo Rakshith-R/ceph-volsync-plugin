@@ -6,6 +6,7 @@ require (
 	github.com/backube/volsync v0.11.0
 	github.com/ceph/ceph-csi/api v0.0.0-20260306160649-6fda146e5dbb
 	github.com/ceph/go-ceph v0.38.0
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.0.0
@@ -35,7 +36,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
-	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
