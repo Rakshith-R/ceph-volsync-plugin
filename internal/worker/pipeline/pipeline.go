@@ -18,6 +18,7 @@ package pipeline
 
 import (
 	"context"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -62,7 +63,8 @@ type HashStreamFactory func(
 
 // Pipeline orchestrates the 5-stage concurrent transfer pipeline.
 type Pipeline struct {
-	cfg Config
+	cfg   Config
+	Stats Stats
 }
 
 // New creates a Pipeline with the given config.
@@ -85,7 +87,11 @@ func (p *Pipeline) Run(
 		return err
 	}
 
+	p.Stats.PipelineStart = time.Now()
+	defer func() { p.Stats.PipelineEnd = time.Now() }()
+
 	cfg := &p.cfg
+	stats := &p.Stats
 
 	memRaw := NewMemSemaphore(cfg.MaxRawMemoryBytes)
 
@@ -105,7 +111,7 @@ func (p *Pipeline) Run(
 	// Stage 1: Read - parallel pread from device
 	g.Go(func() error {
 		defer close(readCh)
-		return StageRead(gctx, cfg, memRaw, win, reader, chunkCh, readCh)
+		return StageRead(gctx, cfg, stats, memRaw, win, reader, chunkCh, readCh)
 	})
 
 	if newHashStream == nil {
@@ -131,12 +137,12 @@ func (p *Pipeline) Run(
 	// Stage 4: Compress - LZ4 compression
 	g.Go(func() error {
 		defer close(compressedCh)
-		return StageCompress(gctx, cfg, memRaw, win, mismatchCh, compressedCh)
+		return StageCompress(gctx, cfg, stats, memRaw, win, mismatchCh, compressedCh)
 	})
 
 	// Stage 5: SendData - batched gRPC sends
 	g.Go(func() error {
-		return StageSendData(gctx, cfg, memRaw, win, newStream, compressedCh)
+		return StageSendData(gctx, cfg, stats, memRaw, win, newStream, compressedCh)
 	})
 
 	return g.Wait()

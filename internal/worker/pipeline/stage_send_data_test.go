@@ -92,7 +92,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 	})
 
 	err := StageSendData(
-		ctx, cfg, mem, win, factory, inCh,
+		ctx, cfg, &Stats{}, mem, win, factory, inCh,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func TestStageSendData_MultiFileBatch(t *testing.T) {
 	})
 
 	err := StageSendData(
-		ctx, cfg, mem, win, factory, inCh,
+		ctx, cfg, &Stats{}, mem, win, factory, inCh,
 	)
 	if err != nil {
 		t.Fatal(err)

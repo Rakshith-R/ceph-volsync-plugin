@@ -43,7 +43,7 @@ const (
 
 	// MaxGRPCMessageSize is the maximum gRPC message
 	// size for send and receive.
-	MaxGRPCMessageSize = 8 * 1024 * 1024 // 8MB
+	MaxGRPCMessageSize = 16 * 1024 * 1024 // 16MB
 
 	// DefaultServerPort is the gRPC server listen
 	// port inside the mover container.

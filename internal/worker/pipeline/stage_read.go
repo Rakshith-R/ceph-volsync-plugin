@@ -19,6 +19,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -31,6 +32,7 @@ import (
 func StageRead(
 	ctx context.Context,
 	cfg *Config,
+	stats *Stats,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	reader DataReader,
@@ -41,7 +43,7 @@ func StageRead(
 
 	for range cfg.ReadWorkers {
 		g.Go(func() error {
-			return readWorker(gctx, cfg, memRaw, win, reader, inCh, readCh)
+			return readWorker(gctx, cfg, stats, memRaw, win, reader, inCh, readCh)
 		})
 	}
 
@@ -51,6 +53,7 @@ func StageRead(
 func readWorker(
 	ctx context.Context,
 	cfg *Config,
+	stats *Stats,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	reader DataReader,
@@ -78,16 +81,21 @@ func readWorker(
 			return err
 		}
 
+		t0 := time.Now()
 		data, err := reader.ReadAt(
 			chunk.FilePath, chunk.Offset, chunk.Length,
 		)
+		stats.ReadTimeNs.Add(time.Since(t0).Nanoseconds())
 		if err != nil {
 			memRaw.Release(cfg.ChunkSize)
 			win.Release(chunk.ReqID)
 			return fmt.Errorf("read chunk %d: %w", chunk.ReqID, err)
 		}
+		stats.ReadCount.Add(1)
+		stats.ReadBytes.Add(int64(len(data)))
 
 		if common.IsAllZero(data) {
+			stats.ReadZeroCount.Add(1)
 			memRaw.Release(cfg.ChunkSize)
 			// Win stays acquired; released by ack receiver
 			select {

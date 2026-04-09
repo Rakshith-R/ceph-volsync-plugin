@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -30,6 +31,7 @@ import (
 func StageSendData(
 	ctx context.Context,
 	cfg *Config,
+	stats *Stats,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	newStream StreamFactory,
@@ -45,7 +47,7 @@ func StageSendData(
 				)
 			}
 			return dataSendWorker(
-				gctx, cfg, memRaw, win,
+				gctx, cfg, stats, memRaw, win,
 				stream, inCh,
 			)
 		})
@@ -56,6 +58,7 @@ func StageSendData(
 func dataSendWorker(
 	ctx context.Context,
 	cfg *Config,
+	stats *Stats,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	stream grpc.BidiStreamingClient[
@@ -67,13 +70,13 @@ func dataSendWorker(
 
 	// Ack receiver: reads WriteResponse, releases window
 	g.Go(func() error {
-		return ackReceiver(gctx, win, stream)
+		return ackReceiver(gctx, stats, win, stream)
 	})
 
 	// Sender: batches and sends WriteRequests
 	g.Go(func() error {
 		return dataSender(
-			gctx, cfg, memRaw, win, stream, inCh,
+			gctx, cfg, stats, memRaw, win, stream, inCh,
 		)
 	})
 
@@ -82,13 +85,16 @@ func dataSendWorker(
 
 func ackReceiver(
 	_ context.Context,
+	stats *Stats,
 	win *WindowSemaphore,
 	stream grpc.BidiStreamingClient[
 		apiv1.WriteRequest, apiv1.WriteResponse,
 	],
 ) error {
 	for {
+		t0 := time.Now()
 		resp, err := stream.Recv()
+		stats.AckTimeNs.Add(time.Since(t0).Nanoseconds())
 		if err == io.EOF {
 			return nil
 		}
@@ -97,6 +103,7 @@ func ackReceiver(
 				"recv sync ack: %w", err,
 			)
 		}
+		stats.AckCount.Add(int64(len(resp.AcknowledgedIds)))
 		for _, id := range resp.AcknowledgedIds {
 			win.Release(id)
 		}
@@ -106,6 +113,7 @@ func ackReceiver(
 func dataSender(
 	ctx context.Context,
 	cfg *Config,
+	stats *Stats,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	stream grpc.BidiStreamingClient[
@@ -131,12 +139,17 @@ func dataSender(
 			Blocks: blocks,
 		}
 
+		t0 := time.Now()
 		if err := stream.Send(req); err != nil {
 			for i := range pending {
 				pending[i].release(memRaw, win)
 			}
 			return err
 		}
+		stats.SendTimeNs.Add(time.Since(t0).Nanoseconds())
+		stats.SendBytes.Add(int64(accum))
+		stats.SendCount.Add(int64(len(blocks)))
+		stats.SendFlushes.Add(1)
 
 		for i := range pending {
 			pending[i].releaseMemOnly(memRaw)

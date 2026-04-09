@@ -84,10 +84,10 @@ func (c *Config) SetDefaults() {
 		c.DataSendWorkers = 8
 	}
 	if c.MaxWindow == 0 {
-		c.MaxWindow = 64
+		c.MaxWindow = 256
 	}
 	if c.MaxRawMemoryBytes == 0 {
-		c.MaxRawMemoryBytes = 256 * 1024 * 1024
+		c.MaxRawMemoryBytes = 1024 * 1024 * 1024
 	}
 	if c.WinPressureThresh == 0 {
 		c.WinPressureThresh = 0.75
@@ -102,7 +102,7 @@ func (c *Config) SetDefaults() {
 		c.DataBatchMaxCount = 16
 	}
 	if c.DataBatchMaxBytes == 0 {
-		c.DataBatchMaxBytes = 6 * 1024 * 1024
+		c.DataBatchMaxBytes = 12 * 1024 * 1024
 	}
 	if c.ReadChanBuf == 0 {
 		c.ReadChanBuf = c.ReadWorkers * 2

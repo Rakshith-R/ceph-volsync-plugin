@@ -174,16 +174,9 @@ func (w *SourceWorker) Sync(
 	], error) {
 		return dataSyncClient.Write(ctx)
 	}
-	newHashStream := func(
-		ctx context.Context,
-	) (grpc.BidiStreamingClient[
-		apiv1.HashRequest,
-		apiv1.HashResponse,
-	], error) {
-		return dataSyncClient.CompareHashes(ctx)
-	}
-
-	cfg := pipeline.Config{ReadWorkers: 16}
+	// Skip hash comparison for RBD — snapshot diff
+	// already identifies changed extents precisely.
+	cfg := pipeline.Config{ReadWorkers: 16, MaxWindow: 256}
 	cfg.SetDefaults()
 
 	win := pipeline.NewWindowSemaphore(cfg.MaxWindow)
@@ -197,13 +190,14 @@ func (w *SourceWorker) Sync(
 	reader := &fileDataReader{file: device}
 	if err := p.Run(
 		ctx, adapter, reader,
-		newStream, newHashStream, win,
+		newStream, nil, win,
 	); err != nil {
 		return err
 	}
 
 	w.Logger.Info("Pipeline completed",
 		"blocksProcessed", adapter.reqID,
+		"stats", p.Stats.Summary(),
 	)
 
 	// Wait for all acks before committing

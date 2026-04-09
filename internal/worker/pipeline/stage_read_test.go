@@ -62,7 +62,7 @@ func TestStageRead_ReadsAllChunks(t *testing.T) {
 
 	readCh := make(chan ReadChunk, 3)
 
-	err := StageRead(ctx, cfg, mem, win, reader, inCh, readCh)
+	err := StageRead(ctx, cfg, &Stats{}, mem, win, reader, inCh, readCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestStageRead_ZeroShortCircuit(t *testing.T) {
 
 	readCh := make(chan ReadChunk, 1)
 
-	err := StageRead(ctx, cfg, mem, win, reader, inCh, readCh)
+	err := StageRead(ctx, cfg, &Stats{}, mem, win, reader, inCh, readCh)
 	if err != nil {
 		t.Fatal(err)
 	}

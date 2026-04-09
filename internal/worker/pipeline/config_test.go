@@ -27,7 +27,7 @@ func TestConfig_SetDefaults_ZeroValue(t *testing.T) {
 	if cfg.ReadWorkers != 8 {
 		t.Fatalf("ReadWorkers: got %d", cfg.ReadWorkers)
 	}
-	if cfg.MaxWindow != 64 {
+	if cfg.MaxWindow != 256 {
 		t.Fatalf("MaxWindow: got %d", cfg.MaxWindow)
 	}
 	if cfg.HashSendWorkers != 2 {

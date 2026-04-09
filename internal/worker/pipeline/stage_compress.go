@@ -19,6 +19,7 @@ package pipeline
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/pierrec/lz4/v4"
 	"golang.org/x/sync/errgroup"
@@ -36,6 +37,7 @@ var compressBufPool = sync.Pool{
 func StageCompress(
 	ctx context.Context,
 	cfg *Config,
+	stats *Stats,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	inCh <-chan HashedChunk,
@@ -46,7 +48,7 @@ func StageCompress(
 	for range cfg.CompressWorkers {
 		g.Go(func() error {
 			return compressWorker(
-				gctx, memRaw, win, inCh, outCh,
+				gctx, stats, memRaw, win, inCh, outCh,
 			)
 		})
 	}
@@ -56,6 +58,7 @@ func StageCompress(
 
 func compressWorker(
 	ctx context.Context,
+	stats *Stats,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	inCh <-chan HashedChunk,
@@ -84,6 +87,7 @@ func compressWorker(
 		var n int
 		isRaw := false
 
+		t0 := time.Now()
 		if hc.IsZero {
 			// Nothing to compress (zero chunk).
 			dst = nil
@@ -109,6 +113,10 @@ func compressWorker(
 				compressBufPool.Put(bufPtr)
 			}
 		}
+
+		stats.CompressTimeNs.Add(time.Since(t0).Nanoseconds())
+		stats.CompressCount.Add(1)
+		stats.CompressBytes.Add(int64(n))
 
 		saved := int64(len(hc.Data)) - int64(n)
 		if saved > 0 {

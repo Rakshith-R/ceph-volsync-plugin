@@ -50,7 +50,7 @@ func TestStageCompress_LZ4_Compresses(t *testing.T) {
 
 	outCh := make(chan CompressedChunk, 1)
 
-	err := StageCompress(ctx, cfg, mem, nil, inCh, outCh)
+	err := StageCompress(ctx, cfg, &Stats{}, mem, nil, inCh, outCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestStageCompress_LZ4_Incompressible(t *testing.T) {
 
 	outCh := make(chan CompressedChunk, 1)
 
-	err := StageCompress(ctx, cfg, mem, nil, inCh, outCh)
+	err := StageCompress(ctx, cfg, &Stats{}, mem, nil, inCh, outCh)
 	if err != nil {
 		t.Fatal(err)
 	}
