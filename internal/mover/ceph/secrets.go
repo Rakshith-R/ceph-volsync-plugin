@@ -21,7 +21,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"os"
 
 	"github.com/backube/volsync/controllers/utils"
 	corev1 "k8s.io/api/core/v1"
@@ -102,15 +101,29 @@ func (m *Mover) ensureSecrets(ctx context.Context) (*string, error) {
 	return &keySecret.Name, nil
 }
 
-// ensureCephCSIConfigMap reads the ceph-csi config files
-// from the operator's mounted ConfigMap and creates a
-// per-RS/RD ConfigMap in the owner's namespace.
+// fetchCSIConfigData fetches the ceph-csi ConfigMap from the configured
+// namespace via the k8s API and returns its data map.
+func (m *Mover) fetchCSIConfigData(ctx context.Context) (map[string]string, error) {
+	srcCM := &corev1.ConfigMap{}
+	if err := m.client.Get(ctx, client.ObjectKey{
+		Name:      m.csiConfigName,
+		Namespace: m.csiConfigNamespace,
+	}, srcCM); err != nil {
+		return nil, fmt.Errorf("failed to get csi config ConfigMap %s/%s: %w", m.csiConfigNamespace, m.csiConfigName, err)
+	}
+
+	if _, ok := srcCM.Data["config.json"]; !ok {
+		return nil, fmt.Errorf("config.json not found in ConfigMap %s/%s", m.csiConfigNamespace, m.csiConfigName)
+	}
+
+	return srcCM.Data, nil
+}
+
+// ensureCephCSIConfigMap creates a per-RS/RD ConfigMap in the owner's
+// namespace from the pre-fetched ceph-csi config data.
 // TODO: filter the config for only the relevant(+mapped)
 // clusterID instead of copying everything.
-func (m *Mover) ensureCephCSIConfigMap(
-	ctx context.Context,
-	_ string,
-) (*string, error) {
+func (m *Mover) ensureCephCSIConfigMap(ctx context.Context, csiConfigData map[string]string) (*string, error) {
 	cmName := m.namePrefix + "csi-config-" + m.direction + "-" + m.owner.GetName()
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -121,66 +134,37 @@ func (m *Mover) ensureCephCSIConfigMap(
 	logger := m.logger.WithValues("ConfigMap", cmName)
 
 	data := make(map[string]string)
-
-	// config.json is required
-	configPath := csiConfigMountPath + "/config.json"
-	configContent, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", configPath, err)
-	}
-	data["config.json"] = string(configContent)
+	data["config.json"] = csiConfigData["config.json"]
 
 	// cluster-mapping.json is optional
-	mappingPath := csiConfigMountPath +
-		"/cluster-mapping.json"
-	mappingContent, err := os.ReadFile(mappingPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("failed to read %s: %w", mappingPath, err)
-		}
-		logger.Info(
-			"cluster-mapping.json not found, skipping",
-			"path", mappingPath,
-		)
+	if mappingJSON, ok := csiConfigData["cluster-mapping.json"]; ok {
+		data["cluster-mapping.json"] = mappingJSON
 	} else {
-		data["cluster-mapping.json"] =
-			string(mappingContent)
+		logger.Info("cluster-mapping.json not found in source ConfigMap, skipping")
 	}
 
-	op, err := ctrlutil.CreateOrUpdate(
-		ctx, m.client, cm, func() error {
-			if err := ctrl.SetControllerReference(
-				m.owner, cm, m.client.Scheme(),
-			); err != nil {
-				logger.Error(
-					err,
-					utils.ErrUnableToSetControllerRef,
-				)
-				return err
-			}
-			utils.SetOwnedByVolSync(cm)
-			cm.Data = data
-			return nil
-		},
-	)
+	op, err := ctrlutil.CreateOrUpdate(ctx, m.client, cm, func() error {
+		if err := ctrl.SetControllerReference(m.owner, cm, m.client.Scheme()); err != nil {
+			logger.Error(err, utils.ErrUnableToSetControllerRef)
+			return err
+		}
+		utils.SetOwnedByVolSync(cm)
+		cm.Data = data
+		return nil
+	})
 	if err != nil {
 		logger.Error(err, "ConfigMap reconcile failed")
 		return nil, err
 	}
 
-	logger.V(1).Info(
-		"CSI ConfigMap reconciled", "operation", op,
-	)
+	logger.V(1).Info("CSI ConfigMap reconciled", "operation", op)
 	return &cmName, nil
 }
 
-// ensureCephCSISecret extracts clusterID from the PVC,
-// looks up the ceph admin secret ref from csi config,
-// fetches it, and creates a copy in the owner's namespace.
-func (m *Mover) ensureCephCSISecret(
-	ctx context.Context,
-	clusterID string,
-) (*string, error) {
+// ensureCephCSISecret looks up the ceph admin secret ref from the
+// pre-fetched csi config data, fetches it, and creates a copy in
+// the owner's namespace.
+func (m *Mover) ensureCephCSISecret(ctx context.Context, csiConfigData map[string]string, clusterID string) (*string, error) {
 	if m.mainPVCName == nil {
 		return nil, fmt.Errorf("mainPVCName is not set")
 	}
@@ -192,21 +176,15 @@ func (m *Mover) ensureCephCSISecret(
 			Namespace: m.owner.GetNamespace(),
 		},
 	}
-	if err := m.client.Get(
-		ctx, client.ObjectKeyFromObject(srcPVC), srcPVC,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"failed to get PVC: %w", err,
-		)
+	if err := m.client.Get(ctx, client.ObjectKeyFromObject(srcPVC), srcPVC); err != nil {
+		return nil, fmt.Errorf("failed to get PVC: %w", err)
 	}
 
-	// Look up the secret ref from csi config
-	getSecretRef := config.GetCephFSControllerPublishSecretRef
+	getSecretRef := config.GetCephFSControllerPublishSecretRefFromData
 	if m.moverType == constant.MoverRBD {
-		getSecretRef = config.GetRBDControllerPublishSecretRef
+		getSecretRef = config.GetRBDControllerPublishSecretRefFromData
 	}
-	secretName, secretNS, err :=
-		getSecretRef(config.CsiConfigFile, clusterID)
+	secretName, secretNS, err := getSecretRef([]byte(csiConfigData["config.json"]), clusterID)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"failed to get secret ref: %w", err,

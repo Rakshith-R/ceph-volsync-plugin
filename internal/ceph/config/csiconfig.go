@@ -71,20 +71,14 @@ const (
 	}
 }]
 */
-func readClusterInfo(pathToConfig, clusterID string) (*kubernetes.ClusterInfo, error) {
+// ReadClusterInfoFromData parses raw JSON config data and returns the
+// ClusterInfo for the given clusterID. Use this when the config content
+// is already available (e.g. fetched from a ConfigMap via the k8s API).
+func ReadClusterInfoFromData(data []byte, clusterID string) (*kubernetes.ClusterInfo, error) {
 	var config []kubernetes.ClusterInfo
 
-	// #nosec
-	content, err := os.ReadFile(pathToConfig)
-	if err != nil {
-		err = fmt.Errorf("error fetching configuration for cluster ID %q: %w", clusterID, err)
-
-		return nil, err
-	}
-
-	err = json.Unmarshal(content, &config)
-	if err != nil {
-		return nil, fmt.Errorf("unmarshal failed (%w), raw buffer response: %s", err, string(content))
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("unmarshal failed (%w), raw buffer response: %s", err, string(data))
 	}
 
 	for i := range config {
@@ -94,6 +88,16 @@ func readClusterInfo(pathToConfig, clusterID string) (*kubernetes.ClusterInfo, e
 	}
 
 	return nil, fmt.Errorf("%w: %q", ErrConfigNotFound, clusterID)
+}
+
+func readClusterInfo(pathToConfig, clusterID string) (*kubernetes.ClusterInfo, error) {
+	// #nosec
+	content, err := os.ReadFile(pathToConfig)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching configuration for cluster ID %q: %w", clusterID, err)
+	}
+
+	return ReadClusterInfoFromData(content, clusterID)
 }
 
 // Mons returns a comma separated MON list from the csi config
@@ -178,6 +182,32 @@ func GetRBDControllerPublishSecretRef(pathToConfig, clusterID string) (string, s
 // namespace used for controller publish operations for CephFS volumes.
 func GetCephFSControllerPublishSecretRef(pathToConfig, clusterID string) (string, string, error) {
 	cluster, err := readClusterInfo(pathToConfig, clusterID)
+	if err != nil {
+		return "", "", err
+	}
+
+	secretRef := cluster.CephFS.ControllerPublishSecretRef
+
+	return secretRef.Name, secretRef.Namespace, nil
+}
+
+// GetRBDControllerPublishSecretRefFromData returns the secret name and
+// namespace for RBD controller publish operations, parsing from raw JSON data.
+func GetRBDControllerPublishSecretRefFromData(data []byte, clusterID string) (string, string, error) {
+	cluster, err := ReadClusterInfoFromData(data, clusterID)
+	if err != nil {
+		return "", "", err
+	}
+
+	secretRef := cluster.RBD.ControllerPublishSecretRef
+
+	return secretRef.Name, secretRef.Namespace, nil
+}
+
+// GetCephFSControllerPublishSecretRefFromData returns the secret name and
+// namespace for CephFS controller publish operations, parsing from raw JSON data.
+func GetCephFSControllerPublishSecretRefFromData(data []byte, clusterID string) (string, string, error) {
+	cluster, err := ReadClusterInfoFromData(data, clusterID)
 	if err != nil {
 		return "", "", err
 	}

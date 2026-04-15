@@ -104,6 +104,92 @@ func TestEnsureSecrets_AutoGen(t *testing.T) {
 	}
 }
 
+func TestFetchCSIConfigData(t *testing.T) {
+	t.Parallel()
+	srcCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ceph-csi-config",
+			Namespace: "rook-ceph",
+		},
+		Data: map[string]string{
+			"config.json":          `[{"clusterID":"test-cluster","monitors":["mon1"]}]`,
+			"cluster-mapping.json": `[{"source":"a","dest":"b"}]`,
+		},
+	}
+	m := newTestMover(t, true, constant.MoverCephFS, srcCM)
+	ctx := t.Context()
+
+	data, err := m.fetchCSIConfigData(ctx)
+	if err != nil {
+		t.Fatalf("fetchCSIConfigData() error: %v", err)
+	}
+	if data["config.json"] != srcCM.Data["config.json"] {
+		t.Errorf("config.json = %q, want %q", data["config.json"], srcCM.Data["config.json"])
+	}
+	if data["cluster-mapping.json"] != srcCM.Data["cluster-mapping.json"] {
+		t.Errorf("cluster-mapping.json = %q, want %q", data["cluster-mapping.json"], srcCM.Data["cluster-mapping.json"])
+	}
+}
+
+func TestFetchCSIConfigData_MissingConfigJSON(t *testing.T) {
+	t.Parallel()
+	srcCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ceph-csi-config",
+			Namespace: "rook-ceph",
+		},
+		Data: map[string]string{},
+	}
+	m := newTestMover(t, true, constant.MoverCephFS, srcCM)
+	ctx := t.Context()
+
+	_, err := m.fetchCSIConfigData(ctx)
+	if err == nil {
+		t.Error("expected error for missing config.json")
+	}
+}
+
+func TestFetchCSIConfigData_MissingSourceCM(t *testing.T) {
+	t.Parallel()
+	m := newTestMover(t, true, constant.MoverCephFS)
+	ctx := t.Context()
+
+	_, err := m.fetchCSIConfigData(ctx)
+	if err == nil {
+		t.Error("expected error for missing source ConfigMap")
+	}
+}
+
+func TestEnsureCephCSIConfigMap(t *testing.T) {
+	t.Parallel()
+	srcData := map[string]string{
+		"config.json":          `[{"clusterID":"test-cluster","monitors":["mon1"]}]`,
+		"cluster-mapping.json": `[{"source":"a","dest":"b"}]`,
+	}
+	m := newTestMover(t, true, constant.MoverCephFS)
+	ctx := t.Context()
+
+	got, err := m.ensureCephCSIConfigMap(ctx, srcData)
+	if err != nil {
+		t.Fatalf("ensureCephCSIConfigMap() error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("ensureCephCSIConfigMap() returned nil")
+	}
+
+	// Verify the per-RS/RD ConfigMap was created with correct data
+	cm := &corev1.ConfigMap{}
+	if err := m.client.Get(ctx, client.ObjectKey{Name: *got, Namespace: "test-ns"}, cm); err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if cm.Data["config.json"] != srcData["config.json"] {
+		t.Errorf("config.json = %q, want %q", cm.Data["config.json"], srcData["config.json"])
+	}
+	if cm.Data["cluster-mapping.json"] != srcData["cluster-mapping.json"] {
+		t.Errorf("cluster-mapping.json = %q, want %q", cm.Data["cluster-mapping.json"], srcData["cluster-mapping.json"])
+	}
+}
+
 func TestClusterIDFromStorageClass(t *testing.T) {
 	t.Parallel()
 	sc := &storagev1.StorageClass{

@@ -19,6 +19,7 @@ package mover
 import (
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
@@ -48,6 +49,12 @@ const (
 	cephContainerImageFlag   = "mover-image"
 	cephContainerImageEnvVar = "MOVER_IMAGE"
 
+	// CSI config env vars for the operator to locate the ceph-csi ConfigMap
+	csiConfigNameEnvVar      = "CEPH_CSI_CONFIG_NAME"
+	csiConfigNamespaceEnvVar = "CEPH_CSI_CONFIG_NAMESPACE"
+	defaultCSIConfigName     = "ceph-csi-config"
+	defaultCSIConfigNS       = "rook-ceph"
+
 	// External parameter keys
 	// common parameters
 	optStorageClassName        = "storageClassName"
@@ -67,8 +74,10 @@ const (
 // Builder implements mover.Builder for the Ceph data mover.
 // It detects the CSI provider from the CR and constructs Mover instances.
 type Builder struct {
-	viper *viper.Viper  // For unit tests to be able to override - global viper will be used by default in Register()
-	flags *flag.FlagSet // For unit tests to be able to override - global flags will be used by default in Register()
+	viper              *viper.Viper  // For unit tests to be able to override - global viper will be used by default in Register()
+	flags              *flag.FlagSet // For unit tests to be able to override - global flags will be used by default in Register()
+	csiConfigName      string
+	csiConfigNamespace string
 }
 
 var _ mover.Builder = &Builder{}
@@ -88,9 +97,19 @@ func Register() error {
 // newBuilder initializes a Builder with the given viper and flag set,
 // registering the container image flag and env var binding.
 func newBuilder(v *viper.Viper, flags *flag.FlagSet) (*Builder, error) {
+	csiName := os.Getenv(csiConfigNameEnvVar)
+	if csiName == "" {
+		csiName = defaultCSIConfigName
+	}
+	csiNS := os.Getenv(csiConfigNamespaceEnvVar)
+	if csiNS == "" {
+		csiNS = defaultCSIConfigNS
+	}
 	b := &Builder{
-		viper: v,
-		flags: flags,
+		viper:              v,
+		flags:              flags,
+		csiConfigName:      csiName,
+		csiConfigNamespace: csiNS,
 	}
 
 	// Set default ceph container image - will be used if both command line flag and env var are not set
@@ -200,24 +219,26 @@ func (rb *Builder) FromSource(cl client.Client, logger logr.Logger,
 		nil)
 
 	m := &Mover{
-		client:            cl,
-		logger:            logger.WithValues("method", "Ceph"),
-		eventRecorder:     eventRecorder,
-		owner:             source,
-		vh:                vh,
-		saHandler:         saHandler,
-		containerImage:    rb.getCephContainerImage(),
-		moverType:         mt,
-		key:               secretKey,
-		address:           address,
-		isSource:          isSource,
-		paused:            source.Spec.Paused,
-		mainPVCName:       &source.Spec.SourcePVC,
-		privileged:        privileged,
-		sourceStatus:      source.Status.RsyncTLS,
-		latestMoverStatus: source.Status.LatestMoverStatus,
-		moverConfig:       volsyncv1alpha1.MoverConfig{},
-		options:           source.Spec.External.Parameters,
+		client:             cl,
+		logger:             logger.WithValues("method", "Ceph"),
+		eventRecorder:      eventRecorder,
+		owner:              source,
+		vh:                 vh,
+		saHandler:          saHandler,
+		containerImage:     rb.getCephContainerImage(),
+		moverType:          mt,
+		key:                secretKey,
+		address:            address,
+		isSource:           isSource,
+		paused:             source.Spec.Paused,
+		mainPVCName:        &source.Spec.SourcePVC,
+		privileged:         privileged,
+		sourceStatus:       source.Status.RsyncTLS,
+		latestMoverStatus:  source.Status.LatestMoverStatus,
+		moverConfig:        volsyncv1alpha1.MoverConfig{},
+		options:            source.Spec.External.Parameters,
+		csiConfigName:      rb.csiConfigName,
+		csiConfigNamespace: rb.csiConfigNamespace,
 	}
 	m.initCached()
 
@@ -308,24 +329,26 @@ func (rb *Builder) FromDestination(cl client.Client, logger logr.Logger,
 	}
 
 	m := &Mover{
-		client:            cl,
-		logger:            logger.WithValues("method", "Ceph"),
-		eventRecorder:     eventRecorder,
-		owner:             destination,
-		vh:                vh,
-		saHandler:         saHandler,
-		containerImage:    rb.getCephContainerImage(),
-		moverType:         mt,
-		key:               keySecret,
-		isSource:          isSource,
-		paused:            destination.Spec.Paused,
-		mainPVCName:       destPVCPtr,
-		cleanupTempPVC:    false,
-		privileged:        privileged,
-		destStatus:        destination.Status.RsyncTLS,
-		latestMoverStatus: destination.Status.LatestMoverStatus,
-		moverConfig:       volsyncv1alpha1.MoverConfig{},
-		options:           options,
+		client:             cl,
+		logger:             logger.WithValues("method", "Ceph"),
+		eventRecorder:      eventRecorder,
+		owner:              destination,
+		vh:                 vh,
+		saHandler:          saHandler,
+		containerImage:     rb.getCephContainerImage(),
+		moverType:          mt,
+		key:                keySecret,
+		isSource:           isSource,
+		paused:             destination.Spec.Paused,
+		mainPVCName:        destPVCPtr,
+		cleanupTempPVC:     false,
+		privileged:         privileged,
+		destStatus:         destination.Status.RsyncTLS,
+		latestMoverStatus:  destination.Status.LatestMoverStatus,
+		moverConfig:        volsyncv1alpha1.MoverConfig{},
+		options:            options,
+		csiConfigName:      rb.csiConfigName,
+		csiConfigNamespace: rb.csiConfigNamespace,
 	}
 	m.initCached()
 

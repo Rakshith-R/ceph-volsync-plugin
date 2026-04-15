@@ -42,7 +42,7 @@ const (
 	containerNameRBD    = "rbd-mover"
 	containerNameCephFS = "cephfs-mover"
 
-	// Paths for ceph-csi config mounted in the operator
+	// csiConfigMountPath is the mount path for ceph-csi config in mover Job pods.
 	csiConfigMountPath = "/etc/ceph-csi-config"
 
 	// Volume name for ceph-csi secret
@@ -97,6 +97,10 @@ type Mover struct {
 	cleanupTempPVC bool
 	// options are the external parameters from the CR spec.
 	options map[string]string
+	// csiConfigName is the name of the ceph-csi ConfigMap to fetch via the k8s API.
+	csiConfigName string
+	// csiConfigNamespace is the namespace of the ceph-csi ConfigMap to fetch via the k8s API.
+	csiConfigNamespace string
 
 	// Precomputed values derived from immutable fields.
 	// Set once via initCached() after construction.
@@ -197,21 +201,25 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 	}
 
 	// clusterID is extracted from storageclass
-	clusterID, err := m.clusterIDFromStorageClass(
-		ctx, dataPVC.Spec.StorageClassName,
-	)
+	clusterID, err := m.clusterIDFromStorageClass(ctx, dataPVC.Spec.StorageClassName)
+	if err != nil {
+		return mover.InProgress(), err
+	}
+
+	// Fetch ceph-csi config once for both ConfigMap and Secret reconciliation
+	csiConfigData, err := m.fetchCSIConfigData(ctx)
 	if err != nil {
 		return mover.InProgress(), err
 	}
 
 	// Ensure ceph-csi ConfigMap in owner namespace
-	csiConfigMapName, err := m.ensureCephCSIConfigMap(ctx, clusterID)
+	csiConfigMapName, err := m.ensureCephCSIConfigMap(ctx, csiConfigData)
 	if csiConfigMapName == nil || err != nil {
 		return mover.InProgress(), err
 	}
 
 	// Ensure ceph-csi Secret in owner namespace
-	csiSecretName, err := m.ensureCephCSISecret(ctx, clusterID)
+	csiSecretName, err := m.ensureCephCSISecret(ctx, csiConfigData, clusterID)
 	if csiSecretName == nil || err != nil {
 		return mover.InProgress(), err
 	}

@@ -78,17 +78,19 @@ func newTestMover(
 
 	pvcName := "test-pvc"
 	m := &Mover{
-		client:            fakeClient,
-		logger:            logr.Discard(),
-		eventRecorder:     &fakeEventRecorder{},
-		owner:             owner,
-		isSource:          isSource,
-		moverType:         moverType,
-		mainPVCName:       &pvcName,
-		sourceStatus:      &volsyncv1alpha1.ReplicationSourceRsyncTLSStatus{},
-		destStatus:        &volsyncv1alpha1.ReplicationDestinationRsyncTLSStatus{},
-		latestMoverStatus: &volsyncv1alpha1.MoverStatus{},
-		options:           map[string]string{},
+		client:             fakeClient,
+		logger:             logr.Discard(),
+		eventRecorder:      &fakeEventRecorder{},
+		owner:              owner,
+		isSource:           isSource,
+		moverType:          moverType,
+		mainPVCName:        &pvcName,
+		sourceStatus:       &volsyncv1alpha1.ReplicationSourceRsyncTLSStatus{},
+		destStatus:         &volsyncv1alpha1.ReplicationDestinationRsyncTLSStatus{},
+		latestMoverStatus:  &volsyncv1alpha1.MoverStatus{},
+		options:            map[string]string{},
+		csiConfigName:      "ceph-csi-config",
+		csiConfigNamespace: "rook-ceph",
 	}
 	m.initCached()
 

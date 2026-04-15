@@ -72,6 +72,11 @@ IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
 # MOVER_IMG defines the image:tag used for the mover plugin image.
 MOVER_IMG ?= $(MOVER_IMAGE_TAG_BASE):v$(VERSION)
 
+# CEPH_CSI_CONFIG_NAME is the name of the ceph-csi ConfigMap the operator reads.
+CEPH_CSI_CONFIG_NAME ?= ceph-csi-config
+# CEPH_CSI_CONFIG_NAMESPACE is the namespace of the ceph-csi ConfigMap.
+CEPH_CSI_CONFIG_NAMESPACE ?= rook-ceph
+
 # Mover container --build-arg flags
 MOVER_BUILD_ARGS = \
 	--build-arg CEPH_BASE_IMAGE=$(CEPH_BASE_IMAGE) \
@@ -294,7 +299,7 @@ docker-buildx-mover: ## Build and push docker image for the mover for cross-plat
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g' > dist/install.yaml
+	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g; s|CEPH_CSI_CONFIG_NAME_PLACEHOLDER|${CEPH_CSI_CONFIG_NAME}|g; s|CEPH_CSI_CONFIG_NAMESPACE_PLACEHOLDER|${CEPH_CSI_CONFIG_NAMESPACE}|g' > dist/install.yaml
 
 ##@ Deployment
 
@@ -313,7 +318,7 @@ uninstall: ## Uninstall VolSync CRDs from K8s cluster.
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g' | $(KUBECTL) apply -f -
+	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g; s|CEPH_CSI_CONFIG_NAME_PLACEHOLDER|${CEPH_CSI_CONFIG_NAME}|g; s|CEPH_CSI_CONFIG_NAMESPACE_PLACEHOLDER|${CEPH_CSI_CONFIG_NAMESPACE}|g' | $(KUBECTL) apply -f -
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.

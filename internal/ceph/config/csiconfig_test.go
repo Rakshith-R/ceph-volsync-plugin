@@ -139,6 +139,94 @@ func TestCSIConfig(t *testing.T) {
 	}
 }
 
+func TestReadClusterInfoFromData(t *testing.T) {
+	t.Parallel()
+	data := []byte(`[{"clusterID":"c1","monitors":["mon1","mon2"]},{"clusterID":"c2","monitors":["mon3"]}]`)
+
+	info, err := ReadClusterInfoFromData(data, "c1")
+	if err != nil {
+		t.Fatalf("ReadClusterInfoFromData() error: %v", err)
+	}
+	if info.ClusterID != "c1" {
+		t.Errorf("ClusterID = %q, want %q", info.ClusterID, "c1")
+	}
+	if len(info.Monitors) != 2 {
+		t.Errorf("Monitors count = %d, want 2", len(info.Monitors))
+	}
+
+	_, err = ReadClusterInfoFromData(data, "missing")
+	if err == nil {
+		t.Error("expected error for missing clusterID")
+	}
+
+	_, err = ReadClusterInfoFromData([]byte("invalid"), "c1")
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+func TestGetRBDControllerPublishSecretRefFromData(t *testing.T) {
+	t.Parallel()
+	csiConfig := []cephcsi.ClusterInfo{
+		{
+			ClusterID: "cluster-1",
+			RBD: cephcsi.RBD{
+				ControllerPublishSecretRef: corev1.SecretReference{
+					Name: "rbd-secret-1", Namespace: "ceph-csi",
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(csiConfig)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+
+	name, ns, err := GetRBDControllerPublishSecretRefFromData(data, "cluster-1")
+	if err != nil {
+		t.Fatalf("GetRBDControllerPublishSecretRefFromData() error: %v", err)
+	}
+	if name != "rbd-secret-1" || ns != "ceph-csi" {
+		t.Errorf("got (%q, %q), want (%q, %q)", name, ns, "rbd-secret-1", "ceph-csi")
+	}
+
+	_, _, err = GetRBDControllerPublishSecretRefFromData(data, "missing")
+	if err == nil {
+		t.Error("expected error for missing clusterID")
+	}
+}
+
+func TestGetCephFSControllerPublishSecretRefFromData(t *testing.T) {
+	t.Parallel()
+	csiConfig := []cephcsi.ClusterInfo{
+		{
+			ClusterID: "cluster-1",
+			CephFS: cephcsi.CephFS{
+				ControllerPublishSecretRef: corev1.SecretReference{
+					Name: "cephfs-secret-1", Namespace: "ceph-csi",
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(csiConfig)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+
+	name, ns, err := GetCephFSControllerPublishSecretRefFromData(data, "cluster-1")
+	if err != nil {
+		t.Fatalf("GetCephFSControllerPublishSecretRefFromData() error: %v", err)
+	}
+	if name != "cephfs-secret-1" || ns != "ceph-csi" {
+		t.Errorf("got (%q, %q), want (%q, %q)", name, ns, "cephfs-secret-1", "ceph-csi")
+	}
+
+	_, _, err = GetCephFSControllerPublishSecretRefFromData(data, "missing")
+	if err == nil {
+		t.Error("expected error for missing clusterID")
+	}
+}
+
 func TestGetRBDControllerPublishSecretRef(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
