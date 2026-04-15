@@ -165,21 +165,6 @@ func (m *Mover) ensureCephCSIConfigMap(ctx context.Context, csiConfigData map[st
 // pre-fetched csi config data, fetches it, and creates a copy in
 // the owner's namespace.
 func (m *Mover) ensureCephCSISecret(ctx context.Context, csiConfigData map[string]string, clusterID string) (*string, error) {
-	if m.mainPVCName == nil {
-		return nil, fmt.Errorf("mainPVCName is not set")
-	}
-
-	// Get the source PVC to find its PV
-	srcPVC := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      *m.mainPVCName,
-			Namespace: m.owner.GetNamespace(),
-		},
-	}
-	if err := m.client.Get(ctx, client.ObjectKeyFromObject(srcPVC), srcPVC); err != nil {
-		return nil, fmt.Errorf("failed to get PVC: %w", err)
-	}
-
 	getSecretRef := config.GetCephFSControllerPublishSecretRefFromData
 	if m.moverType == constant.MoverRBD {
 		getSecretRef = config.GetRBDControllerPublishSecretRefFromData

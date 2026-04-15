@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -284,24 +285,36 @@ func createVolumeSnapshot(ctx context.Context, name, pvcName, volumeSnapshotClas
 func updateManualTrigger(ctx context.Context, rsName, rdName, newID string) {
 	By("updating manual trigger to " + newID)
 
-	rs := &volsyncv1alpha1.ReplicationSource{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs)).To(Succeed())
-	rs.Spec.Trigger.Manual = newID
-	Expect(k8sClient.Update(ctx, rs)).To(Succeed())
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		rs := &volsyncv1alpha1.ReplicationSource{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs); err != nil {
+			return err
+		}
+		rs.Spec.Trigger.Manual = newID
+		return k8sClient.Update(ctx, rs)
+	})).To(Succeed())
 
-	rd := &volsyncv1alpha1.ReplicationDestination{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rdName, Namespace: namespace}, rd)).To(Succeed())
-	rd.Spec.Trigger.Manual = newID
-	Expect(k8sClient.Update(ctx, rd)).To(Succeed())
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		rd := &volsyncv1alpha1.ReplicationDestination{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rdName, Namespace: namespace}, rd); err != nil {
+			return err
+		}
+		rd.Spec.Trigger.Manual = newID
+		return k8sClient.Update(ctx, rd)
+	})).To(Succeed())
 }
 
 func updateRSManualTrigger(ctx context.Context, rsName, newID string) {
 	By("updating RS manual trigger to " + newID)
 
-	rs := &volsyncv1alpha1.ReplicationSource{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs)).To(Succeed())
-	rs.Spec.Trigger.Manual = newID
-	Expect(k8sClient.Update(ctx, rs)).To(Succeed())
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		rs := &volsyncv1alpha1.ReplicationSource{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs); err != nil {
+			return err
+		}
+		rs.Spec.Trigger.Manual = newID
+		return k8sClient.Update(ctx, rs)
+	})).To(Succeed())
 }
 
 func setRSPaused(ctx context.Context, rsName string, paused bool) {
@@ -312,10 +325,14 @@ func setRSPaused(ctx context.Context, rsName string, paused bool) {
 
 	By(action + " ReplicationSource " + rsName)
 
-	rs := &volsyncv1alpha1.ReplicationSource{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs)).To(Succeed())
-	rs.Spec.Paused = paused
-	Expect(k8sClient.Update(ctx, rs)).To(Succeed())
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		rs := &volsyncv1alpha1.ReplicationSource{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs); err != nil {
+			return err
+		}
+		rs.Spec.Paused = paused
+		return k8sClient.Update(ctx, rs)
+	})).To(Succeed())
 }
 
 // waitForSyncTime waits for RS.Status.LastSyncTime to be non-nil.
