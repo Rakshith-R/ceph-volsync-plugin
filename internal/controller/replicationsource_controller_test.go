@@ -24,6 +24,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	testRSName = "test-rs"
+	testRSNS   = "test-ns"
+)
+
 func TestRsHasMover(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -34,8 +39,8 @@ func TestRsHasMover(t *testing.T) {
 			name: "No mover",
 			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-rs",
-					Namespace: "test-ns",
+					Name:      testRSName,
+					Namespace: testRSNS,
 				},
 				Spec: volsyncv1alpha1.ReplicationSourceSpec{},
 			},
@@ -45,8 +50,8 @@ func TestRsHasMover(t *testing.T) {
 			name: "Rclone mover",
 			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-rs",
-					Namespace: "test-ns",
+					Name:      testRSName,
+					Namespace: testRSNS,
 				},
 				Spec: volsyncv1alpha1.ReplicationSourceSpec{
 					Rclone: &volsyncv1alpha1.ReplicationSourceRcloneSpec{},
@@ -58,8 +63,8 @@ func TestRsHasMover(t *testing.T) {
 			name: "Restic mover",
 			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-rs",
-					Namespace: "test-ns",
+					Name:      testRSName,
+					Namespace: testRSNS,
 				},
 				Spec: volsyncv1alpha1.ReplicationSourceSpec{
 					Restic: &volsyncv1alpha1.ReplicationSourceResticSpec{},
@@ -71,8 +76,8 @@ func TestRsHasMover(t *testing.T) {
 			name: "Rsync mover",
 			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-rs",
-					Namespace: "test-ns",
+					Name:      testRSName,
+					Namespace: testRSNS,
 				},
 				Spec: volsyncv1alpha1.ReplicationSourceSpec{
 					Rsync: &volsyncv1alpha1.ReplicationSourceRsyncSpec{},
@@ -84,8 +89,8 @@ func TestRsHasMover(t *testing.T) {
 			name: "RsyncTLS mover",
 			rs: &volsyncv1alpha1.ReplicationSource{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-rs",
-					Namespace: "test-ns",
+					Name:      testRSName,
+					Namespace: testRSNS,
 				},
 				Spec: volsyncv1alpha1.ReplicationSourceSpec{
 					RsyncTLS: &volsyncv1alpha1.ReplicationSourceRsyncTLSSpec{},
