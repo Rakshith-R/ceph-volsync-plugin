@@ -35,6 +35,8 @@ import (
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
 )
 
+const pskFileName = "psk.txt"
+
 // updateStatusPSK sets the PSK secret name in the source or destination status.
 func (m *Mover) updateStatusPSK(pskSecretName *string) {
 	if m.isSource {
@@ -55,7 +57,7 @@ func (m *Mover) ensureSecrets(ctx context.Context) (*string, error) {
 				Namespace: m.owner.GetNamespace(),
 			},
 		}
-		fields := []string{"psk.txt"}
+		fields := []string{pskFileName}
 		if err := utils.GetAndValidateSecret(ctx, m.client, m.logger, keySecret, fields...); err != nil {
 			m.logger.Error(err, "Key Secret does not contain the proper fields")
 			return nil, err
@@ -83,7 +85,7 @@ func (m *Mover) ensureSecrets(ctx context.Context) (*string, error) {
 			return nil, err
 		}
 		keySecret.StringData = map[string]string{
-			"psk.txt": "volsync:" + hex.EncodeToString(keyData),
+			pskFileName: "volsync:" + hex.EncodeToString(keyData),
 		}
 		if err := ctrl.SetControllerReference(m.owner, keySecret, m.client.Scheme()); err != nil {
 			m.logger.Error(err, utils.ErrUnableToSetControllerRef)

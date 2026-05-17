@@ -103,7 +103,7 @@ func TestInitCached_DestPVC_Generated(t *testing.T) {
 		WithScheme(scheme).
 		Build()
 
-	owner := newTestOwner("my-rd", "test-ns")
+	owner := newTestOwner("my-rd", testNamespace)
 	m := &Mover{
 		client:            fakeClient,
 		logger:            logr.Discard(),

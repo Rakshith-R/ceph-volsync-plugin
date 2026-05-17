@@ -22,6 +22,7 @@ import (
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	"github.com/go-logr/logr"
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -31,6 +32,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
+)
+
+const (
+	testNamespace = "test-ns"
+	testCephFSSC  = "cephfs-sc"
 )
 
 // fakeEventRecorder implements events.EventRecorder with no-ops.
@@ -71,7 +77,7 @@ func newTestMover(
 	owner := &volsyncv1alpha1.ReplicationSource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-rs",
-			Namespace: "test-ns",
+			Namespace: testNamespace,
 			UID:       "test-uid",
 		},
 	}
@@ -89,8 +95,8 @@ func newTestMover(
 		destStatus:         &volsyncv1alpha1.ReplicationDestinationRsyncTLSStatus{},
 		latestMoverStatus:  &volsyncv1alpha1.MoverStatus{},
 		options:            map[string]string{},
-		csiConfigName:      "ceph-csi-config",
-		csiConfigNamespace: "rook-ceph",
+		csiConfigName:      defaultCSIConfigName,
+		csiConfigNamespace: defaultCSIConfigNS,
 	}
 	m.initCached()
 
@@ -114,7 +120,7 @@ func ptrTo[T any](v T) *T {
 }
 
 // newSnapshot creates a ready VolumeSnapshot in
-// "test-ns" with the given name and labels.
+// testNamespace with the given name and labels.
 func newSnapshot(
 	name string,
 	labels map[string]string,
@@ -122,7 +128,7 @@ func newSnapshot(
 	snap := &snapv1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: "test-ns",
+			Namespace: testNamespace,
 			Labels:    labels,
 		},
 		Status: &snapv1.VolumeSnapshotStatus{
@@ -130,4 +136,40 @@ func newSnapshot(
 		},
 	}
 	return snap
+}
+
+// newSnapshotWithContent creates a ready VolumeSnapshot with a bound
+// VolumeSnapshotContent for testing annotation operations.
+func newSnapshotWithContent(
+	name, contentName string,
+	labels map[string]string,
+) (*snapv1.VolumeSnapshot, *snapv1.VolumeSnapshotContent) {
+	snap := &snapv1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: testNamespace,
+			Labels:    labels,
+		},
+		Status: &snapv1.VolumeSnapshotStatus{
+			ReadyToUse:                     ptrTo(true),
+			BoundVolumeSnapshotContentName: &contentName,
+		},
+	}
+	content := &snapv1.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: contentName,
+		},
+		Spec: snapv1.VolumeSnapshotContentSpec{
+			Driver:         "test-driver",
+			DeletionPolicy: snapv1.VolumeSnapshotContentDelete,
+			Source: snapv1.VolumeSnapshotContentSource{
+				SnapshotHandle: ptrTo("test-handle"),
+			},
+			VolumeSnapshotRef: corev1.ObjectReference{
+				Name:      name,
+				Namespace: testNamespace,
+			},
+		},
+	}
+	return snap, content
 }
