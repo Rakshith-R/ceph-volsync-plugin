@@ -78,7 +78,7 @@ func scheduleSnapshotTest(drv driverConfig) {
 				},
 				drv,
 				map[string]string{
-					"copyMethod": "Snapshot",
+					copyMethodKey: copyMethodSnapshot,
 				},
 			)
 		})
@@ -95,7 +95,7 @@ func scheduleSnapshotTest(drv driverConfig) {
 				},
 				rdAddr, rdKey, drv,
 				map[string]string{
-					"copyMethod": "Snapshot",
+					copyMethodKey: copyMethodSnapshot,
 				},
 			)
 		})
@@ -107,7 +107,7 @@ func scheduleSnapshotTest(drv driverConfig) {
 		})
 
 		It("should validate first sync", func() {
-			validateSyncedData(ctx, srcPVC, destPVC, drv, "Snapshot", rdName, drv.name+"-ss-v1")
+			validateSyncedData(ctx, srcPVC, destPVC, drv, copyMethodSnapshot, rdName, drv.name+"-ss-v1")
 		})
 
 		It("should write more data", func() {
@@ -120,7 +120,7 @@ func scheduleSnapshotTest(drv driverConfig) {
 		})
 
 		It("should complete second sync and match data", func() {
-			waitForDataMatch(ctx, srcPVC, destPVC, drv, "Snapshot", rdName, drv.name+"-ss-v2", waitTill)
+			waitForDataMatch(ctx, srcPVC, destPVC, drv, copyMethodSnapshot, rdName, drv.name+"-ss-v2", waitTill)
 		})
 	})
 }
@@ -159,7 +159,7 @@ func scheduleSnapshotNoRDTriggerTest(drv driverConfig) {
 			rdAddr, rdKey = createRDAndWaitForAddress(
 				ctx, rdName, destPVC, nil, drv,
 				map[string]string{
-					"copyMethod": "Snapshot",
+					copyMethodKey: copyMethodSnapshot,
 				},
 			)
 		})
@@ -176,7 +176,7 @@ func scheduleSnapshotNoRDTriggerTest(drv driverConfig) {
 				},
 				rdAddr, rdKey, drv,
 				map[string]string{
-					"copyMethod": "Snapshot",
+					copyMethodKey: copyMethodSnapshot,
 				},
 			)
 		})
@@ -188,7 +188,7 @@ func scheduleSnapshotNoRDTriggerTest(drv driverConfig) {
 		})
 
 		It("should validate first sync", func() {
-			validateSyncedData(ctx, srcPVC, destPVC, drv, "Snapshot", rdName, drv.name+"-ssn-v1")
+			validateSyncedData(ctx, srcPVC, destPVC, drv, copyMethodSnapshot, rdName, drv.name+"-ssn-v1")
 		})
 
 		It("should write more data", func() {
@@ -201,7 +201,7 @@ func scheduleSnapshotNoRDTriggerTest(drv driverConfig) {
 		})
 
 		It("should complete second sync and match data", func() {
-			waitForDataMatch(ctx, srcPVC, destPVC, drv, "Snapshot", rdName, drv.name+"-ssn-v2", waitTill)
+			waitForDataMatch(ctx, srcPVC, destPVC, drv, copyMethodSnapshot, rdName, drv.name+"-ssn-v2", waitTill)
 		})
 	})
 }
@@ -248,7 +248,7 @@ func scheduleDirectTest(drv driverConfig) {
 				},
 				drv,
 				map[string]string{
-					"copyMethod": "Direct",
+					copyMethodKey: copyMethodDirect,
 				},
 			)
 		})
@@ -265,7 +265,7 @@ func scheduleDirectTest(drv driverConfig) {
 				},
 				rdAddr, rdKey, drv,
 				map[string]string{
-					"copyMethod": "Snapshot",
+					copyMethodKey: copyMethodSnapshot,
 				},
 			)
 		})
@@ -277,7 +277,7 @@ func scheduleDirectTest(drv driverConfig) {
 		})
 
 		It("should validate first sync", func() {
-			validateSyncedData(ctx, srcPVC, destPVC, drv, "Direct", rdName, drv.name+"-sd-v1")
+			validateSyncedData(ctx, srcPVC, destPVC, drv, copyMethodDirect, rdName, drv.name+"-sd-v1")
 		})
 
 		It("should write more data", func() {
@@ -290,7 +290,7 @@ func scheduleDirectTest(drv driverConfig) {
 		})
 
 		It("should complete second sync and match data", func() {
-			waitForDataMatch(ctx, srcPVC, destPVC, drv, "Direct", rdName, drv.name+"-sd-v2", waitTill)
+			waitForDataMatch(ctx, srcPVC, destPVC, drv, copyMethodDirect, rdName, drv.name+"-sd-v2", waitTill)
 		})
 	})
 }
@@ -333,7 +333,7 @@ func scheduleDirectNoRDTriggerTest(drv driverConfig) {
 			rdAddr, rdKey = createRDAndWaitForAddress(
 				ctx, rdName, destPVC, nil, drv,
 				map[string]string{
-					"copyMethod": "Direct",
+					copyMethodKey: copyMethodDirect,
 				},
 			)
 		})
@@ -350,7 +350,7 @@ func scheduleDirectNoRDTriggerTest(drv driverConfig) {
 				},
 				rdAddr, rdKey, drv,
 				map[string]string{
-					"copyMethod": "Snapshot",
+					copyMethodKey: copyMethodSnapshot,
 				},
 			)
 		})
@@ -362,7 +362,7 @@ func scheduleDirectNoRDTriggerTest(drv driverConfig) {
 		})
 
 		It("should validate first sync", func() {
-			validateSyncedData(ctx, srcPVC, destPVC, drv, "Direct", rdName, drv.name+"-sdn-v1")
+			validateSyncedData(ctx, srcPVC, destPVC, drv, copyMethodDirect, rdName, drv.name+"-sdn-v1")
 		})
 
 		It("should write more data", func() {
@@ -375,7 +375,7 @@ func scheduleDirectNoRDTriggerTest(drv driverConfig) {
 		})
 
 		It("should complete second sync and match data", func() {
-			waitForDataMatch(ctx, srcPVC, destPVC, drv, "Direct", rdName, drv.name+"-sdn-v2", waitTill)
+			waitForDataMatch(ctx, srcPVC, destPVC, drv, copyMethodDirect, rdName, drv.name+"-sdn-v2", waitTill)
 		})
 	})
 }
