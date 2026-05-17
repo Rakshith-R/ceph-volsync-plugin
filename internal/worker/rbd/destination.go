@@ -23,7 +23,6 @@ import (
 	"os"
 
 	"github.com/go-logr/logr"
-	"github.com/pierrec/lz4/v4"
 	"google.golang.org/grpc"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
@@ -58,15 +57,16 @@ func (w *DestinationWorker) Run(ctx context.Context) error {
 		logger:     w.Logger,
 		devicePath: constant.DevicePath,
 	}
-	hashServer := &HashServer{
-		logger:     w.Logger,
-		devicePath: constant.DevicePath,
-	}
 	commitServer := &RBDCommitServer{
 		logger:     w.Logger,
 		devicePath: constant.DevicePath,
 	}
-	syncServer := common.NewSyncServer(dataServer, dataServer, hashServer, commitServer)
+	syncServer := common.NewSyncServer(dataServer, dataServer, commitServer)
+	certHandler := &common.CertExchangeHandler{
+		ServerCtx:  ctx,
+		SyncServer: syncServer,
+	}
+	syncServer.SetCertHandler(certHandler)
 	return w.BaseDestinationWorker.Run(ctx, syncServer)
 }
 
@@ -209,10 +209,6 @@ func (s *RBDCommitServer) Commit(
 					s.devicePath, err,
 				)
 			}
-			s.logger.Info(
-				"Committed block device writes",
-				"path", entry.Path,
-			)
 			paths = append(paths, entry.Path)
 		}
 
@@ -239,60 +235,33 @@ func (s *RBDCommitServer) Commit(
 func (s *RBDDataServer) writeBlocks(
 	file *os.File, req *apiv1.WriteRequest,
 ) error {
-	s.logger.Info(
-		"Writing blocks to device",
-		"block_count", len(req.Blocks),
-	)
-
 	for i, block := range req.Blocks {
 		if block.IsZero {
-			zeros := make([]byte, block.Length)
-			if _, err := file.WriteAt(
-				zeros, int64(block.Offset), //nolint:gosec // G115: value within safe range
-			); err != nil {
+			if err := zeroRange(file, int64(block.Offset), int64(block.Length)); err != nil { //nolint:gosec // G115: value within safe range
 				s.logger.Error(
-					err, "Failed to write zeros",
+					err, "Failed to zero range",
 					"offset", block.Offset,
 					"length", block.Length,
 					"block_index", i,
 				)
 				return fmt.Errorf(
-					"failed to write zeros at "+
-						"offset %d: %w",
+					"zero range at offset %d: %w",
 					block.Offset, err,
 				)
 			}
 			s.logger.V(1).Info(
-				"Wrote zero block",
+				"Zeroed block",
 				"offset", block.Offset,
 				"length", block.Length,
 			)
 		} else {
-			writeData := block.Data
-			if block.Compression == apiv1.CompressionAlgo_COMPRESSION_LZ4 {
-				decompressed := make([]byte, block.Length)
-				n, err := lz4.UncompressBlock(block.Data, decompressed)
-				if err != nil {
-					s.logger.Error(err, "Failed to decompress LZ4",
-						"offset", block.Offset, "block_index", i)
-					return fmt.Errorf("lz4 decompress at offset %d: %w", block.Offset, err)
-				}
-				writeData = decompressed[:n]
-				if n != int(block.Length) { //nolint:gosec // block.Length is bounded by pipeline chunk size
-					return fmt.Errorf(
-						"lz4 decompressed size mismatch at offset %d: got %d, expected %d",
-						block.Offset, n, block.Length,
-					)
-				}
-			}
-
 			if _, err := file.WriteAt(
-				writeData, int64(block.Offset), //nolint:gosec // G115: value within safe range
+				block.Data, int64(block.Offset), //nolint:gosec // G115: value within safe range
 			); err != nil {
 				s.logger.Error(
 					err, "Failed to write data",
 					"offset", block.Offset,
-					"length", len(writeData),
+					"length", len(block.Data),
 					"block_index", i,
 				)
 				return fmt.Errorf(
@@ -304,8 +273,7 @@ func (s *RBDDataServer) writeBlocks(
 			s.logger.V(1).Info(
 				"Wrote data block",
 				"offset", block.Offset,
-				"length", len(writeData),
-				"compressed", block.Compression != apiv1.CompressionAlgo_COMPRESSION_NONE,
+				"length", len(block.Data),
 			)
 		}
 	}

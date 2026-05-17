@@ -27,7 +27,7 @@ Main entry point for the source side that orchestrates RBD block device synchron
 
 Destination side worker that receives and applies block changes via gRPC.
 
-**Implementation**: Embeds `common.BaseDestinationWorker` and runs servers for Write, Delete, CompareHashes, and Commit operations on the block device.
+**Implementation**: Embeds `common.BaseDestinationWorker` and runs servers for Write, Delete, and Commit operations on the block device.
 
 ### RBDDataServer
 
@@ -42,18 +42,6 @@ Destination-side handler for `Write` and `Delete` RPCs on block devices.
 - Syncs and closes device when stream completes
 
 **Delete**: No-op for block devices (not applicable).
-
-### HashServer
-
-Implements hash comparison for detecting identical blocks.
-
-**Protocol**:
-- Opens device read-only
-- For each block hash request, reads device at given offset
-- Computes SHA-256 and compares with source hash
-- Returns list of mismatched request IDs
-
-**Optimization**: Allows pipeline to skip sending blocks that already match at destination.
 
 ### RBDCommitServer
 
@@ -105,7 +93,7 @@ Adapts `os.File` to `pipeline.DataReader` interface for reading from block devic
 4. **Block Diff Iteration**:
    - Create RBDBlockDiffIterator with resolved snapshot IDs
    - Open source block device (/data/rbd-pv)
-   - Run pipeline: Iterator → Read → Hash → SendHash → Compress → SendData
+   - Run pipeline: Iterator → Read → SendData
 
 5. **Commit**:
    - Wait for all blocks to be ACKed (check sliding window)
@@ -114,10 +102,9 @@ Adapts `os.File` to `pipeline.DataReader` interface for reading from block devic
 
 ### Destination Side
 
-1. Start gRPC sync server with Write/Hash/Commit handlers
-2. **Write handler**: Receive blocks, decompress, write to device, ACK
-3. **Hash handler**: Read device blocks, compare SHA-256, return mismatches
-4. **Commit handler**: Sync device to ensure durability, ACK
+1. Start gRPC sync server with Write/Commit handlers
+2. **Write handler**: Receive blocks, write to device, ACK
+3. **Commit handler**: Sync device to ensure durability, ACK
 
 ## Configuration
 
@@ -161,7 +148,7 @@ When both BASE_SNAPSHOT_HANDLE and TARGET_SNAPSHOT_HANDLE are provided:
 
 - Provides `pipeline.BlockIterator` implementation (rbdIterAdapter)
 - Provides `pipeline.DataReader` implementation (fileDataReader)
-- Uses `pipeline.New()` to run 6-stage concurrent pipeline
+- Uses `pipeline.New()` to run concurrent pipeline
 
 ### Common Package
 
@@ -194,5 +181,5 @@ All device operations use standard Go file I/O:
 ## Testing
 
 Unit tests cover:
-- Hash server with various scenarios (match, mismatch)
-- Destination write operations with compression
+- Destination write operations
+- Source iterator adapter (full/incremental diff, zero gaps)
