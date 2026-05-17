@@ -17,6 +17,7 @@ limitations under the License.
 package cephfs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -79,6 +80,59 @@ func TestCephFSReader_CloseFile(t *testing.T) {
 	if string(data) != "bbb" {
 		t.Errorf("expected %q, got %q", "bbb", data)
 	}
+}
+
+// TestCephFSReader_ConcurrentReadAt exercises the ReadAt-vs-CloseFile
+// race that caused the original "concurrent map writes" crash.
+// Run with: go test -race -run TestCephFSReader_ConcurrentReadAt
+func TestCephFSReader_ConcurrentReadAt(t *testing.T) {
+	dir := t.TempDir()
+	numFiles := 20
+	for i := range numFiles {
+		name := filepath.Join(dir, fmt.Sprintf("f%d.bin", i))
+		_ = os.WriteFile(name, []byte("concurrent test data"), 0600)
+	}
+
+	r := newCephFSReader(dir)
+	defer func() { _ = r.Close() }()
+
+	// Readers use files 0-9, closer uses files 10-19.
+	// Both operate on the same CephFSReader concurrently,
+	// exercising the mutex on the shared acquired map.
+	var wg sync.WaitGroup
+	workers := 8
+	half := numFiles / 2
+	wg.Add(workers + 1)
+
+	// Read workers: call ReadAt across files 0-9.
+	for w := range workers {
+		go func(id int) {
+			defer wg.Done()
+			for i := range half {
+				name := fmt.Sprintf("f%d.bin", (i+id)%half)
+				data, err := r.ReadAt(name, 0, 20)
+				if err != nil {
+					t.Errorf("worker %d: ReadAt %s: %v", id, name, err)
+					return
+				}
+				if string(data) != "concurrent test data" {
+					t.Errorf("worker %d: got %q", id, data)
+				}
+			}
+		}(w)
+	}
+
+	// Closer: acquire then close files 10-19 concurrently.
+	go func() {
+		defer wg.Done()
+		for i := half; i < numFiles; i++ {
+			name := fmt.Sprintf("f%d.bin", i)
+			_, _ = r.ReadAt(name, 0, 20)
+			_ = r.CloseFile(name)
+		}
+	}()
+
+	wg.Wait()
 }
 
 func TestFileCache_RefCounting(t *testing.T) {

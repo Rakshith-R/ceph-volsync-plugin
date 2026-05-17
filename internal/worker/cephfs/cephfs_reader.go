@@ -18,6 +18,7 @@ package cephfs
 
 import (
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
@@ -33,16 +34,31 @@ type fileEntry struct {
 	refCount int
 }
 
+const numCacheShards = 16
+
+type fileCacheShard struct {
+	mu    sync.Mutex
+	files map[string]*fileEntry
+}
+
 // FileCache is a ref-counted file handle cache.
 // Thread-safe for concurrent use across goroutines.
 // A single instance is shared by all components
 // that access files under the same baseDir.
+// Uses sharded locking to reduce contention when
+// many goroutines open different files concurrently.
 type FileCache struct {
 	baseDir string
 	mode    int
 	perm    os.FileMode
-	mu      sync.Mutex
-	files   map[string]*fileEntry
+	shards  [numCacheShards]fileCacheShard
+}
+
+// shard returns the shard responsible for key.
+func (fc *FileCache) shard(key string) *fileCacheShard {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return &fc.shards[h.Sum32()%numCacheShards]
 }
 
 // NewFileCache creates a FileCache rooted at
@@ -50,12 +66,11 @@ type FileCache struct {
 func NewFileCache(
 	baseDir string, mode int, perm os.FileMode,
 ) *FileCache {
-	return &FileCache{
-		baseDir: baseDir,
-		mode:    mode,
-		perm:    perm,
-		files:   make(map[string]*fileEntry),
+	fc := &FileCache{baseDir: baseDir, mode: mode, perm: perm}
+	for i := range fc.shards {
+		fc.shards[i].files = make(map[string]*fileEntry)
 	}
+	return fc
 }
 
 // NewReadCache creates a read-only FileCache
@@ -89,10 +104,11 @@ func (fc *FileCache) Acquire(
 		)
 	}
 
-	fc.mu.Lock()
-	defer fc.mu.Unlock()
+	s := fc.shard(relPath)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if entry, ok := fc.files[relPath]; ok {
+	if entry, ok := s.files[relPath]; ok {
 		entry.refCount++
 		return entry.file, nil
 	}
@@ -135,7 +151,7 @@ func (fc *FileCache) Acquire(
 		}
 	}
 
-	fc.files[relPath] = &fileEntry{
+	s.files[relPath] = &fileEntry{
 		file: f, refCount: 1,
 	}
 	return f, nil
@@ -146,16 +162,17 @@ func (fc *FileCache) Acquire(
 func (fc *FileCache) Release(
 	relPath string,
 ) error {
-	fc.mu.Lock()
-	defer fc.mu.Unlock()
+	s := fc.shard(relPath)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	entry, ok := fc.files[relPath]
+	entry, ok := s.files[relPath]
 	if !ok {
 		return nil
 	}
 	entry.refCount--
 	if entry.refCount <= 0 {
-		delete(fc.files, relPath)
+		delete(s.files, relPath)
 		return entry.file.Close()
 	}
 	return nil
@@ -166,14 +183,15 @@ func (fc *FileCache) Release(
 func (fc *FileCache) SyncAndRelease(
 	relPath string,
 ) error {
-	fc.mu.Lock()
-	entry, ok := fc.files[relPath]
+	s := fc.shard(relPath)
+	s.mu.Lock()
+	entry, ok := s.files[relPath]
 	if !ok {
-		fc.mu.Unlock()
+		s.mu.Unlock()
 		return nil
 	}
 	entry.refCount++
-	fc.mu.Unlock()
+	s.mu.Unlock()
 
 	syncErr := entry.file.Sync()
 
@@ -192,16 +210,17 @@ func (fc *FileCache) SyncAndRelease(
 
 // Close releases all cached file handles.
 func (fc *FileCache) Close() error {
-	fc.mu.Lock()
-	defer fc.mu.Unlock()
-
 	var firstErr error
-	for k, entry := range fc.files {
-		if err := entry.file.Close(); err != nil &&
-			firstErr == nil {
-			firstErr = err
+	for i := range fc.shards {
+		s := &fc.shards[i]
+		s.mu.Lock()
+		for k, entry := range s.files {
+			if err := entry.file.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			delete(s.files, k)
 		}
-		delete(fc.files, k)
+		s.mu.Unlock()
 	}
 	return firstErr
 }
@@ -213,15 +232,14 @@ func (fc *FileCache) Close() error {
 // CommitRequest via drainPending.
 type CephFSReader struct {
 	cache    *FileCache
-	acquired map[string]struct{}
+	acquired sync.Map
 }
 
 // newCephFSReader creates a reader rooted at baseDir.
 // Production code passes constant.DataMountPath.
 func newCephFSReader(baseDir string) *CephFSReader {
 	return &CephFSReader{
-		cache:    NewReadCache(baseDir),
-		acquired: make(map[string]struct{}),
+		cache: NewReadCache(baseDir),
 	}
 }
 
@@ -241,10 +259,8 @@ func (r *CephFSReader) ReadAt(
 		return nil, err
 	}
 
-	if _, already := r.acquired[filePath]; already {
+	if _, loaded := r.acquired.LoadOrStore(filePath, struct{}{}); loaded {
 		_ = r.cache.Release(filePath)
-	} else {
-		r.acquired[filePath] = struct{}{}
 	}
 
 	data := make([]byte, length)
@@ -263,7 +279,7 @@ func (r *CephFSReader) ReadAt(
 func (r *CephFSReader) CloseFile(
 	filePath string,
 ) error {
-	delete(r.acquired, filePath)
+	r.acquired.Delete(filePath)
 	return r.cache.Release(filePath)
 }
 

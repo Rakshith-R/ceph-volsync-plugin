@@ -25,7 +25,7 @@ Main entry point for the source side that orchestrates CephFS snapshot diff sync
 
 Destination side worker that receives and applies changes via gRPC.
 
-**Implementation**: Embeds `common.BaseDestinationWorker` and runs servers for Write, Delete, CompareHashes, and Commit operations using a shared FileCache.
+**Implementation**: Embeds `common.BaseDestinationWorker` and runs servers for Write, Delete, and Commit operations using a shared FileCache.
 
 ### CephFSBlockIterator
 
@@ -74,14 +74,6 @@ Destination-side handler for `Write` and `Delete` RPCs.
 
 **Delete**: Bidi-streaming RPC that receives batches of paths to delete and ACKs each batch.
 
-### CephFSHashServer
-
-Implements hash comparison for detecting identical blocks between source and destination.
-
-**Protocol**: For each block, reads destination file at given offset, computes SHA-256, compares with source hash, and returns mismatched request IDs.
-
-**Optimization**: Allows pipeline to skip sending blocks that already match.
-
 ### CephFSCommitServer
 
 Handles commit operations on the destination.
@@ -115,18 +107,17 @@ Thread-safe cache for CephFS file handles with reference counting.
    - Directories → recursive walk
 4. For large files:
    - Block iterator generates changed blocks
-   - Pipeline: Read → Hash → SendHash → Compress → SendData
+   - Pipeline: Read → SendData
    - Commit drainer waits for ACKs and sends batched commits
    - Metadata rsync updates timestamps/permissions for committed files
 5. Signal Done when all operations complete
 
 ### Destination Side
 
-1. Start gRPC sync server with Write/Delete/Hash/Commit handlers
+1. Start gRPC sync server with Write/Delete/Commit handlers
 2. Write handler: Receive blocks, write to FileCache, ACK request IDs
 3. Delete handler: Remove paths, ACK batches
-4. Hash handler: Read local blocks, compare SHA-256, return mismatches
-5. Commit handler: Fsync files, release handles, ACK batches
+4. Commit handler: Fsync files, release handles, ACK batches
 
 ## Configuration
 
@@ -150,7 +141,7 @@ Thread-safe cache for CephFS file handles with reference counting.
 
 - Provides `pipeline.BlockIterator` implementation (CephFSBlockIterator)
 - Provides `pipeline.DataReader` implementation (CephFSReader)
-- Uses `pipeline.New()` to run 6-stage concurrent pipeline
+- Uses `pipeline.New()` to run concurrent pipeline
 
 ### Common Package
 
@@ -173,4 +164,4 @@ Thread-safe cache for CephFS file handles with reference counting.
 Unit tests cover:
 - Block iterator with mock file diff iterators
 - CephFS reader with temporary files
-- Hash server with various scenarios (match, mismatch, missing file)
+- Destination write and commit operations

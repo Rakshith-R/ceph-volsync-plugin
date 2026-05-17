@@ -25,7 +25,6 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
-	"github.com/pierrec/lz4/v4"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
@@ -65,16 +64,17 @@ func (w *DestinationWorker) Run(ctx context.Context) error {
 		logger: w.Logger,
 		cache:  cache,
 	}
-	hashServer := &CephFSHashServer{
-		logger: w.Logger,
-		cache:  cache,
-	}
 	commitServer := &CephFSCommitServer{
 		logger: w.Logger,
 		cache:  cache,
 	}
 
-	syncServer := common.NewSyncServer(dataServer, dataServer, hashServer, commitServer)
+	syncServer := common.NewSyncServer(dataServer, dataServer, commitServer)
+	certHandler := &common.CertExchangeHandler{
+		ServerCtx:  ctx,
+		SyncServer: syncServer,
+	}
+	syncServer.SetCertHandler(certHandler)
 	return w.BaseDestinationWorker.Run(ctx, syncServer)
 }
 
@@ -179,19 +179,11 @@ func (s *CephFSCommitServer) Commit(
 			[]string, 0, len(req.Entries),
 		)
 		for _, entry := range req.Entries {
-			s.logger.Info(
-				"Committing file",
-				"path", entry.Path,
-			)
 			if err := s.cache.SyncAndRelease(
 				entry.Path,
 			); err != nil {
 				return err
 			}
-			s.logger.Info(
-				"Successfully committed file",
-				"path", entry.Path,
-			)
 			paths = append(paths, entry.Path)
 		}
 
@@ -234,81 +226,52 @@ func (s *DataServer) writeBlocks(
 		return nil
 	}
 
-	s.logger.Info(
-		"Writing blocks",
-		"path", req.Blocks[0].FilePath,
-		"block_count", len(req.Blocks),
-	)
-
-	filePath := req.Blocks[0].FilePath
-	file, ok := files[filePath]
-	if !ok {
-		var err error
-		file, err = s.cache.Acquire(
-			filePath,
-			int64(req.Blocks[0].TotalSize), //nolint:gosec // G115
-		)
-		if err != nil {
-			return err
-		}
-		files[filePath] = file
-	}
-
 	for i, block := range req.Blocks {
+		filePath := block.FilePath
+		file, ok := files[filePath]
+		if !ok {
+			var err error
+			file, err = s.cache.Acquire(
+				filePath,
+				int64(block.TotalSize), //nolint:gosec // G115
+			)
+			if err != nil {
+				return err
+			}
+			files[filePath] = file
+		}
+
 		offset := int64(block.Offset) //nolint:gosec // G115: value within safe range
 		if block.IsZero {
-			zeros := make([]byte, block.Length)
-			if _, err := file.WriteAt(
-				zeros, offset,
-			); err != nil {
+			if err := zeroRange(file, offset, int64(block.Length)); err != nil { //nolint:gosec // G115
 				s.logger.Error(
-					err, "Failed to write zeros",
+					err, "Failed to zero block",
 					"path", filePath,
 					"offset", block.Offset,
 					"length", block.Length,
 					"block_index", i,
 				)
 				return fmt.Errorf(
-					"failed to write zeros at "+
+					"failed to zero block at "+
 						"offset %d in %s: %w",
 					block.Offset, filePath, err,
 				)
 			}
 			s.logger.V(1).Info(
-				"Wrote zero block",
+				"Zeroed block",
 				"path", filePath,
 				"offset", block.Offset,
 				"length", block.Length,
 			)
 		} else {
-			writeData := block.Data
-			if block.Compression == apiv1.CompressionAlgo_COMPRESSION_LZ4 {
-				decompressed := make([]byte, block.Length)
-				n, err := lz4.UncompressBlock(block.Data, decompressed)
-				if err != nil {
-					s.logger.Error(err, "Failed to decompress LZ4",
-						"path", filePath, "offset", block.Offset,
-						"block_index", i)
-					return fmt.Errorf("lz4 decompress at offset %d in %s: %w",
-						block.Offset, filePath, err)
-				}
-				writeData = decompressed[:n]
-				if n != int(block.Length) { //nolint:gosec // block.Length is bounded by pipeline chunk size
-					return fmt.Errorf(
-						"lz4 decompressed size mismatch at offset %d in %s: got %d, expected %d",
-						block.Offset, filePath, n, block.Length,
-					)
-				}
-			}
-
 			if _, err := file.WriteAt(
-				writeData, offset,
+				block.Data, offset,
 			); err != nil {
 				s.logger.Error(
 					err, "Failed to write data",
 					"path", filePath,
 					"offset", block.Offset,
-					"length", len(writeData),
+					"length", len(block.Data),
 					"block_index", i,
 				)
 				return fmt.Errorf(
@@ -321,8 +284,7 @@ func (s *DataServer) writeBlocks(
 				"Wrote data block",
 				"path", filePath,
 				"offset", block.Offset,
-				"length", len(writeData),
-				"compressed", block.Compression != apiv1.CompressionAlgo_COMPRESSION_NONE,
+				"length", len(block.Data),
 			)
 		}
 	}
