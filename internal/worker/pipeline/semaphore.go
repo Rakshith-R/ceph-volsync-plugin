@@ -75,11 +75,6 @@ func (s *MemSemaphore) Release(n int64) {
 	s.wakeWaiters()
 }
 
-// PartialRelease returns n bytes (used by LZ4 in-place shrink).
-func (s *MemSemaphore) PartialRelease(n int64) {
-	s.Release(n)
-}
-
 func (s *MemSemaphore) wakeWaiters() {
 	for {
 		front := s.waiters.Front()
@@ -110,13 +105,7 @@ type WindowSemaphore struct {
 	released  []bool
 	inFlight  int
 	waiters   []*winWaiter // sorted by reqID
-	pressure  []pressureEntry
-}
-
-type pressureEntry struct {
-	threshold float64
-	ch        chan struct{}
-	fired     bool
+	releaseCh chan struct{}
 }
 
 func NewWindowSemaphore(maxWindow int) *WindowSemaphore {
@@ -125,6 +114,7 @@ func NewWindowSemaphore(maxWindow int) *WindowSemaphore {
 		maxWindow: maxWindow,
 		limit:     limit,
 		released:  make([]bool, limit),
+		releaseCh: make(chan struct{}, 1),
 	}
 }
 
@@ -132,7 +122,6 @@ func (w *WindowSemaphore) Acquire(ctx context.Context, reqID uint64) error {
 	w.mu.Lock()
 	if reqID-w.base < uint64(w.limit) { //nolint:gosec // G115: limit is positive
 		w.inFlight++
-		w.checkPressure()
 		w.mu.Unlock()
 		return nil
 	}
@@ -165,6 +154,9 @@ func (w *WindowSemaphore) Release(reqID uint64) {
 	// Use absolute (ring-buffer) indexing, consistent
 	// with the advance loop below.
 	idx := int(reqID % uint64(w.limit)) //nolint:gosec // G115: result in [0, limit)
+	if w.released[idx] {
+		return
+	}
 	w.released[idx] = true
 	w.inFlight--
 
@@ -174,7 +166,10 @@ func (w *WindowSemaphore) Release(reqID uint64) {
 	}
 
 	w.wakeWinWaiters()
-	w.checkPressure()
+	select {
+	case w.releaseCh <- struct{}{}:
+	default:
+	}
 }
 
 // IsReleased returns true if reqID has been released
@@ -185,20 +180,11 @@ func (w *WindowSemaphore) IsReleased(reqID uint64) bool {
 	return w.base > reqID
 }
 
-func (w *WindowSemaphore) PressureSignal(threshold float64) <-chan struct{} {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	ch := make(chan struct{}, 1)
-	entry := pressureEntry{threshold: threshold, ch: ch}
-
-	if float64(w.inFlight) >= threshold*float64(w.maxWindow) {
-		ch <- struct{}{}
-		entry.fired = true
-	}
-
-	w.pressure = append(w.pressure, entry)
-	return ch
+// ReleaseChan returns a channel that receives a notification
+// each time a request is released. The channel is buffered(1)
+// so signals are coalesced; callers must re-check IsReleased.
+func (w *WindowSemaphore) ReleaseChan() <-chan struct{} {
+	return w.releaseCh
 }
 
 func (w *WindowSemaphore) insertWaiter(waiter *winWaiter) {
@@ -229,21 +215,5 @@ func (w *WindowSemaphore) wakeWinWaiters() {
 		w.waiters = w.waiters[1:]
 		w.inFlight++
 		close(front.ch)
-	}
-}
-
-func (w *WindowSemaphore) checkPressure() {
-	for i := range w.pressure {
-		p := &w.pressure[i]
-		shouldFire := float64(w.inFlight) >= p.threshold*float64(w.maxWindow)
-		if shouldFire && !p.fired {
-			select {
-			case p.ch <- struct{}{}:
-			default:
-			}
-			p.fired = true
-		} else if !shouldFire {
-			p.fired = false
-		}
 	}
 }

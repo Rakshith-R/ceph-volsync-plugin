@@ -20,10 +20,10 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	SyncService_Write_FullMethodName         = "/api.v1.SyncService/Write"
-	SyncService_CompareHashes_FullMethodName = "/api.v1.SyncService/CompareHashes"
 	SyncService_Commit_FullMethodName        = "/api.v1.SyncService/Commit"
 	SyncService_Delete_FullMethodName        = "/api.v1.SyncService/Delete"
 	SyncService_Done_FullMethodName          = "/api.v1.SyncService/Done"
+	SyncService_ExchangeCerts_FullMethodName = "/api.v1.SyncService/ExchangeCerts"
 )
 
 // SyncServiceClient is the client API for SyncService service.
@@ -34,11 +34,11 @@ const (
 type SyncServiceClient interface {
 	// Bidi-streaming RPCs
 	Write(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WriteRequest, WriteResponse], error)
-	CompareHashes(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HashRequest, HashResponse], error)
 	Commit(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CommitRequest, CommitResponse], error)
 	Delete(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[DeleteRequest, DeleteResponse], error)
 	// Unary RPCs
 	Done(ctx context.Context, in *DoneRequest, opts ...grpc.CallOption) (*DoneResponse, error)
+	ExchangeCerts(ctx context.Context, in *ExchangeCertsRequest, opts ...grpc.CallOption) (*ExchangeCertsResponse, error)
 }
 
 type syncServiceClient struct {
@@ -62,22 +62,9 @@ func (c *syncServiceClient) Write(ctx context.Context, opts ...grpc.CallOption) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type SyncService_WriteClient = grpc.BidiStreamingClient[WriteRequest, WriteResponse]
 
-func (c *syncServiceClient) CompareHashes(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HashRequest, HashResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &SyncService_ServiceDesc.Streams[1], SyncService_CompareHashes_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[HashRequest, HashResponse]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SyncService_CompareHashesClient = grpc.BidiStreamingClient[HashRequest, HashResponse]
-
 func (c *syncServiceClient) Commit(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CommitRequest, CommitResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &SyncService_ServiceDesc.Streams[2], SyncService_Commit_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &SyncService_ServiceDesc.Streams[1], SyncService_Commit_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +77,7 @@ type SyncService_CommitClient = grpc.BidiStreamingClient[CommitRequest, CommitRe
 
 func (c *syncServiceClient) Delete(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[DeleteRequest, DeleteResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &SyncService_ServiceDesc.Streams[3], SyncService_Delete_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &SyncService_ServiceDesc.Streams[2], SyncService_Delete_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +98,16 @@ func (c *syncServiceClient) Done(ctx context.Context, in *DoneRequest, opts ...g
 	return out, nil
 }
 
+func (c *syncServiceClient) ExchangeCerts(ctx context.Context, in *ExchangeCertsRequest, opts ...grpc.CallOption) (*ExchangeCertsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExchangeCertsResponse)
+	err := c.cc.Invoke(ctx, SyncService_ExchangeCerts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SyncServiceServer is the server API for SyncService service.
 // All implementations must embed UnimplementedSyncServiceServer
 // for forward compatibility.
@@ -119,11 +116,11 @@ func (c *syncServiceClient) Done(ctx context.Context, in *DoneRequest, opts ...g
 type SyncServiceServer interface {
 	// Bidi-streaming RPCs
 	Write(grpc.BidiStreamingServer[WriteRequest, WriteResponse]) error
-	CompareHashes(grpc.BidiStreamingServer[HashRequest, HashResponse]) error
 	Commit(grpc.BidiStreamingServer[CommitRequest, CommitResponse]) error
 	Delete(grpc.BidiStreamingServer[DeleteRequest, DeleteResponse]) error
 	// Unary RPCs
 	Done(context.Context, *DoneRequest) (*DoneResponse, error)
+	ExchangeCerts(context.Context, *ExchangeCertsRequest) (*ExchangeCertsResponse, error)
 	mustEmbedUnimplementedSyncServiceServer()
 }
 
@@ -137,9 +134,6 @@ type UnimplementedSyncServiceServer struct{}
 func (UnimplementedSyncServiceServer) Write(grpc.BidiStreamingServer[WriteRequest, WriteResponse]) error {
 	return status.Error(codes.Unimplemented, "method Write not implemented")
 }
-func (UnimplementedSyncServiceServer) CompareHashes(grpc.BidiStreamingServer[HashRequest, HashResponse]) error {
-	return status.Error(codes.Unimplemented, "method CompareHashes not implemented")
-}
 func (UnimplementedSyncServiceServer) Commit(grpc.BidiStreamingServer[CommitRequest, CommitResponse]) error {
 	return status.Error(codes.Unimplemented, "method Commit not implemented")
 }
@@ -148,6 +142,9 @@ func (UnimplementedSyncServiceServer) Delete(grpc.BidiStreamingServer[DeleteRequ
 }
 func (UnimplementedSyncServiceServer) Done(context.Context, *DoneRequest) (*DoneResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Done not implemented")
+}
+func (UnimplementedSyncServiceServer) ExchangeCerts(context.Context, *ExchangeCertsRequest) (*ExchangeCertsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExchangeCerts not implemented")
 }
 func (UnimplementedSyncServiceServer) mustEmbedUnimplementedSyncServiceServer() {}
 func (UnimplementedSyncServiceServer) testEmbeddedByValue()                     {}
@@ -176,13 +173,6 @@ func _SyncService_Write_Handler(srv interface{}, stream grpc.ServerStream) error
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type SyncService_WriteServer = grpc.BidiStreamingServer[WriteRequest, WriteResponse]
-
-func _SyncService_CompareHashes_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(SyncServiceServer).CompareHashes(&grpc.GenericServerStream[HashRequest, HashResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SyncService_CompareHashesServer = grpc.BidiStreamingServer[HashRequest, HashResponse]
 
 func _SyncService_Commit_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(SyncServiceServer).Commit(&grpc.GenericServerStream[CommitRequest, CommitResponse]{ServerStream: stream})
@@ -216,6 +206,24 @@ func _SyncService_Done_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SyncService_ExchangeCerts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExchangeCertsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SyncServiceServer).ExchangeCerts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SyncService_ExchangeCerts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SyncServiceServer).ExchangeCerts(ctx, req.(*ExchangeCertsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SyncService_ServiceDesc is the grpc.ServiceDesc for SyncService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -227,17 +235,15 @@ var SyncService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Done",
 			Handler:    _SyncService_Done_Handler,
 		},
+		{
+			MethodName: "ExchangeCerts",
+			Handler:    _SyncService_ExchangeCerts_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Write",
 			Handler:       _SyncService_Write_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
-		{
-			StreamName:    "CompareHashes",
-			Handler:       _SyncService_CompareHashes_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

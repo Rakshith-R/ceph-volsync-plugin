@@ -109,18 +109,6 @@ func TestMemSemaphore_ContextCancel(t *testing.T) {
 	s.Release(10)
 }
 
-func TestMemSemaphore_PartialRelease(t *testing.T) {
-	s := NewMemSemaphore(100)
-	ctx := context.Background()
-	_ = s.Acquire(ctx, 80)
-	s.PartialRelease(30)
-	if err := s.Acquire(ctx, 50); err != nil {
-		t.Fatal(err)
-	}
-	s.Release(50)
-	s.Release(50)
-}
-
 func TestWindowSemaphore_Sequential(t *testing.T) {
 	w := NewWindowSemaphore(4)
 	ctx := context.Background()
@@ -241,25 +229,22 @@ func TestWindowSemaphore_IsReleased(t *testing.T) {
 	w.Release(3)
 }
 
-func TestWindowSemaphore_PressureSignal(t *testing.T) {
-	w := NewWindowSemaphore(4)
+func TestWindowSemaphore_DoubleRelease(t *testing.T) {
+	win := NewWindowSemaphore(8)
 	ctx := context.Background()
-	sig := w.PressureSignal(0.75)
-	for i := range uint64(3) {
-		_ = w.Acquire(ctx, i)
+	if err := win.Acquire(ctx, 0); err != nil {
+		t.Fatal(err)
 	}
-	select {
-	case <-sig:
-	case <-time.After(50 * time.Millisecond):
-		t.Fatal("pressure should fire at 75%")
+	win.Release(0)
+	// Second release should be a no-op, not panic or corrupt state
+	win.Release(0)
+	if !win.IsReleased(0) {
+		t.Fatal("reqID 0 should be released")
 	}
-	w.Release(0)
-	sig2 := w.PressureSignal(0.75)
-	select {
-	case <-sig2:
-		t.Fatal("should not fire at 50%")
-	case <-time.After(50 * time.Millisecond):
-	}
-	w.Release(1)
-	w.Release(2)
+}
+
+func TestWindowSemaphore_ReleaseUnacquired(t *testing.T) {
+	win := NewWindowSemaphore(8)
+	// Releasing an ID that was never acquired should not panic
+	win.Release(0)
 }

@@ -46,9 +46,3 @@ func (h *held) releaseMemOnly(memRaw *MemSemaphore) {
 		h.hasMem = false
 	}
 }
-
-// partialReleaseMemRaw returns delta bytes from the raw memory pool (LZ4 in-place shrink).
-func (h *held) partialReleaseMemRaw(memRaw *MemSemaphore, delta int64) {
-	memRaw.PartialRelease(delta)
-	h.memRawN -= delta
-}
