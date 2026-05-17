@@ -41,5 +41,7 @@ func (w *BaseDestinationWorker) Run(
 	return RunDestinationServer(
 		ctx, w.Logger, DefaultServerPort, syncServer,
 		grpc.MaxRecvMsgSize(MaxGRPCMessageSize),
+		grpc.WriteBufferSize(16*1024*1024),
+		grpc.ReadBufferSize(16*1024*1024),
 	)
 }

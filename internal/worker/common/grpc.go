@@ -54,11 +54,6 @@ type DeleteHandler interface {
 	Delete(grpc.BidiStreamingServer[apiv1.DeleteRequest, apiv1.DeleteResponse]) error
 }
 
-// HashHandler handles CompareHashes bidi stream.
-type HashHandler interface {
-	CompareHashes(grpc.BidiStreamingServer[apiv1.HashRequest, apiv1.HashResponse]) error
-}
-
 // CommitHandler handles Commit bidi stream.
 type CommitHandler interface {
 	Commit(grpc.BidiStreamingServer[apiv1.CommitRequest, apiv1.CommitResponse]) error
@@ -72,8 +67,8 @@ type SyncServer struct {
 	shutdownChan chan struct{}
 	writeH       WriteHandler
 	deleteH      DeleteHandler
-	hashH        HashHandler
 	commitH      CommitHandler
+	certHandler  *CertExchangeHandler
 }
 
 // NewSyncServer creates a SyncServer with the given
@@ -81,14 +76,12 @@ type SyncServer struct {
 func NewSyncServer(
 	writeH WriteHandler,
 	deleteH DeleteHandler,
-	hashH HashHandler,
 	commitH CommitHandler,
 ) *SyncServer {
 	return &SyncServer{
 		shutdownChan: make(chan struct{}, 1),
 		writeH:       writeH,
 		deleteH:      deleteH,
-		hashH:        hashH,
 		commitH:      commitH,
 	}
 }
@@ -113,16 +106,6 @@ func (s *SyncServer) Delete(
 	return s.deleteH.Delete(stream)
 }
 
-// CompareHashes delegates to HashHandler.
-func (s *SyncServer) CompareHashes(
-	stream grpc.BidiStreamingServer[apiv1.HashRequest, apiv1.HashResponse],
-) error {
-	if s.hashH == nil {
-		return status.Error(codes.Unimplemented, "hash not configured")
-	}
-	return s.hashH.CompareHashes(stream)
-}
-
 // Commit delegates to CommitHandler.
 func (s *SyncServer) Commit(
 	stream grpc.BidiStreamingServer[apiv1.CommitRequest, apiv1.CommitResponse],
@@ -143,4 +126,29 @@ func (s *SyncServer) Done(
 	default:
 	}
 	return &apiv1.DoneResponse{}, nil
+}
+
+// SetCertHandler sets the certificate exchange handler
+// for direct TLS connections.
+func (s *SyncServer) SetCertHandler(h *CertExchangeHandler) {
+	s.certHandler = h
+}
+
+// ExchangeCerts delegates to the CertExchangeHandler.
+func (s *SyncServer) ExchangeCerts(
+	ctx context.Context,
+	req *apiv1.ExchangeCertsRequest,
+) (*apiv1.ExchangeCertsResponse, error) {
+	if s.certHandler == nil {
+		return nil, status.Error(codes.Unimplemented, "cert exchange not configured")
+	}
+	return s.certHandler.ExchangeCerts(ctx, req)
+}
+
+// StopDirectTLS stops the direct TLS listener if one
+// was started by the CertExchangeHandler.
+func (s *SyncServer) StopDirectTLS() {
+	if s.certHandler != nil {
+		s.certHandler.StopDirectTLS()
+	}
 }

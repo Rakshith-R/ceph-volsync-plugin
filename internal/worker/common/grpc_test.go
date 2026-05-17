@@ -24,7 +24,7 @@ import (
 )
 
 func TestDoneSignalsShutdownChan(t *testing.T) {
-	s := NewSyncServer(nil, nil, nil, nil)
+	s := NewSyncServer(nil, nil, nil)
 
 	if _, err := s.Done(context.Background(), &apiv1.DoneRequest{}); err != nil {
 		t.Fatalf("Done() returned error: %v", err)
@@ -38,7 +38,7 @@ func TestDoneSignalsShutdownChan(t *testing.T) {
 }
 
 func TestDoneIdempotent(t *testing.T) {
-	s := NewSyncServer(nil, nil, nil, nil)
+	s := NewSyncServer(nil, nil, nil)
 
 	for i := 0; i < 3; i++ {
 		if _, err := s.Done(context.Background(), &apiv1.DoneRequest{}); err != nil {

@@ -16,6 +16,8 @@ limitations under the License.
 
 package common
 
+import "os"
+
 // IsAllZero checks if a byte slice contains only zeros.
 func IsAllZero(data []byte) bool {
 	for _, b := range data {
@@ -24,4 +26,20 @@ func IsAllZero(data []byte) bool {
 		}
 	}
 	return true
+}
+
+const zeroBufSize = 1 << 20 // 1 MB
+
+// WriteZeros writes zeros in 1 MB chunks to f at offset.
+func WriteZeros(f *os.File, offset, length int64) error {
+	buf := make([]byte, zeroBufSize)
+	for length > 0 {
+		n := min(int64(len(buf)), length)
+		if _, err := f.WriteAt(buf[:n], offset); err != nil {
+			return err
+		}
+		offset += n
+		length -= n
+	}
+	return nil
 }
