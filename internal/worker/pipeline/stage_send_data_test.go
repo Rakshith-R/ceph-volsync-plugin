@@ -18,7 +18,6 @@ package pipeline
 
 import (
 	"context"
-	"crypto/sha256"
 	"io"
 	"sync"
 	"testing"
@@ -63,20 +62,18 @@ func TestStageSendData_SendsAll(t *testing.T) {
 	win := NewWindowSemaphore(cfg.MaxWindow)
 
 	data := []byte("compressed data!")
-	hash := sha256.Sum256(data)
 
-	inCh := make(chan CompressedChunk, 2)
+	inCh := make(chan ReadChunk, 2)
 	for i := range uint64(2) {
 		_ = mem.Acquire(ctx, 16)
 		_ = win.Acquire(ctx, i)
-		inCh <- CompressedChunk{
-			ReqID:              i,
-			FilePath:           "/dev/block",
-			Offset:             int64(i) * 100,
-			Data:               data,
-			Hash:               hash,
-			UncompressedLength: 16,
-			Held:               held{reqID: i, memRawN: 16, hasWin: true, hasMem: true},
+		inCh <- ReadChunk{
+			ReqID:    i,
+			FilePath: testBlockDevice,
+			Offset:   int64(i) * 100,
+			Data:     data,
+			Length:   16,
+			Held:     held{reqID: i, memRawN: 16, hasWin: true, hasMem: true},
 		}
 	}
 	close(inCh)
@@ -92,7 +89,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 	})
 
 	err := StageSendData(
-		ctx, cfg, mem, win, factory, inCh,
+		ctx, cfg, &Stats{}, mem, win, factory, inCh,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +103,7 @@ func TestStageSendData_SendsAll(t *testing.T) {
 	}
 
 	for _, req := range mock.sent {
-		if req.Blocks[0].FilePath != "/dev/block" {
+		if req.Blocks[0].FilePath != testBlockDevice {
 			t.Fatalf(
 				"expected FilePath /dev/block, got %s",
 				req.Blocks[0].FilePath,
@@ -127,21 +124,19 @@ func TestStageSendData_MultiFileBatch(t *testing.T) {
 	win := NewWindowSemaphore(cfg.MaxWindow)
 
 	data := []byte("test")
-	hash := sha256.Sum256(data)
 
-	inCh := make(chan CompressedChunk, 2)
+	inCh := make(chan ReadChunk, 2)
 	paths := []string{"/data/file-a", "/data/file-b"}
 	for i := range uint64(2) {
 		_ = mem.Acquire(ctx, 4)
 		_ = win.Acquire(ctx, i)
-		inCh <- CompressedChunk{
-			ReqID:              i,
-			FilePath:           paths[i],
-			Offset:             0,
-			Data:               data,
-			Hash:               hash,
-			UncompressedLength: 4,
-			Held:               held{reqID: i, memRawN: 4, hasWin: true, hasMem: true},
+		inCh <- ReadChunk{
+			ReqID:    i,
+			FilePath: paths[i],
+			Offset:   0,
+			Data:     data,
+			Length:   4,
+			Held:     held{reqID: i, memRawN: 4, hasWin: true, hasMem: true},
 		}
 	}
 	close(inCh)
@@ -156,7 +151,7 @@ func TestStageSendData_MultiFileBatch(t *testing.T) {
 	})
 
 	err := StageSendData(
-		ctx, cfg, mem, win, factory, inCh,
+		ctx, cfg, &Stats{}, mem, win, factory, inCh,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -165,19 +160,23 @@ func TestStageSendData_MultiFileBatch(t *testing.T) {
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 
-	// With path-level grouping, each file gets its own WriteRequest
-	if len(mock.sent) != 2 {
-		t.Fatalf("expected 2 requests, got %d", len(mock.sent))
+	// Without path-level flushing, both blocks from different files are
+	// batched into a single WriteRequest (batch limits are not reached).
+	totalBlocks := 0
+	for _, req := range mock.sent {
+		totalBlocks += len(req.Blocks)
+	}
+	if totalBlocks != 2 {
+		t.Fatalf("expected 2 total blocks across all requests, got %d", totalBlocks)
 	}
 
 	sentPaths := make(map[string]bool)
 	for _, req := range mock.sent {
-		sentPaths[req.Blocks[0].FilePath] = true
-		if len(req.Blocks) != 1 {
-			t.Fatalf("expected 1 block per request, got %d", len(req.Blocks))
+		for _, b := range req.Blocks {
+			sentPaths[b.FilePath] = true
 		}
 	}
 	if !sentPaths["/data/file-a"] || !sentPaths["/data/file-b"] {
-		t.Fatal("expected requests for both file paths")
+		t.Fatal("expected blocks for both file paths")
 	}
 }

@@ -23,6 +23,7 @@ type Chunk struct {
 	Offset    int64
 	Length    int64
 	TotalSize int64
+	IsZero    bool
 }
 
 // ReadChunk carries raw data from StageRead.
@@ -36,31 +37,4 @@ type ReadChunk struct {
 	IsZero    bool
 	TotalSize int64
 	Held      held
-}
-
-// HashedChunk adds SHA-256 to a ReadChunk.
-type HashedChunk struct {
-	ReqID     uint64
-	FilePath  string
-	Offset    int64
-	Length    int64 // original block length
-	Data      []byte
-	Hash      [32]byte
-	IsZero    bool
-	TotalSize int64
-	Held      held
-}
-
-// CompressedChunk holds LZ4-compressed data.
-type CompressedChunk struct {
-	ReqID              uint64
-	FilePath           string
-	Offset             int64
-	Data               []byte
-	Hash               [32]byte
-	UncompressedLength int64
-	IsRaw              bool // true if incompressible
-	IsZero             bool
-	TotalSize          int64
-	Held               held
 }

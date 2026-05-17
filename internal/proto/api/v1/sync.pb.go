@@ -21,53 +21,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// CompressionAlgo specifies the compression format.
-type CompressionAlgo int32
-
-const (
-	CompressionAlgo_COMPRESSION_NONE CompressionAlgo = 0
-	CompressionAlgo_COMPRESSION_LZ4  CompressionAlgo = 1
-)
-
-// Enum value maps for CompressionAlgo.
-var (
-	CompressionAlgo_name = map[int32]string{
-		0: "COMPRESSION_NONE",
-		1: "COMPRESSION_LZ4",
-	}
-	CompressionAlgo_value = map[string]int32{
-		"COMPRESSION_NONE": 0,
-		"COMPRESSION_LZ4":  1,
-	}
-)
-
-func (x CompressionAlgo) Enum() *CompressionAlgo {
-	p := new(CompressionAlgo)
-	*p = x
-	return p
-}
-
-func (x CompressionAlgo) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (CompressionAlgo) Descriptor() protoreflect.EnumDescriptor {
-	return file_api_v1_sync_proto_enumTypes[0].Descriptor()
-}
-
-func (CompressionAlgo) Type() protoreflect.EnumType {
-	return &file_api_v1_sync_proto_enumTypes[0]
-}
-
-func (x CompressionAlgo) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use CompressionAlgo.Descriptor instead.
-func (CompressionAlgo) EnumDescriptor() ([]byte, []int) {
-	return file_api_v1_sync_proto_rawDescGZIP(), []int{0}
-}
-
 // ChangedBlock represents a modified data range.
 type ChangedBlock struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -84,9 +37,7 @@ type ChangedBlock struct {
 	// Indicates this write represents a zeroed range.
 	IsZero bool `protobuf:"varint,6,opt,name=is_zero,json=isZero,proto3" json:"is_zero,omitempty"`
 	// Data payload. May be empty if is_zero is true.
-	Data []byte `protobuf:"bytes,7,opt,name=data,proto3" json:"data,omitempty"`
-	// Compression algorithm applied to data.
-	Compression   CompressionAlgo `protobuf:"varint,8,opt,name=compression,proto3,enum=api.v1.CompressionAlgo" json:"compression,omitempty"`
+	Data          []byte `protobuf:"bytes,7,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -168,13 +119,6 @@ func (x *ChangedBlock) GetData() []byte {
 		return x.Data
 	}
 	return nil
-}
-
-func (x *ChangedBlock) GetCompression() CompressionAlgo {
-	if x != nil {
-		return x.Compression
-	}
-	return CompressionAlgo_COMPRESSION_NONE
 }
 
 // WriteRequest represents a batched write operation.
@@ -353,189 +297,6 @@ func (*DeleteResponse) Descriptor() ([]byte, []int) {
 	return file_api_v1_sync_proto_rawDescGZIP(), []int{4}
 }
 
-// BlockHash represents a hash of a single block for comparison.
-type BlockHash struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Unique ID for tracking and correlating responses.
-	RequestId uint64 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	// Path of the file or device being compared.
-	FilePath string `protobuf:"bytes,2,opt,name=file_path,json=filePath,proto3" json:"file_path,omitempty"`
-	// Total size of the file or device in bytes.
-	TotalSize uint64 `protobuf:"varint,3,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
-	// Byte offset of the block within the file or device.
-	Offset uint64 `protobuf:"varint,4,opt,name=offset,proto3" json:"offset,omitempty"`
-	// Length of the block in bytes.
-	Length uint64 `protobuf:"varint,5,opt,name=length,proto3" json:"length,omitempty"`
-	// SHA-256 hash of the block data.
-	Sha256        []byte `protobuf:"bytes,6,opt,name=sha256,proto3" json:"sha256,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BlockHash) Reset() {
-	*x = BlockHash{}
-	mi := &file_api_v1_sync_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BlockHash) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BlockHash) ProtoMessage() {}
-
-func (x *BlockHash) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_sync_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BlockHash.ProtoReflect.Descriptor instead.
-func (*BlockHash) Descriptor() ([]byte, []int) {
-	return file_api_v1_sync_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *BlockHash) GetRequestId() uint64 {
-	if x != nil {
-		return x.RequestId
-	}
-	return 0
-}
-
-func (x *BlockHash) GetFilePath() string {
-	if x != nil {
-		return x.FilePath
-	}
-	return ""
-}
-
-func (x *BlockHash) GetTotalSize() uint64 {
-	if x != nil {
-		return x.TotalSize
-	}
-	return 0
-}
-
-func (x *BlockHash) GetOffset() uint64 {
-	if x != nil {
-		return x.Offset
-	}
-	return 0
-}
-
-func (x *BlockHash) GetLength() uint64 {
-	if x != nil {
-		return x.Length
-	}
-	return 0
-}
-
-func (x *BlockHash) GetSha256() []byte {
-	if x != nil {
-		return x.Sha256
-	}
-	return nil
-}
-
-// HashRequest carries a batch of block hashes to compare.
-type HashRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// List of block hashes to be compared on the destination.
-	Hashes        []*BlockHash `protobuf:"bytes,1,rep,name=hashes,proto3" json:"hashes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HashRequest) Reset() {
-	*x = HashRequest{}
-	mi := &file_api_v1_sync_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HashRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HashRequest) ProtoMessage() {}
-
-func (x *HashRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_sync_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HashRequest.ProtoReflect.Descriptor instead.
-func (*HashRequest) Descriptor() ([]byte, []int) {
-	return file_api_v1_sync_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *HashRequest) GetHashes() []*BlockHash {
-	if x != nil {
-		return x.Hashes
-	}
-	return nil
-}
-
-// HashResponse reports which blocks did not match.
-type HashResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Request IDs of blocks whose hashes did not match.
-	MismatchedIds []uint64 `protobuf:"varint,1,rep,packed,name=mismatched_ids,json=mismatchedIds,proto3" json:"mismatched_ids,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HashResponse) Reset() {
-	*x = HashResponse{}
-	mi := &file_api_v1_sync_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HashResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HashResponse) ProtoMessage() {}
-
-func (x *HashResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_sync_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HashResponse.ProtoReflect.Descriptor instead.
-func (*HashResponse) Descriptor() ([]byte, []int) {
-	return file_api_v1_sync_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *HashResponse) GetMismatchedIds() []uint64 {
-	if x != nil {
-		return x.MismatchedIds
-	}
-	return nil
-}
-
 // CommitEntry represents a single file to commit.
 type CommitEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -549,7 +310,7 @@ type CommitEntry struct {
 
 func (x *CommitEntry) Reset() {
 	*x = CommitEntry{}
-	mi := &file_api_v1_sync_proto_msgTypes[8]
+	mi := &file_api_v1_sync_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -561,7 +322,7 @@ func (x *CommitEntry) String() string {
 func (*CommitEntry) ProtoMessage() {}
 
 func (x *CommitEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_sync_proto_msgTypes[8]
+	mi := &file_api_v1_sync_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -574,7 +335,7 @@ func (x *CommitEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitEntry.ProtoReflect.Descriptor instead.
 func (*CommitEntry) Descriptor() ([]byte, []int) {
-	return file_api_v1_sync_proto_rawDescGZIP(), []int{8}
+	return file_api_v1_sync_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CommitEntry) GetPath() string {
@@ -601,7 +362,7 @@ type CommitRequest struct {
 
 func (x *CommitRequest) Reset() {
 	*x = CommitRequest{}
-	mi := &file_api_v1_sync_proto_msgTypes[9]
+	mi := &file_api_v1_sync_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -613,7 +374,7 @@ func (x *CommitRequest) String() string {
 func (*CommitRequest) ProtoMessage() {}
 
 func (x *CommitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_sync_proto_msgTypes[9]
+	mi := &file_api_v1_sync_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -626,7 +387,7 @@ func (x *CommitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitRequest.ProtoReflect.Descriptor instead.
 func (*CommitRequest) Descriptor() ([]byte, []int) {
-	return file_api_v1_sync_proto_rawDescGZIP(), []int{9}
+	return file_api_v1_sync_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CommitRequest) GetEntries() []*CommitEntry {
@@ -646,7 +407,7 @@ type CommitResponse struct {
 
 func (x *CommitResponse) Reset() {
 	*x = CommitResponse{}
-	mi := &file_api_v1_sync_proto_msgTypes[10]
+	mi := &file_api_v1_sync_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -658,7 +419,7 @@ func (x *CommitResponse) String() string {
 func (*CommitResponse) ProtoMessage() {}
 
 func (x *CommitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_sync_proto_msgTypes[10]
+	mi := &file_api_v1_sync_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -671,7 +432,7 @@ func (x *CommitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitResponse.ProtoReflect.Descriptor instead.
 func (*CommitResponse) Descriptor() ([]byte, []int) {
-	return file_api_v1_sync_proto_rawDescGZIP(), []int{10}
+	return file_api_v1_sync_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CommitResponse) GetPaths() []string {
@@ -690,7 +451,7 @@ type DoneRequest struct {
 
 func (x *DoneRequest) Reset() {
 	*x = DoneRequest{}
-	mi := &file_api_v1_sync_proto_msgTypes[11]
+	mi := &file_api_v1_sync_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -702,7 +463,7 @@ func (x *DoneRequest) String() string {
 func (*DoneRequest) ProtoMessage() {}
 
 func (x *DoneRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_sync_proto_msgTypes[11]
+	mi := &file_api_v1_sync_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -715,7 +476,7 @@ func (x *DoneRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DoneRequest.ProtoReflect.Descriptor instead.
 func (*DoneRequest) Descriptor() ([]byte, []int) {
-	return file_api_v1_sync_proto_rawDescGZIP(), []int{11}
+	return file_api_v1_sync_proto_rawDescGZIP(), []int{8}
 }
 
 // DoneResponse is empty on success.
@@ -727,7 +488,7 @@ type DoneResponse struct {
 
 func (x *DoneResponse) Reset() {
 	*x = DoneResponse{}
-	mi := &file_api_v1_sync_proto_msgTypes[12]
+	mi := &file_api_v1_sync_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -739,7 +500,7 @@ func (x *DoneResponse) String() string {
 func (*DoneResponse) ProtoMessage() {}
 
 func (x *DoneResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_v1_sync_proto_msgTypes[12]
+	mi := &file_api_v1_sync_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -752,14 +513,113 @@ func (x *DoneResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DoneResponse.ProtoReflect.Descriptor instead.
 func (*DoneResponse) Descriptor() ([]byte, []int) {
-	return file_api_v1_sync_proto_rawDescGZIP(), []int{12}
+	return file_api_v1_sync_proto_rawDescGZIP(), []int{9}
+}
+
+// ExchangeCertsRequest sends the source's ephemeral certificate.
+type ExchangeCertsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClientCertPem []byte                 `protobuf:"bytes,1,opt,name=client_cert_pem,json=clientCertPem,proto3" json:"client_cert_pem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExchangeCertsRequest) Reset() {
+	*x = ExchangeCertsRequest{}
+	mi := &file_api_v1_sync_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExchangeCertsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExchangeCertsRequest) ProtoMessage() {}
+
+func (x *ExchangeCertsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_sync_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExchangeCertsRequest.ProtoReflect.Descriptor instead.
+func (*ExchangeCertsRequest) Descriptor() ([]byte, []int) {
+	return file_api_v1_sync_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ExchangeCertsRequest) GetClientCertPem() []byte {
+	if x != nil {
+		return x.ClientCertPem
+	}
+	return nil
+}
+
+// ExchangeCertsResponse returns the destination's ephemeral certificate
+// and the port where the direct TLS listener accepts connections.
+type ExchangeCertsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ServerCertPem []byte                 `protobuf:"bytes,1,opt,name=server_cert_pem,json=serverCertPem,proto3" json:"server_cert_pem,omitempty"`
+	DirectTlsPort int32                  `protobuf:"varint,2,opt,name=direct_tls_port,json=directTlsPort,proto3" json:"direct_tls_port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExchangeCertsResponse) Reset() {
+	*x = ExchangeCertsResponse{}
+	mi := &file_api_v1_sync_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExchangeCertsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExchangeCertsResponse) ProtoMessage() {}
+
+func (x *ExchangeCertsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_v1_sync_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExchangeCertsResponse.ProtoReflect.Descriptor instead.
+func (*ExchangeCertsResponse) Descriptor() ([]byte, []int) {
+	return file_api_v1_sync_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ExchangeCertsResponse) GetServerCertPem() []byte {
+	if x != nil {
+		return x.ServerCertPem
+	}
+	return nil
+}
+
+func (x *ExchangeCertsResponse) GetDirectTlsPort() int32 {
+	if x != nil {
+		return x.DirectTlsPort
+	}
+	return 0
 }
 
 var File_api_v1_sync_proto protoreflect.FileDescriptor
 
 const file_api_v1_sync_proto_rawDesc = "" +
 	"\n" +
-	"\x11api/v1/sync.proto\x12\x06api.v1\"\x81\x02\n" +
+	"\x11api/v1/sync.proto\x12\x06api.v1\"\xc6\x01\n" +
 	"\fChangedBlock\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1b\n" +
@@ -769,28 +629,14 @@ const file_api_v1_sync_proto_rawDesc = "" +
 	"\x06offset\x18\x04 \x01(\x04R\x06offset\x12\x16\n" +
 	"\x06length\x18\x05 \x01(\x04R\x06length\x12\x17\n" +
 	"\ais_zero\x18\x06 \x01(\bR\x06isZero\x12\x12\n" +
-	"\x04data\x18\a \x01(\fR\x04data\x129\n" +
-	"\vcompression\x18\b \x01(\x0e2\x17.api.v1.CompressionAlgoR\vcompression\"<\n" +
+	"\x04data\x18\a \x01(\fR\x04data\"<\n" +
 	"\fWriteRequest\x12,\n" +
 	"\x06blocks\x18\x01 \x03(\v2\x14.api.v1.ChangedBlockR\x06blocks\":\n" +
 	"\rWriteResponse\x12)\n" +
 	"\x10acknowledged_ids\x18\x01 \x03(\x04R\x0facknowledgedIds\"%\n" +
 	"\rDeleteRequest\x12\x14\n" +
 	"\x05paths\x18\x01 \x03(\tR\x05paths\"\x10\n" +
-	"\x0eDeleteResponse\"\xae\x01\n" +
-	"\tBlockHash\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\x04R\trequestId\x12\x1b\n" +
-	"\tfile_path\x18\x02 \x01(\tR\bfilePath\x12\x1d\n" +
-	"\n" +
-	"total_size\x18\x03 \x01(\x04R\ttotalSize\x12\x16\n" +
-	"\x06offset\x18\x04 \x01(\x04R\x06offset\x12\x16\n" +
-	"\x06length\x18\x05 \x01(\x04R\x06length\x12\x16\n" +
-	"\x06sha256\x18\x06 \x01(\fR\x06sha256\"8\n" +
-	"\vHashRequest\x12)\n" +
-	"\x06hashes\x18\x01 \x03(\v2\x11.api.v1.BlockHashR\x06hashes\"5\n" +
-	"\fHashResponse\x12%\n" +
-	"\x0emismatched_ids\x18\x01 \x03(\x04R\rmismatchedIds\"@\n" +
+	"\x0eDeleteResponse\"@\n" +
 	"\vCommitEntry\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1d\n" +
 	"\n" +
@@ -800,16 +646,18 @@ const file_api_v1_sync_proto_rawDesc = "" +
 	"\x0eCommitResponse\x12\x14\n" +
 	"\x05paths\x18\x01 \x03(\tR\x05paths\"\r\n" +
 	"\vDoneRequest\"\x0e\n" +
-	"\fDoneResponse*<\n" +
-	"\x0fCompressionAlgo\x12\x14\n" +
-	"\x10COMPRESSION_NONE\x10\x00\x12\x13\n" +
-	"\x0fCOMPRESSION_LZ4\x10\x012\xb4\x02\n" +
+	"\fDoneResponse\">\n" +
+	"\x14ExchangeCertsRequest\x12&\n" +
+	"\x0fclient_cert_pem\x18\x01 \x01(\fR\rclientCertPem\"g\n" +
+	"\x15ExchangeCertsResponse\x12&\n" +
+	"\x0fserver_cert_pem\x18\x01 \x01(\fR\rserverCertPem\x12&\n" +
+	"\x0fdirect_tls_port\x18\x02 \x01(\x05R\rdirectTlsPort2\xc2\x02\n" +
 	"\vSyncService\x128\n" +
-	"\x05Write\x12\x14.api.v1.WriteRequest\x1a\x15.api.v1.WriteResponse(\x010\x01\x12>\n" +
-	"\rCompareHashes\x12\x13.api.v1.HashRequest\x1a\x14.api.v1.HashResponse(\x010\x01\x12;\n" +
+	"\x05Write\x12\x14.api.v1.WriteRequest\x1a\x15.api.v1.WriteResponse(\x010\x01\x12;\n" +
 	"\x06Commit\x12\x15.api.v1.CommitRequest\x1a\x16.api.v1.CommitResponse(\x010\x01\x12;\n" +
 	"\x06Delete\x12\x15.api.v1.DeleteRequest\x1a\x16.api.v1.DeleteResponse(\x010\x01\x121\n" +
-	"\x04Done\x12\x13.api.v1.DoneRequest\x1a\x14.api.v1.DoneResponseB>Z<github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1b\x06proto3"
+	"\x04Done\x12\x13.api.v1.DoneRequest\x1a\x14.api.v1.DoneResponse\x12L\n" +
+	"\rExchangeCerts\x12\x1c.api.v1.ExchangeCertsRequest\x1a\x1d.api.v1.ExchangeCertsResponseB>Z<github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1b\x06proto3"
 
 var (
 	file_api_v1_sync_proto_rawDescOnce sync.Once
@@ -823,44 +671,39 @@ func file_api_v1_sync_proto_rawDescGZIP() []byte {
 	return file_api_v1_sync_proto_rawDescData
 }
 
-var file_api_v1_sync_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_v1_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_api_v1_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_api_v1_sync_proto_goTypes = []any{
-	(CompressionAlgo)(0),   // 0: api.v1.CompressionAlgo
-	(*ChangedBlock)(nil),   // 1: api.v1.ChangedBlock
-	(*WriteRequest)(nil),   // 2: api.v1.WriteRequest
-	(*WriteResponse)(nil),  // 3: api.v1.WriteResponse
-	(*DeleteRequest)(nil),  // 4: api.v1.DeleteRequest
-	(*DeleteResponse)(nil), // 5: api.v1.DeleteResponse
-	(*BlockHash)(nil),      // 6: api.v1.BlockHash
-	(*HashRequest)(nil),    // 7: api.v1.HashRequest
-	(*HashResponse)(nil),   // 8: api.v1.HashResponse
-	(*CommitEntry)(nil),    // 9: api.v1.CommitEntry
-	(*CommitRequest)(nil),  // 10: api.v1.CommitRequest
-	(*CommitResponse)(nil), // 11: api.v1.CommitResponse
-	(*DoneRequest)(nil),    // 12: api.v1.DoneRequest
-	(*DoneResponse)(nil),   // 13: api.v1.DoneResponse
+	(*ChangedBlock)(nil),          // 0: api.v1.ChangedBlock
+	(*WriteRequest)(nil),          // 1: api.v1.WriteRequest
+	(*WriteResponse)(nil),         // 2: api.v1.WriteResponse
+	(*DeleteRequest)(nil),         // 3: api.v1.DeleteRequest
+	(*DeleteResponse)(nil),        // 4: api.v1.DeleteResponse
+	(*CommitEntry)(nil),           // 5: api.v1.CommitEntry
+	(*CommitRequest)(nil),         // 6: api.v1.CommitRequest
+	(*CommitResponse)(nil),        // 7: api.v1.CommitResponse
+	(*DoneRequest)(nil),           // 8: api.v1.DoneRequest
+	(*DoneResponse)(nil),          // 9: api.v1.DoneResponse
+	(*ExchangeCertsRequest)(nil),  // 10: api.v1.ExchangeCertsRequest
+	(*ExchangeCertsResponse)(nil), // 11: api.v1.ExchangeCertsResponse
 }
 var file_api_v1_sync_proto_depIdxs = []int32{
-	0,  // 0: api.v1.ChangedBlock.compression:type_name -> api.v1.CompressionAlgo
-	1,  // 1: api.v1.WriteRequest.blocks:type_name -> api.v1.ChangedBlock
-	6,  // 2: api.v1.HashRequest.hashes:type_name -> api.v1.BlockHash
-	9,  // 3: api.v1.CommitRequest.entries:type_name -> api.v1.CommitEntry
-	2,  // 4: api.v1.SyncService.Write:input_type -> api.v1.WriteRequest
-	7,  // 5: api.v1.SyncService.CompareHashes:input_type -> api.v1.HashRequest
-	10, // 6: api.v1.SyncService.Commit:input_type -> api.v1.CommitRequest
-	4,  // 7: api.v1.SyncService.Delete:input_type -> api.v1.DeleteRequest
-	12, // 8: api.v1.SyncService.Done:input_type -> api.v1.DoneRequest
-	3,  // 9: api.v1.SyncService.Write:output_type -> api.v1.WriteResponse
-	8,  // 10: api.v1.SyncService.CompareHashes:output_type -> api.v1.HashResponse
-	11, // 11: api.v1.SyncService.Commit:output_type -> api.v1.CommitResponse
-	5,  // 12: api.v1.SyncService.Delete:output_type -> api.v1.DeleteResponse
-	13, // 13: api.v1.SyncService.Done:output_type -> api.v1.DoneResponse
-	9,  // [9:14] is the sub-list for method output_type
-	4,  // [4:9] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	0,  // 0: api.v1.WriteRequest.blocks:type_name -> api.v1.ChangedBlock
+	5,  // 1: api.v1.CommitRequest.entries:type_name -> api.v1.CommitEntry
+	1,  // 2: api.v1.SyncService.Write:input_type -> api.v1.WriteRequest
+	6,  // 3: api.v1.SyncService.Commit:input_type -> api.v1.CommitRequest
+	3,  // 4: api.v1.SyncService.Delete:input_type -> api.v1.DeleteRequest
+	8,  // 5: api.v1.SyncService.Done:input_type -> api.v1.DoneRequest
+	10, // 6: api.v1.SyncService.ExchangeCerts:input_type -> api.v1.ExchangeCertsRequest
+	2,  // 7: api.v1.SyncService.Write:output_type -> api.v1.WriteResponse
+	7,  // 8: api.v1.SyncService.Commit:output_type -> api.v1.CommitResponse
+	4,  // 9: api.v1.SyncService.Delete:output_type -> api.v1.DeleteResponse
+	9,  // 10: api.v1.SyncService.Done:output_type -> api.v1.DoneResponse
+	11, // 11: api.v1.SyncService.ExchangeCerts:output_type -> api.v1.ExchangeCertsResponse
+	7,  // [7:12] is the sub-list for method output_type
+	2,  // [2:7] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_api_v1_sync_proto_init() }
@@ -873,14 +716,13 @@ func file_api_v1_sync_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_v1_sync_proto_rawDesc), len(file_api_v1_sync_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   13,
+			NumEnums:      0,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_api_v1_sync_proto_goTypes,
 		DependencyIndexes: file_api_v1_sync_proto_depIdxs,
-		EnumInfos:         file_api_v1_sync_proto_enumTypes,
 		MessageInfos:      file_api_v1_sync_proto_msgTypes,
 	}.Build()
 	File_api_v1_sync_proto = out.File

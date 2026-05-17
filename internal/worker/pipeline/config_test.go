@@ -21,19 +21,16 @@ import "testing"
 func TestConfig_SetDefaults_ZeroValue(t *testing.T) {
 	cfg := &Config{}
 	cfg.SetDefaults()
-	if cfg.ChunkSize != 4*1024*1024 {
+	if cfg.ChunkSize != 16*1024*1024 {
 		t.Fatalf("ChunkSize: got %d", cfg.ChunkSize)
 	}
 	if cfg.ReadWorkers != 8 {
 		t.Fatalf("ReadWorkers: got %d", cfg.ReadWorkers)
 	}
-	if cfg.MaxWindow != 64 {
+	if cfg.MaxWindow != 1024 {
 		t.Fatalf("MaxWindow: got %d", cfg.MaxWindow)
 	}
-	if cfg.HashSendWorkers != 2 {
-		t.Fatalf("HashSendWorkers: got %d", cfg.HashSendWorkers)
-	}
-	if cfg.DataSendWorkers != 4 {
+	if cfg.DataSendWorkers != 8 {
 		t.Fatalf("DataSendWorkers: got %d", cfg.DataSendWorkers)
 	}
 }

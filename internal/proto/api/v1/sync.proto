@@ -8,12 +8,12 @@ option go_package = "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v
 service SyncService {
   // Bidi-streaming RPCs
   rpc Write(stream WriteRequest) returns (stream WriteResponse);
-  rpc CompareHashes(stream HashRequest) returns (stream HashResponse);
   rpc Commit(stream CommitRequest) returns (stream CommitResponse);
   rpc Delete(stream DeleteRequest) returns (stream DeleteResponse);
 
   // Unary RPCs
   rpc Done(DoneRequest) returns (DoneResponse);
+  rpc ExchangeCerts(ExchangeCertsRequest) returns (ExchangeCertsResponse);
 }
 
 // --------------------
@@ -42,15 +42,6 @@ message ChangedBlock {
 
   // Data payload. May be empty if is_zero is true.
   bytes data = 7;
-
-  // Compression algorithm applied to data.
-  CompressionAlgo compression = 8;
-}
-
-// CompressionAlgo specifies the compression format.
-enum CompressionAlgo {
-  COMPRESSION_NONE = 0;
-  COMPRESSION_LZ4 = 1;
 }
 
 // WriteRequest represents a batched write operation.
@@ -74,43 +65,6 @@ message DeleteRequest {
 
 // DeleteResponse is empty on success.
 message DeleteResponse {}
-
-// --------------------
-// Hash Comparison Messages
-// --------------------
-
-// BlockHash represents a hash of a single block for comparison.
-message BlockHash {
-  // Unique ID for tracking and correlating responses.
-  uint64 request_id = 1;
-
-  // Path of the file or device being compared.
-  string file_path = 2;
-
-  // Total size of the file or device in bytes.
-  uint64 total_size = 3;
-
-  // Byte offset of the block within the file or device.
-  uint64 offset = 4;
-
-  // Length of the block in bytes.
-  uint64 length = 5;
-
-  // SHA-256 hash of the block data.
-  bytes sha256 = 6;
-}
-
-// HashRequest carries a batch of block hashes to compare.
-message HashRequest {
-  // List of block hashes to be compared on the destination.
-  repeated BlockHash hashes = 1;
-}
-
-// HashResponse reports which blocks did not match.
-message HashResponse {
-  // Request IDs of blocks whose hashes did not match.
-  repeated uint64 mismatched_ids = 1;
-}
 
 // --------------------
 // Commit Messages
@@ -144,3 +98,19 @@ message DoneRequest {}
 
 // DoneResponse is empty on success.
 message DoneResponse {}
+
+// --------------------
+// Certificate Exchange Messages
+// --------------------
+
+// ExchangeCertsRequest sends the source's ephemeral certificate.
+message ExchangeCertsRequest {
+  bytes client_cert_pem = 1;
+}
+
+// ExchangeCertsResponse returns the destination's ephemeral certificate
+// and the port where the direct TLS listener accepts connections.
+message ExchangeCertsResponse {
+  bytes server_cert_pem = 1;
+  int32 direct_tls_port = 2;
+}
