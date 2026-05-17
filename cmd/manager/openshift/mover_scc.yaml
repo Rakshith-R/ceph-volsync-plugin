@@ -26,6 +26,8 @@ runAsUser:
   type: RunAsAny  # allow mover to run as root
 seLinuxContext:
   type: MustRunAs
+  seLinuxOptions:
+    type: spc_t
 seccompProfiles:
   - runtime/default
 supplementalGroups:
