@@ -64,9 +64,9 @@ func (d *svcDescription) Reconcile(l logr.Logger) error {
 		d.Service.Spec.Type = corev1.ServiceTypeClusterIP
 		d.Service.Spec.Selector = d.Selector
 
-		portCount := 1
+		portCount := 2
 		if d.MoverType == constant.MoverCephFS {
-			portCount = 2
+			portCount = 3
 		}
 		if len(d.Service.Spec.Ports) != portCount {
 			d.Service.Spec.Ports = make([]corev1.ServicePort, portCount)
@@ -84,6 +84,11 @@ func (d *svcDescription) Reconcile(l logr.Logger) error {
 			d.Service.Spec.Ports[1].Protocol = corev1.ProtocolTCP
 			d.Service.Spec.Ports[1].TargetPort = intstr.FromInt32(constant.RsyncStunnelPort)
 		}
+
+		d.Service.Spec.Ports[portCount-1].Name = "direct-tls"
+		d.Service.Spec.Ports[portCount-1].Port = constant.DirectTLSPort
+		d.Service.Spec.Ports[portCount-1].Protocol = corev1.ProtocolTCP
+		d.Service.Spec.Ports[portCount-1].TargetPort = intstr.FromInt32(constant.DirectTLSPort)
 		return nil
 	})
 	if err != nil {

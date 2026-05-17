@@ -129,7 +129,7 @@ func TestFromSource_MissingParams(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "rs", Namespace: "ns"},
 		Spec: volsyncv1alpha1.ReplicationSourceSpec{
 			External: &volsyncv1alpha1.ReplicationSourceExternalSpec{
-				Provider: "cephfs.csi.ceph.com",
+				Provider: cephfsProviderName,
 				// No parameters
 			},
 		},
@@ -152,8 +152,8 @@ func TestFromSource_CephFS(t *testing.T) {
 		Spec: volsyncv1alpha1.ReplicationSourceSpec{
 			SourcePVC: "my-pvc",
 			External: &volsyncv1alpha1.ReplicationSourceExternalSpec{
-				Provider:   "cephfs.csi.ceph.com",
-				Parameters: map[string]string{"storageClassName": "cephfs-sc"},
+				Provider:   cephfsProviderName,
+				Parameters: map[string]string{optStorageClassName: testCephFSSC},
 			},
 		},
 		Status: &volsyncv1alpha1.ReplicationSourceStatus{},
@@ -189,7 +189,7 @@ func TestFromSource_RBD(t *testing.T) {
 			SourcePVC: "my-pvc",
 			External: &volsyncv1alpha1.ReplicationSourceExternalSpec{
 				Provider:   "rbd.csi.ceph.com",
-				Parameters: map[string]string{"storageClassName": "rbd-sc"},
+				Parameters: map[string]string{optStorageClassName: "rbd-sc"},
 			},
 		},
 		Status: &volsyncv1alpha1.ReplicationSourceStatus{},
@@ -239,7 +239,7 @@ func TestFromDestination_CephFS(t *testing.T) {
 		Spec: volsyncv1alpha1.ReplicationDestinationSpec{
 			External: &volsyncv1alpha1.ReplicationDestinationExternalSpec{
 				Provider:   "nfs.csi.ceph.com",
-				Parameters: map[string]string{"storageClassName": "nfs-sc"},
+				Parameters: map[string]string{optStorageClassName: "nfs-sc"},
 			},
 		},
 		Status: &volsyncv1alpha1.ReplicationDestinationStatus{},

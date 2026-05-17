@@ -87,11 +87,11 @@ func TestReconcile_CephFS(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	ctx := t.Context()
 
-	owner := newTestOwner("test-rs", "test-ns")
+	owner := newTestOwner("test-rs", testNamespace)
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-svc",
-			Namespace: "test-ns",
+			Namespace: testNamespace,
 		},
 	}
 	desc := svcDescription{
@@ -111,8 +111,8 @@ func TestReconcile_CephFS(t *testing.T) {
 	if err := cl.Get(ctx, client.ObjectKeyFromObject(svc), created); err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
-	if len(created.Spec.Ports) != 2 {
-		t.Fatalf("len(ports) = %d, want 2", len(created.Spec.Ports))
+	if len(created.Spec.Ports) != 3 {
+		t.Fatalf("len(ports) = %d, want 3", len(created.Spec.Ports))
 	}
 	if created.Spec.Ports[0].Port != constant.TLSPort {
 		t.Errorf("port[0] = %d, want %d",
@@ -121,6 +121,10 @@ func TestReconcile_CephFS(t *testing.T) {
 	if created.Spec.Ports[1].Port != constant.RsyncStunnelPort {
 		t.Errorf("port[1] = %d, want %d",
 			created.Spec.Ports[1].Port, constant.RsyncStunnelPort)
+	}
+	if created.Spec.Ports[2].Port != constant.DirectTLSPort {
+		t.Errorf("port[2] = %d, want %d",
+			created.Spec.Ports[2].Port, constant.DirectTLSPort)
 	}
 	if created.Spec.Ports[0].Name != grpcServerPortName {
 		t.Errorf("port[0].Name = %q, want %q",
@@ -134,11 +138,11 @@ func TestReconcile_RBD(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	ctx := t.Context()
 
-	owner := newTestOwner("test-rs", "test-ns")
+	owner := newTestOwner("test-rs", testNamespace)
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-svc",
-			Namespace: "test-ns",
+			Namespace: testNamespace,
 		},
 	}
 	desc := svcDescription{
@@ -157,11 +161,15 @@ func TestReconcile_RBD(t *testing.T) {
 	if err := cl.Get(ctx, client.ObjectKeyFromObject(svc), created); err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
-	if len(created.Spec.Ports) != 1 {
-		t.Fatalf("len(ports) = %d, want 1", len(created.Spec.Ports))
+	if len(created.Spec.Ports) != 2 {
+		t.Fatalf("len(ports) = %d, want 2", len(created.Spec.Ports))
 	}
 	if created.Spec.Ports[0].Name != grpcServerPortName {
 		t.Errorf("port[0].Name = %q, want %q",
 			created.Spec.Ports[0].Name, grpcServerPortName)
+	}
+	if created.Spec.Ports[1].Port != constant.DirectTLSPort {
+		t.Errorf("port[1] = %d, want %d",
+			created.Spec.Ports[1].Port, constant.DirectTLSPort)
 	}
 }

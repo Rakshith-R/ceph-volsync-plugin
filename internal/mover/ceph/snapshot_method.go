@@ -42,6 +42,21 @@ const (
 	snapshotStatusPrevious = "previous"
 )
 
+const (
+	// annotationAllowVolumeModeChange is the VolumeSnapshotContent annotation
+	// that permits CSI to provision a PVC with a different VolumeMode than the
+	// source snapshot. Required when restoring a Filesystem-mode snapshot as a
+	// Block PVC for the RBD mover.
+	annotationAllowVolumeModeChange      = "snapshot.storage.kubernetes.io/allow-volume-mode-change"
+	annotationAllowVolumeModeChangeValue = "true"
+)
+
+// pvcIsFilesystemMode returns true if the PVC uses Filesystem mode.
+// A nil VolumeMode defaults to Filesystem per the Kubernetes spec.
+func pvcIsFilesystemMode(pvc *corev1.PersistentVolumeClaim) bool {
+	return pvc.Spec.VolumeMode == nil || *pvc.Spec.VolumeMode == corev1.PersistentVolumeFilesystem
+}
+
 // isSnapshotReady returns true if the snapshot exists and its ReadyToUse status is true.
 func isSnapshotReady(snap *snapv1.VolumeSnapshot) bool {
 	return snap != nil && snap.Status != nil &&
@@ -169,7 +184,16 @@ func (m *Mover) createPVCFromSnapshot(
 			pvc.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadOnlyMany}
 			pvc.Spec.Resources = src.Spec.Resources
 			pvc.Spec.StorageClassName = src.Spec.StorageClassName
-			pvc.Spec.VolumeMode = src.Spec.VolumeMode
+			// RBD workers access the Ceph block device directly and require
+			// Block-mode PVCs regardless of the application's original VolumeMode.
+			// CephFS workers operate on the mounted filesystem and preserve the
+			// source PVC's VolumeMode.
+			if m.moverType == constant.MoverRBD {
+				blockMode := corev1.PersistentVolumeBlock
+				pvc.Spec.VolumeMode = &blockMode
+			} else {
+				pvc.Spec.VolumeMode = src.Spec.VolumeMode
+			}
 
 			// Set DataSource to the snapshot
 			pvc.Spec.DataSource = &corev1.TypedLocalObjectReference{
@@ -228,6 +252,14 @@ func (m *Mover) ensurePVCFromSrcWithStatusLabels(
 		logger.V(1).Info("Creating new snapshot with status=current", "name", dataName)
 		snap, err = m.ensureSnapshotWithStatusLabel(ctx, logger, src, dataName)
 		if snap == nil || err != nil {
+			return nil, err
+		}
+	}
+
+	// RBD requires Block-mode PVCs. When the source is Filesystem, annotate
+	// the VolumeSnapshotContent to allow the CSI driver to change the mode.
+	if m.moverType == constant.MoverRBD && pvcIsFilesystemMode(src) {
+		if err := m.ensureAllowVolumeModeChangeAnnotation(ctx, logger, snap); err != nil {
 			return nil, err
 		}
 	}
@@ -453,6 +485,43 @@ func (m *Mover) getSnapshotHandle(
 	}
 
 	return *content.Status.SnapshotHandle, nil
+}
+
+// ensureAllowVolumeModeChangeAnnotation sets the allowVolumeModeChange annotation
+// on the VolumeSnapshotContent bound to the given snapshot. This is required by
+// the external-snapshotter to permit provisioning a Block-mode PVC from a
+// Filesystem-mode snapshot. Idempotent — skips the update if already annotated.
+func (m *Mover) ensureAllowVolumeModeChangeAnnotation(
+	ctx context.Context, logger logr.Logger,
+	snap *snapv1.VolumeSnapshot,
+) error {
+	if snap.Status == nil || snap.Status.BoundVolumeSnapshotContentName == nil {
+		return fmt.Errorf("snapshot %s has no bound content", snap.Name)
+	}
+
+	content := &snapv1.VolumeSnapshotContent{}
+	if err := m.client.Get(ctx, client.ObjectKey{
+		Name: *snap.Status.BoundVolumeSnapshotContentName,
+	}, content); err != nil {
+		return err
+	}
+
+	if content.Annotations != nil && content.Annotations[annotationAllowVolumeModeChange] == annotationAllowVolumeModeChangeValue {
+		return nil
+	}
+
+	if content.Annotations == nil {
+		content.Annotations = make(map[string]string)
+	}
+	content.Annotations[annotationAllowVolumeModeChange] = annotationAllowVolumeModeChangeValue
+
+	if err := m.client.Update(ctx, content); err != nil {
+		logger.Error(err, "failed to annotate VolumeSnapshotContent", "content", content.Name)
+		return err
+	}
+
+	logger.V(1).Info("Annotated VolumeSnapshotContent with allowVolumeModeChange", "content", content.Name)
+	return nil
 }
 
 // transitionSnapshotStatuses rotates snapshot lifecycle labels: marks old previous

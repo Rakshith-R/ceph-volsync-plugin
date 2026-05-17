@@ -175,7 +175,7 @@ func (m *Mover) ensureJob(
 				MountPath: "/etc/ceph",
 			},
 			corev1.VolumeMount{
-				Name:      "ceph-csi-config",
+				Name:      defaultCSIConfigName,
 				MountPath: csiConfigMountPath,
 				ReadOnly:  true,
 			},
@@ -197,6 +197,10 @@ func (m *Mover) ensureJob(
 			// ceph daemons running on hostnetwork.
 			podSpec.HostNetwork = true
 			podSpec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
+		}
+		podSpec.SecurityContext = &corev1.PodSecurityContext{
+			FSGroupChangePolicy: ptr.To(corev1.FSGroupChangeOnRootMismatch),
+			SELinuxOptions:      &corev1.SELinuxOptions{Type: "spc_t"},
 		}
 		podSpec.ServiceAccountName = sa.Name
 		podSpec.Volumes = []corev1.Volume{
@@ -224,7 +228,7 @@ func (m *Mover) ensureJob(
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{},
 				}},
-			{Name: "ceph-csi-config",
+			{Name: defaultCSIConfigName,
 				VolumeSource: corev1.VolumeSource{
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						LocalObjectReference: corev1.LocalObjectReference{

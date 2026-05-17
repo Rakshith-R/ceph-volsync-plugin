@@ -55,10 +55,10 @@ func TestEnsureSecrets_UserKey(t *testing.T) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      keyName,
-			Namespace: "test-ns",
+			Namespace: testNamespace,
 		},
 		Data: map[string][]byte{
-			"psk.txt": []byte("volsync:abcdef"),
+			pskFileName: []byte("volsync:abcdef"),
 		},
 	}
 
@@ -93,13 +93,13 @@ func TestEnsureSecrets_AutoGen(t *testing.T) {
 	secret := &corev1.Secret{}
 	if err := m.client.Get(ctx, client.ObjectKey{
 		Name:      *got,
-		Namespace: "test-ns",
+		Namespace: testNamespace,
 	}, secret); err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
 	// Fake client does not convert StringData to Data (server-side behavior),
 	// so check StringData directly.
-	if _, ok := secret.StringData["psk.txt"]; !ok {
+	if _, ok := secret.StringData[pskFileName]; !ok {
 		t.Error("secret missing psk.txt field")
 	}
 }
@@ -108,8 +108,8 @@ func TestFetchCSIConfigData(t *testing.T) {
 	t.Parallel()
 	srcCM := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ceph-csi-config",
-			Namespace: "rook-ceph",
+			Name:      defaultCSIConfigName,
+			Namespace: defaultCSIConfigNS,
 		},
 		Data: map[string]string{
 			"config.json":          `[{"clusterID":"test-cluster","monitors":["mon1"]}]`,
@@ -135,8 +135,8 @@ func TestFetchCSIConfigData_MissingConfigJSON(t *testing.T) {
 	t.Parallel()
 	srcCM := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ceph-csi-config",
-			Namespace: "rook-ceph",
+			Name:      defaultCSIConfigName,
+			Namespace: defaultCSIConfigNS,
 		},
 		Data: map[string]string{},
 	}
@@ -179,7 +179,7 @@ func TestEnsureCephCSIConfigMap(t *testing.T) {
 
 	// Verify the per-RS/RD ConfigMap was created with correct data
 	cm := &corev1.ConfigMap{}
-	if err := m.client.Get(ctx, client.ObjectKey{Name: *got, Namespace: "test-ns"}, cm); err != nil {
+	if err := m.client.Get(ctx, client.ObjectKey{Name: *got, Namespace: testNamespace}, cm); err != nil {
 		t.Fatalf("Get() error: %v", err)
 	}
 	if cm.Data["config.json"] != srcData["config.json"] {
@@ -193,14 +193,14 @@ func TestEnsureCephCSIConfigMap(t *testing.T) {
 func TestClusterIDFromStorageClass(t *testing.T) {
 	t.Parallel()
 	sc := &storagev1.StorageClass{
-		ObjectMeta:  metav1.ObjectMeta{Name: "cephfs-sc"},
-		Provisioner: "cephfs.csi.ceph.com",
+		ObjectMeta:  metav1.ObjectMeta{Name: testCephFSSC},
+		Provisioner: cephfsProviderName,
 		Parameters:  map[string]string{"clusterID": "cluster-abc"},
 	}
 	m := newTestMover(t, true, constant.MoverCephFS, sc)
 	ctx := t.Context()
 
-	scName := "cephfs-sc"
+	scName := testCephFSSC
 	got, err := m.clusterIDFromStorageClass(ctx, &scName)
 	if err != nil {
 		t.Fatalf("clusterIDFromStorageClass() error: %v", err)
@@ -214,7 +214,7 @@ func TestClusterIDFromStorageClass_MissingParam(t *testing.T) {
 	t.Parallel()
 	sc := &storagev1.StorageClass{
 		ObjectMeta:  metav1.ObjectMeta{Name: "no-cluster-sc"},
-		Provisioner: "cephfs.csi.ceph.com",
+		Provisioner: cephfsProviderName,
 		Parameters:  map[string]string{},
 	}
 	m := newTestMover(t, true, constant.MoverCephFS, sc)
