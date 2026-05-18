@@ -18,13 +18,13 @@ package pipeline
 
 import (
 	"context"
-	"io"
-	"sync"
 	"testing"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
 	"google.golang.org/grpc"
 )
+
+const testBlockDevice = "/dev/block"
 
 type mockDataReaderForPipeline struct {
 	data []byte
@@ -33,10 +33,7 @@ type mockDataReaderForPipeline struct {
 func (m *mockDataReaderForPipeline) ReadAt(
 	_ string, offset, length int64,
 ) ([]byte, error) {
-	end := offset + length
-	if end > int64(len(m.data)) {
-		end = int64(len(m.data))
-	}
+	end := min(offset+length, int64(len(m.data)))
 	return append([]byte(nil), m.data[offset:end]...), nil
 }
 
@@ -60,78 +57,8 @@ func (m *mockIterator) Next() (*ChangeBlock, bool) {
 
 func (m *mockIterator) Close() error { return nil }
 
-type pipelineMockStream struct {
-	grpc.BidiStreamingClient[
-		apiv1.WriteRequest, apiv1.WriteResponse,
-	]
-	mu   sync.Mutex
-	sent []*apiv1.WriteRequest
-}
-
-func (m *pipelineMockStream) Send(
-	req *apiv1.WriteRequest,
-) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sent = append(m.sent, req)
-	return nil
-}
-
-func (m *pipelineMockStream) Recv() (
-	*apiv1.WriteResponse, error,
-) {
-	return nil, io.EOF
-}
-
-func (m *pipelineMockStream) CloseSend() error {
-	return nil
-}
-
-// allMismatchHashStream returns all request IDs
-// as mismatched, forcing the full pipeline path.
-type allMismatchHashStream struct {
-	grpc.BidiStreamingClient[
-		apiv1.HashRequest,
-		apiv1.HashResponse,
-	]
-	mu      sync.Mutex
-	pending []*apiv1.HashRequest
-}
-
-func (m *allMismatchHashStream) Send(
-	req *apiv1.HashRequest,
-) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.pending = append(m.pending, req)
-	return nil
-}
-
-func (m *allMismatchHashStream) Recv() (
-	*apiv1.HashResponse, error,
-) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.pending) == 0 {
-		return nil, io.EOF
-	}
-	req := m.pending[0]
-	m.pending = m.pending[1:]
-	resp := &apiv1.HashResponse{}
-	for _, h := range req.Hashes {
-		resp.MismatchedIds = append(
-			resp.MismatchedIds, h.RequestId,
-		)
-	}
-	return resp, nil
-}
-
-func (m *allMismatchHashStream) CloseSend() error {
-	return nil
-}
-
 func newStreamFactory(
-	stream *pipelineMockStream,
+	stream *ackStream,
 ) StreamFactory {
 	return func(_ context.Context) (
 		grpc.BidiStreamingClient[
@@ -139,17 +66,6 @@ func newStreamFactory(
 		], error,
 	) {
 		return stream, nil
-	}
-}
-
-func newHashStreamFactory() HashStreamFactory {
-	return func(_ context.Context) (
-		grpc.BidiStreamingClient[
-			apiv1.HashRequest,
-			apiv1.HashResponse,
-		], error,
-	) {
-		return &allMismatchHashStream{}, nil
 	}
 }
 
@@ -165,14 +81,14 @@ func TestPipeline_EndToEnd(t *testing.T) {
 
 	iter := &mockIterator{
 		blocks: []ChangeBlock{
-			{FilePath: "/dev/block", Offset: 0, Len: chunkSize},
-			{FilePath: "/dev/block", Offset: chunkSize, Len: chunkSize},
-			{FilePath: "/dev/block", Offset: chunkSize * 2, Len: chunkSize},
-			{FilePath: "/dev/block", Offset: chunkSize * 3, Len: chunkSize},
+			{FilePath: testBlockDevice, Offset: 0, Len: chunkSize},
+			{FilePath: testBlockDevice, Offset: chunkSize, Len: chunkSize},
+			{FilePath: testBlockDevice, Offset: chunkSize * 2, Len: chunkSize},
+			{FilePath: testBlockDevice, Offset: chunkSize * 3, Len: chunkSize},
 		},
 	}
 
-	stream := &pipelineMockStream{}
+	stream := newAckStream()
 
 	cfg := Config{
 		ChunkSize:         chunkSize,
@@ -183,17 +99,12 @@ func TestPipeline_EndToEnd(t *testing.T) {
 
 	p := New(cfg)
 	win := NewWindowSemaphore(64)
-	err := p.Run(
-		ctx, iter, reader,
-		newStreamFactory(stream),
-		newHashStreamFactory(),
-		win,
-	)
+	err := p.Run(ctx, iter, reader, newStreamFactory(stream), win)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(stream.sent) == 0 {
+	if len(stream.getSent()) == 0 {
 		t.Fatal("no data sent")
 	}
 }
@@ -203,17 +114,12 @@ func TestPipeline_EmptyIterator(t *testing.T) {
 
 	reader := &mockDataReaderForPipeline{data: nil}
 	iter := &mockIterator{}
-	stream := &pipelineMockStream{}
+	stream := newAckStream()
 
 	cfg := Config{}
 	p := New(cfg)
 	win := NewWindowSemaphore(64)
-	err := p.Run(
-		ctx, iter, reader,
-		newStreamFactory(stream),
-		newHashStreamFactory(),
-		win,
-	)
+	err := p.Run(ctx, iter, reader, newStreamFactory(stream), win)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,12 +134,12 @@ func TestPipeline_ZeroBlocks(t *testing.T) {
 
 	iter := &mockIterator{
 		blocks: []ChangeBlock{
-			{FilePath: "/dev/block", Offset: 0, Len: chunkSize},
-			{FilePath: "/dev/block", Offset: chunkSize, Len: chunkSize},
+			{FilePath: testBlockDevice, Offset: 0, Len: chunkSize},
+			{FilePath: testBlockDevice, Offset: chunkSize, Len: chunkSize},
 		},
 	}
 
-	stream := &pipelineMockStream{}
+	stream := newAckStream()
 
 	cfg := Config{
 		ChunkSize:         chunkSize,
@@ -244,12 +150,7 @@ func TestPipeline_ZeroBlocks(t *testing.T) {
 
 	p := New(cfg)
 	win := NewWindowSemaphore(64)
-	err := p.Run(
-		ctx, iter, reader,
-		newStreamFactory(stream),
-		newHashStreamFactory(),
-		win,
-	)
+	err := p.Run(ctx, iter, reader, newStreamFactory(stream), win)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,14 +176,14 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 			length = int64(len(data)) - offset
 		}
 		blocks = append(blocks, ChangeBlock{
-			FilePath: "/dev/block",
+			FilePath: testBlockDevice,
 			Offset:   offset,
 			Len:      length,
 		})
 	}
 
 	iter := &mockIterator{blocks: blocks}
-	stream := &pipelineMockStream{}
+	stream := newAckStream()
 
 	cfg := Config{
 		ChunkSize:         chunkSize,
@@ -293,60 +194,13 @@ func TestPipeline_MultipleChunks(t *testing.T) {
 
 	p := New(cfg)
 	win := NewWindowSemaphore(64)
-	err := p.Run(
-		ctx, iter, reader,
-		newStreamFactory(stream),
-		newHashStreamFactory(),
-		win,
-	)
+	err := p.Run(ctx, iter, reader, newStreamFactory(stream), win)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(stream.sent) == 0 {
+	if len(stream.getSent()) == 0 {
 		t.Fatal("no data sent")
-	}
-}
-
-func TestPipeline_NilHashStream(t *testing.T) {
-	ctx := context.Background()
-
-	chunkSize := int64(64 * 1024)
-	data := make([]byte, chunkSize*4)
-	for i := range data {
-		data[i] = 0xCC
-	}
-	reader := &mockDataReaderForPipeline{data: data}
-
-	iter := &mockIterator{
-		blocks: []ChangeBlock{
-			{FilePath: "/dev/block", Offset: 0, Len: chunkSize},
-			{FilePath: "/dev/block", Offset: chunkSize, Len: chunkSize},
-			{FilePath: "/dev/block", Offset: chunkSize * 2, Len: chunkSize},
-			{FilePath: "/dev/block", Offset: chunkSize * 3, Len: chunkSize},
-		},
-	}
-
-	stream := &pipelineMockStream{}
-	cfg := Config{
-		ChunkSize:         chunkSize,
-		ReadWorkers:       2,
-		MaxWindow:         16,
-		MaxRawMemoryBytes: 2 * 1024 * 1024,
-	}
-
-	p := New(cfg)
-	win := NewWindowSemaphore(64)
-	err := p.Run(
-		ctx, iter, reader,
-		newStreamFactory(stream), nil,
-		win,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(stream.sent) == 0 {
-		t.Fatal("expected data to be sent with nil hash stream")
 	}
 }
 
@@ -355,7 +209,7 @@ func TestPipeline_ConfigValidation(t *testing.T) {
 
 	reader := &mockDataReaderForPipeline{data: nil}
 	iter := &mockIterator{}
-	stream := &pipelineMockStream{}
+	stream := newAckStream()
 
 	// Invalid ChunkSize
 	cfg := Config{
@@ -364,12 +218,7 @@ func TestPipeline_ConfigValidation(t *testing.T) {
 
 	p := New(cfg)
 	win := NewWindowSemaphore(64)
-	err := p.Run(
-		ctx, iter, reader,
-		newStreamFactory(stream),
-		newHashStreamFactory(),
-		win,
-	)
+	err := p.Run(ctx, iter, reader, newStreamFactory(stream), win)
 	if err == nil {
 		t.Fatal("expected validation error for invalid ChunkSize")
 	}

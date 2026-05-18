@@ -29,8 +29,6 @@ Single consolidated service for all data-path RPCs.
 ```protobuf
 rpc Write(stream WriteRequest)
     returns (stream WriteResponse);
-rpc CompareHashes(stream HashRequest)
-    returns (stream HashResponse);
 rpc Commit(stream CommitRequest)
     returns (stream CommitResponse);
 rpc Delete(stream DeleteRequest)

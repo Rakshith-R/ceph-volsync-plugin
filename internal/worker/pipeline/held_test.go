@@ -49,17 +49,6 @@ func TestHeld_DoubleRelease(t *testing.T) {
 	h.release(mem, win) // should be safe no-op
 }
 
-func TestHeld_PartialReleaseMemRaw(t *testing.T) {
-	mem := NewMemSemaphore(1000)
-	ctx := context.Background()
-	_ = mem.Acquire(ctx, 100)
-	h := held{memRawN: 100, hasMem: true}
-	h.partialReleaseMemRaw(mem, 30)
-	if h.memRawN != 70 {
-		t.Fatalf("expected 70, got %d", h.memRawN)
-	}
-}
-
 func TestHeld_ReleaseMemOnly(t *testing.T) {
 	mem := NewMemSemaphore(1000)
 	win := NewWindowSemaphore(64)

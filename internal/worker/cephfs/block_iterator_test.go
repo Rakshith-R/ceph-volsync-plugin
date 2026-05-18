@@ -18,6 +18,7 @@ package cephfs
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -25,8 +26,9 @@ import (
 )
 
 const (
-	testFileA = "a.txt"
-	testFileB = "b.txt"
+	testFileA     = "a.txt"
+	testFileB     = "b.txt"
+	testSmallFile = "small.txt"
 )
 
 type mockFileDiffIter struct {
@@ -134,9 +136,9 @@ func TestCephFSBlockIterator_FromChan(t *testing.T) {
 		return iters[path], nil
 	}
 
-	fileCh := make(chan string, 2)
-	fileCh <- testFileA
-	fileCh <- testFileB
+	fileCh := make(chan changedFileEntry, 2)
+	fileCh <- changedFileEntry{path: testFileA, size: -1}
+	fileCh <- changedFileEntry{path: testFileB, size: -1}
 	close(fileCh)
 
 	boundaryCh := make(chan fileBoundary, 10)
@@ -220,7 +222,7 @@ func TestCephFSBlockIterator_FromChan(t *testing.T) {
 func TestCephFSBlockIterator_FromChan_Empty(
 	t *testing.T,
 ) {
-	fileCh := make(chan string)
+	fileCh := make(chan changedFileEntry)
 	close(fileCh)
 
 	iter := NewCephFSBlockIterator(
@@ -242,7 +244,7 @@ func TestCephFSBlockIterator_FromChan_CtxCancel(
 		context.Background(),
 	)
 
-	fileCh := make(chan string) // unbuffered, will block
+	fileCh := make(chan changedFileEntry) // unbuffered, will block
 
 	iter := NewCephFSBlockIterator(
 		nil, nil,
@@ -270,4 +272,148 @@ func TestCephFSBlockIterator_FromChan_CtxCancel(
 		t.Fatal("Next() did not unblock after cancel")
 	}
 	_ = iter.Close()
+}
+
+func TestCephFSBlockIterator_SmallFileSynthetic(t *testing.T) {
+	iterCalled := false
+	newIter := func(path string) (fileDiffIterator, error) {
+		iterCalled = true
+		return nil, fmt.Errorf("should not be called for small files")
+	}
+
+	ch := make(chan changedFileEntry, 2)
+	boundaryCh := make(chan fileBoundary, 2)
+	ctx := context.Background()
+
+	// 1MB file, threshold 12MB — should be synthetic.
+	ch <- changedFileEntry{path: testSmallFile, size: 1024 * 1024}
+	close(ch)
+
+	it := NewCephFSBlockIterator(newIter, nil,
+		WithFileChan(ch),
+		WithContext(ctx),
+		WithBoundaryChan(boundaryCh),
+		WithSmallFileThreshold(12*1024*1024),
+	)
+
+	block, ok := it.Next()
+	if !ok {
+		t.Fatal("expected a block from small file")
+	}
+	if block.FilePath != testSmallFile {
+		t.Errorf("expected small.txt, got %s", block.FilePath)
+	}
+	if block.Offset != 0 {
+		t.Errorf("expected offset 0, got %d", block.Offset)
+	}
+	if block.Len != 1024*1024 {
+		t.Errorf("expected len %d, got %d", 1024*1024, block.Len)
+	}
+	if block.TotalSize != 1024*1024 {
+		t.Errorf("expected totalSize %d, got %d", 1024*1024, block.TotalSize)
+	}
+
+	_, ok = it.Next()
+	if ok {
+		t.Error("expected no more blocks after small file")
+	}
+
+	if iterCalled {
+		t.Error("newIter should not be called for small files")
+	}
+
+	// Check boundary was emitted.
+	_ = it.Close()
+	close(boundaryCh)
+	var boundaries []fileBoundary
+	for fb := range boundaryCh {
+		boundaries = append(boundaries, fb)
+	}
+	if len(boundaries) != 1 {
+		t.Fatalf("expected 1 boundary, got %d", len(boundaries))
+	}
+	fb := boundaries[0]
+	if fb.path != testSmallFile {
+		t.Errorf("boundary path: expected small.txt, got %s", fb.path)
+	}
+	if fb.lastReqID != 0 {
+		t.Errorf("boundary lastReqID: expected 0, got %d", fb.lastReqID)
+	}
+	if fb.totalSize != 1024*1024 {
+		t.Errorf("boundary totalSize: expected %d, got %d", 1024*1024, fb.totalSize)
+	}
+}
+
+func TestCephFSBlockIterator_BoundaryOverflow(t *testing.T) {
+	// Verify that when boundaryCh is smaller than the
+	// number of files, boundaries are buffered internally
+	// and flushed on Close() — no deadlock.
+	fileCount := 10
+	ch := make(chan changedFileEntry, fileCount)
+	boundaryCh := make(chan fileBoundary, 2) // deliberately small
+	ctx := context.Background()
+
+	newIter := func(path string) (fileDiffIterator, error) {
+		return nil, fmt.Errorf("should not be called")
+	}
+
+	for i := range fileCount {
+		ch <- changedFileEntry{path: fmt.Sprintf("f%d.txt", i), size: 1024}
+	}
+	close(ch)
+
+	it := NewCephFSBlockIterator(newIter, nil,
+		WithFileChan(ch),
+		WithContext(ctx),
+		WithBoundaryChan(boundaryCh),
+		WithSmallFileThreshold(12*1024*1024),
+	)
+
+	// Drain all blocks.
+	count := 0
+	for {
+		_, ok := it.Next()
+		if !ok {
+			break
+		}
+		count++
+		// Drain boundaryCh to simulate the commitDrainer.
+		for len(boundaryCh) > 0 {
+			<-boundaryCh
+		}
+	}
+	if count != fileCount {
+		t.Fatalf("expected %d blocks, got %d", fileCount, count)
+	}
+
+	_ = it.Close()
+
+	// Drain remaining boundaries after Close flushed them.
+	for len(boundaryCh) > 0 {
+		<-boundaryCh
+	}
+}
+
+func TestCephFSBlockIterator_EmptyFileSkipped(t *testing.T) {
+	newIter := func(path string) (fileDiffIterator, error) {
+		return nil, fmt.Errorf("should not be called for empty files")
+	}
+
+	ch := make(chan changedFileEntry, 2)
+	ctx := context.Background()
+
+	ch <- changedFileEntry{path: "empty.txt", size: 0}
+	close(ch)
+
+	it := NewCephFSBlockIterator(newIter, nil,
+		WithFileChan(ch),
+		WithContext(ctx),
+		WithSmallFileThreshold(12*1024*1024),
+	)
+
+	_, ok := it.Next()
+	if ok {
+		t.Error("empty file should produce no blocks")
+	}
+	_ = it.Close()
 }

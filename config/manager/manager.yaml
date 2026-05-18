@@ -59,6 +59,10 @@ spec:
         env:
         - name: MOVER_IMAGE
           value: MOVER_IMAGE_PLACEHOLDER
+        - name: CEPH_CSI_CONFIG_NAME
+          value: CEPH_CSI_CONFIG_NAME_PLACEHOLDER
+        - name: CEPH_CSI_CONFIG_NAMESPACE
+          value: CEPH_CSI_CONFIG_NAMESPACE_PLACEHOLDER
         ports: []
         securityContext:
           allowPrivilegeEscalation: false
@@ -81,18 +85,10 @@ spec:
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
           limits:
-            cpu: 500m
-            memory: 128Mi
+            cpu: 1000m
+            memory: 512Mi
           requests:
             cpu: 10m
             memory: 64Mi
-        volumeMounts:
-        - name: ceph-csi-config
-          mountPath: /etc/ceph-csi-config
-          readOnly: true
-      volumes:
-      - name: ceph-csi-config
-        configMap:
-          name: ceph-csi-config
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

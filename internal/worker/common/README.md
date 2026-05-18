@@ -6,7 +6,7 @@ Shared infrastructure for all mover worker types (CephFS, RBD).
 
 - **`Worker`** — Base interface with `Run(ctx) error`, implemented by all workers.
 - **`Syncer`** — Source-side sync interface, called by `BaseSourceWorker` after connection setup.
-- **`WriteHandler`**, **`DeleteHandler`**, **`HashHandler`**, **`CommitHandler`** — gRPC stream handler interfaces for the `SyncServer`.
+- **`WriteHandler`**, **`DeleteHandler`**, **`CommitHandler`** — gRPC stream handler interfaces for the `SyncServer`.
 
 ## Source/Destination Scaffolding
 
@@ -15,7 +15,7 @@ Shared infrastructure for all mover worker types (CephFS, RBD).
 
 ## gRPC Infrastructure
 
-- **`SyncServer`** — Implements `SyncService` gRPC server. Delegates RPCs (Write, Delete, CompareHashes, Commit) to pluggable handler interfaces. The `Done` RPC signals graceful shutdown.
+- **`SyncServer`** — Implements `SyncService` gRPC server. Delegates RPCs (Write, Delete, Commit) to pluggable handler interfaces. The `Done` RPC signals graceful shutdown.
 - **`VersionServer`** — Implements `VersionService` for version handshake.
 - **`RunDestinationServer()`** — Starts the gRPC server, registers services, and handles shutdown via context cancellation, server error, or Done signal.
 - **`ConnectToDestination()`** — Establishes a gRPC client connection with version verification.

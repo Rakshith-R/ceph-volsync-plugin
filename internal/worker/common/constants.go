@@ -37,13 +37,12 @@ const (
 	WritePayloadMinSize = 2 * 1024 * 1024 // 2MB
 
 	// WritePayloadMaxSize is the maximum accumulated
-	// data payload size. Must stay below the 8MB
-	// MaxGRPCMessageSize limit.
+	// data payload size. Must stay below MaxGRPCMessageSize.
 	WritePayloadMaxSize = 3 * 1024 * 1024 // 3MB
 
 	// MaxGRPCMessageSize is the maximum gRPC message
 	// size for send and receive.
-	MaxGRPCMessageSize = 8 * 1024 * 1024 // 8MB
+	MaxGRPCMessageSize = 20 * 1024 * 1024 // 20MB
 
 	// DefaultServerPort is the gRPC server listen
 	// port inside the mover container.

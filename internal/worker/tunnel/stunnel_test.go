@@ -28,13 +28,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testDestAddr = "10.0.0.1"
+
 func TestWriteSourceConfig_UsesUDS(t *testing.T) {
 	// Clean up any existing config from previous tests
 	_ = os.RemoveAll(stunnelDir)
 
 	cfg := StunnelConfig{
-		WorkerType:         "source",
-		DestinationAddress: "10.0.0.1",
+		WorkerType:         workerTypeSource,
+		DestinationAddress: testDestAddr,
 		DestinationPort:    "8000",
 		EnableRsyncTunnel:  true,
 		RsyncPort:          "8873",
@@ -115,8 +117,8 @@ func TestWriteDestinationConfig_StaysTCP(t *testing.T) {
 
 func TestSourceGRPCAddress_ReturnsUnixScheme(t *testing.T) {
 	cfg := StunnelConfig{
-		WorkerType:         "source",
-		DestinationAddress: "10.0.0.1",
+		WorkerType:         workerTypeSource,
+		DestinationAddress: testDestAddr,
 		DestinationPort:    "8000",
 	}
 
@@ -135,8 +137,8 @@ func TestCheckSocket_ExistingSocket(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "test.sock")
 
 	cfg := StunnelConfig{
-		WorkerType:         "source",
-		DestinationAddress: "10.0.0.1",
+		WorkerType:         workerTypeSource,
+		DestinationAddress: testDestAddr,
 		DestinationPort:    "8000",
 	}
 
@@ -169,8 +171,8 @@ func TestCheckSocket_NonexistentSocket(t *testing.T) {
 	socketPath := filepath.Join(tempDir, "nonexistent.sock")
 
 	cfg := StunnelConfig{
-		WorkerType:         "source",
-		DestinationAddress: "10.0.0.1",
+		WorkerType:         workerTypeSource,
+		DestinationAddress: testDestAddr,
 		DestinationPort:    "8000",
 	}
 

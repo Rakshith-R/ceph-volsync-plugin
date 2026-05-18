@@ -19,6 +19,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -31,6 +32,7 @@ import (
 func StageRead(
 	ctx context.Context,
 	cfg *Config,
+	stats *Stats,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	reader DataReader,
@@ -41,7 +43,7 @@ func StageRead(
 
 	for range cfg.ReadWorkers {
 		g.Go(func() error {
-			return readWorker(gctx, cfg, memRaw, win, reader, inCh, readCh)
+			return readWorker(gctx, cfg, stats, memRaw, win, reader, inCh, readCh)
 		})
 	}
 
@@ -51,6 +53,7 @@ func StageRead(
 func readWorker(
 	ctx context.Context,
 	cfg *Config,
+	stats *Stats,
 	memRaw *MemSemaphore,
 	win *WindowSemaphore,
 	reader DataReader,
@@ -69,26 +72,55 @@ func readWorker(
 			return ctx.Err()
 		}
 
-		if err := memRaw.Acquire(ctx, cfg.ChunkSize); err != nil {
+		if chunk.IsZero {
+			if err := win.Acquire(ctx, chunk.ReqID); err != nil {
+				return err
+			}
+			stats.ReadCount.Add(1)
+			stats.ReadZeroCount.Add(1)
+			select {
+			case readCh <- ReadChunk{
+				ReqID:     chunk.ReqID,
+				FilePath:  chunk.FilePath,
+				Offset:    chunk.Offset,
+				Length:    chunk.Length,
+				IsZero:    true,
+				TotalSize: chunk.TotalSize,
+				Held:      held{reqID: chunk.ReqID, hasWin: true},
+			}:
+			case <-ctx.Done():
+				win.Release(chunk.ReqID)
+				return ctx.Err()
+			}
+			continue
+		}
+
+		acquireSize := min(chunk.Length, cfg.ChunkSize)
+		if err := memRaw.Acquire(ctx, acquireSize); err != nil {
 			return err
 		}
 
 		if err := win.Acquire(ctx, chunk.ReqID); err != nil {
-			memRaw.Release(cfg.ChunkSize)
+			memRaw.Release(acquireSize)
 			return err
 		}
 
+		t0 := time.Now()
 		data, err := reader.ReadAt(
-			chunk.FilePath, chunk.Offset, chunk.Length,
+			chunk.FilePath, chunk.Offset, acquireSize,
 		)
+		stats.ReadTimeNs.Add(time.Since(t0).Nanoseconds())
 		if err != nil {
-			memRaw.Release(cfg.ChunkSize)
+			memRaw.Release(acquireSize)
 			win.Release(chunk.ReqID)
 			return fmt.Errorf("read chunk %d: %w", chunk.ReqID, err)
 		}
+		stats.ReadCount.Add(1)
+		stats.ReadBytes.Add(int64(len(data)))
 
 		if common.IsAllZero(data) {
-			memRaw.Release(cfg.ChunkSize)
+			stats.ReadZeroCount.Add(1)
+			memRaw.Release(acquireSize)
 			// Win stays acquired; released by ack receiver
 			select {
 			case readCh <- ReadChunk{
@@ -110,7 +142,7 @@ func readWorker(
 
 		h := held{
 			reqID:   chunk.ReqID,
-			memRawN: cfg.ChunkSize,
+			memRawN: acquireSize,
 			hasWin:  true,
 			hasMem:  true,
 		}

@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -47,6 +48,17 @@ var waitTimeout = getEnvDuration("WAIT_TIMEOUT", 2*time.Minute)
 
 // dataMatchPollInterval is how often we retry the full validate flow when polling for data match.
 const dataMatchPollInterval = 30 * time.Second
+
+const (
+	busyboxImage       = "busybox"
+	shCmd              = "/bin/sh"
+	volMountName       = "vol"
+	srcVolName         = "src-vol"
+	dstVolName         = "dst-vol"
+	copyMethodSnapshot = "Snapshot"
+	copyMethodDirect   = "Direct"
+	copyMethodKey      = "copyMethod"
+)
 
 // innerPollInterval is the poll interval for sub-waits inside tryValidateSyncedData.
 const innerPollInterval = 5 * time.Second
@@ -284,24 +296,36 @@ func createVolumeSnapshot(ctx context.Context, name, pvcName, volumeSnapshotClas
 func updateManualTrigger(ctx context.Context, rsName, rdName, newID string) {
 	By("updating manual trigger to " + newID)
 
-	rs := &volsyncv1alpha1.ReplicationSource{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs)).To(Succeed())
-	rs.Spec.Trigger.Manual = newID
-	Expect(k8sClient.Update(ctx, rs)).To(Succeed())
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		rs := &volsyncv1alpha1.ReplicationSource{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs); err != nil {
+			return err
+		}
+		rs.Spec.Trigger.Manual = newID
+		return k8sClient.Update(ctx, rs)
+	})).To(Succeed())
 
-	rd := &volsyncv1alpha1.ReplicationDestination{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rdName, Namespace: namespace}, rd)).To(Succeed())
-	rd.Spec.Trigger.Manual = newID
-	Expect(k8sClient.Update(ctx, rd)).To(Succeed())
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		rd := &volsyncv1alpha1.ReplicationDestination{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rdName, Namespace: namespace}, rd); err != nil {
+			return err
+		}
+		rd.Spec.Trigger.Manual = newID
+		return k8sClient.Update(ctx, rd)
+	})).To(Succeed())
 }
 
 func updateRSManualTrigger(ctx context.Context, rsName, newID string) {
 	By("updating RS manual trigger to " + newID)
 
-	rs := &volsyncv1alpha1.ReplicationSource{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs)).To(Succeed())
-	rs.Spec.Trigger.Manual = newID
-	Expect(k8sClient.Update(ctx, rs)).To(Succeed())
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		rs := &volsyncv1alpha1.ReplicationSource{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs); err != nil {
+			return err
+		}
+		rs.Spec.Trigger.Manual = newID
+		return k8sClient.Update(ctx, rs)
+	})).To(Succeed())
 }
 
 func setRSPaused(ctx context.Context, rsName string, paused bool) {
@@ -312,10 +336,14 @@ func setRSPaused(ctx context.Context, rsName string, paused bool) {
 
 	By(action + " ReplicationSource " + rsName)
 
-	rs := &volsyncv1alpha1.ReplicationSource{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs)).To(Succeed())
-	rs.Spec.Paused = paused
-	Expect(k8sClient.Update(ctx, rs)).To(Succeed())
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		rs := &volsyncv1alpha1.ReplicationSource{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsName, Namespace: namespace}, rs); err != nil {
+			return err
+		}
+		rs.Spec.Paused = paused
+		return k8sClient.Update(ctx, rs)
+	})).To(Succeed())
 }
 
 // waitForSyncTime waits for RS.Status.LastSyncTime to be non-nil.
@@ -503,14 +531,14 @@ func runPodWithPVC(ctx context.Context, podName, pvcName string, drv driverConfi
 			Containers: []corev1.Container{
 				{
 					Name:            "worker",
-					Image:           "busybox",
+					Image:           busyboxImage,
 					ImagePullPolicy: corev1.PullAlways,
-					Command:         []string{"/bin/sh", "-c", command},
+					Command:         []string{shCmd, "-c", command},
 				},
 			},
 			Volumes: []corev1.Volume{
 				{
-					Name: "vol",
+					Name: volMountName,
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: pvcName,
@@ -526,14 +554,14 @@ func runPodWithPVC(ctx context.Context, podName, pvcName string, drv driverConfi
 	if isBlock {
 		pod.Spec.Containers[0].VolumeDevices = []corev1.VolumeDevice{
 			{
-				Name:       "vol",
+				Name:       volMountName,
 				DevicePath: "/dev/block",
 			},
 		}
 	} else {
 		pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{
 			{
-				Name:      "vol",
+				Name:      volMountName,
 				MountPath: "/data",
 			},
 		}
@@ -621,14 +649,14 @@ func compareDataInPod(ctx context.Context, podName, srcPVC, dstPVC string, drv d
 			Containers: []corev1.Container{
 				{
 					Name:            "compare",
-					Image:           "busybox",
+					Image:           busyboxImage,
 					ImagePullPolicy: corev1.PullAlways,
-					Command:         []string{"/bin/sh", "-c", command},
+					Command:         []string{shCmd, "-c", command},
 				},
 			},
 			Volumes: []corev1.Volume{
 				{
-					Name: "src-vol",
+					Name: srcVolName,
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: srcPVC,
@@ -637,7 +665,7 @@ func compareDataInPod(ctx context.Context, podName, srcPVC, dstPVC string, drv d
 					},
 				},
 				{
-					Name: "dst-vol",
+					Name: dstVolName,
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: dstPVC,
@@ -652,23 +680,23 @@ func compareDataInPod(ctx context.Context, podName, srcPVC, dstPVC string, drv d
 	if isBlock {
 		pod.Spec.Containers[0].VolumeDevices = []corev1.VolumeDevice{
 			{
-				Name:       "src-vol",
+				Name:       srcVolName,
 				DevicePath: "/dev/src-block",
 			},
 			{
-				Name:       "dst-vol",
+				Name:       dstVolName,
 				DevicePath: "/dev/dst-block",
 			},
 		}
 	} else {
 		pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{
 			{
-				Name:      "src-vol",
+				Name:      srcVolName,
 				MountPath: "/src",
 				ReadOnly:  true,
 			},
 			{
-				Name:      "dst-vol",
+				Name:      dstVolName,
 				MountPath: "/dst",
 				ReadOnly:  true,
 			},
@@ -713,7 +741,7 @@ func validateSyncedData(
 ) {
 	var snapName string
 
-	if copyMethod == "Snapshot" {
+	if copyMethod == copyMethodSnapshot {
 		By("getting snapshot from RD latestImage")
 
 		rd := &volsyncv1alpha1.ReplicationDestination{}
@@ -796,7 +824,7 @@ func validateSyncedData(
 
 	_ = k8sClientSet.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, tempPVC, metav1.DeleteOptions{})
 
-	if copyMethod == "Direct" {
+	if copyMethod == copyMethodDirect {
 		By("cleaning up validation snapshot")
 
 		snap := &snapv1.VolumeSnapshot{
@@ -881,7 +909,7 @@ func cleanupTryResources(ctx context.Context, snapPrefix, copyMethod string) {
 		},
 	})
 
-	if copyMethod == "Direct" {
+	if copyMethod == copyMethodDirect {
 		deleteAndWaitFor(ctx, &snapv1.VolumeSnapshot{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      snapPrefix + "-validate",
@@ -925,14 +953,14 @@ func tryCompareDataInPod(ctx context.Context, podName, srcPVC, dstPVC string, dr
 			Containers: []corev1.Container{
 				{
 					Name:            "compare",
-					Image:           "busybox",
+					Image:           busyboxImage,
 					ImagePullPolicy: corev1.PullAlways,
-					Command:         []string{"/bin/sh", "-c", command},
+					Command:         []string{shCmd, "-c", command},
 				},
 			},
 			Volumes: []corev1.Volume{
 				{
-					Name: "src-vol",
+					Name: srcVolName,
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: srcPVC,
@@ -941,7 +969,7 @@ func tryCompareDataInPod(ctx context.Context, podName, srcPVC, dstPVC string, dr
 					},
 				},
 				{
-					Name: "dst-vol",
+					Name: dstVolName,
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: dstPVC,
@@ -956,23 +984,23 @@ func tryCompareDataInPod(ctx context.Context, podName, srcPVC, dstPVC string, dr
 	if isBlock {
 		pod.Spec.Containers[0].VolumeDevices = []corev1.VolumeDevice{
 			{
-				Name:       "src-vol",
+				Name:       srcVolName,
 				DevicePath: "/dev/src-block",
 			},
 			{
-				Name:       "dst-vol",
+				Name:       dstVolName,
 				DevicePath: "/dev/dst-block",
 			},
 		}
 	} else {
 		pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{
 			{
-				Name:      "src-vol",
+				Name:      srcVolName,
 				MountPath: "/src",
 				ReadOnly:  true,
 			},
 			{
-				Name:      "dst-vol",
+				Name:      dstVolName,
 				MountPath: "/dst",
 				ReadOnly:  true,
 			},
@@ -1016,7 +1044,7 @@ func tryValidateSyncedData(
 
 	var snapName string
 
-	if copyMethod == "Snapshot" {
+	if copyMethod == copyMethodSnapshot {
 		rd := &volsyncv1alpha1.ReplicationDestination{}
 
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: rdName, Namespace: namespace}, rd)

@@ -28,10 +28,7 @@ type mockDataReader struct {
 func (m *mockDataReader) ReadAt(
 	_ string, offset, length int64,
 ) ([]byte, error) {
-	end := offset + length
-	if end > int64(len(m.data)) {
-		end = int64(len(m.data))
-	}
+	end := min(offset+length, int64(len(m.data)))
 	return append([]byte(nil), m.data[offset:end]...), nil
 }
 
@@ -62,7 +59,7 @@ func TestStageRead_ReadsAllChunks(t *testing.T) {
 
 	readCh := make(chan ReadChunk, 3)
 
-	err := StageRead(ctx, cfg, mem, win, reader, inCh, readCh)
+	err := StageRead(ctx, cfg, &Stats{}, mem, win, reader, inCh, readCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,17 +93,20 @@ func TestStageRead_ZeroShortCircuit(t *testing.T) {
 
 	readCh := make(chan ReadChunk, 1)
 
-	err := StageRead(ctx, cfg, mem, win, reader, inCh, readCh)
+	err := StageRead(ctx, cfg, &Stats{}, mem, win, reader, inCh, readCh)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	close(readCh)
 
-	if len(readCh) != 1 {
-		t.Fatal("expected 1 chunk on readCh")
+	var rc ReadChunk
+	count := 0
+	for rc = range readCh {
+		count++
 	}
-	rc := <-readCh
+	if count != 1 {
+		t.Fatalf("expected 1 chunk, got %d", count)
+	}
 	if !rc.IsZero {
 		t.Fatal("zero block should have IsZero=true")
 	}

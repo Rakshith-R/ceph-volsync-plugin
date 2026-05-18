@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/RamenDR/ceph-volsync-plugin/internal/worker/constant"
@@ -83,7 +84,7 @@ func TestSetSnapshotStatus_Nil(t *testing.T) {
 	m := newTestMover(t, true, constant.MoverCephFS)
 	ctx := t.Context()
 
-	if err := m.setSnapshotStatus(ctx, nil, "current"); err != nil {
+	if err := m.setSnapshotStatus(ctx, nil, snapshotStatusCurrent); err != nil {
 		t.Errorf("setSnapshotStatus(nil) returned error: %v", err)
 	}
 }
@@ -94,7 +95,7 @@ func TestSetSnapshotStatus_Updates(t *testing.T) {
 	m := newTestMover(t, true, constant.MoverCephFS, snap)
 	ctx := t.Context()
 
-	if err := m.setSnapshotStatus(ctx, snap, "current"); err != nil {
+	if err := m.setSnapshotStatus(ctx, snap, snapshotStatusCurrent); err != nil {
 		t.Fatalf("setSnapshotStatus() error: %v", err)
 	}
 
@@ -104,15 +105,15 @@ func TestSetSnapshotStatus_Updates(t *testing.T) {
 		t.Fatalf("Get() error: %v", err)
 	}
 	got := updated.Labels[m.snapStatusLabelKey]
-	if got != "current" {
-		t.Errorf("label = %q, want %q", got, "current")
+	if got != snapshotStatusCurrent {
+		t.Errorf("label = %q, want %q", got, snapshotStatusCurrent)
 	}
 }
 
 func TestSetSnapshotStatus_AlreadySet(t *testing.T) {
 	t.Parallel()
 	m := newTestMover(t, true, constant.MoverCephFS)
-	labels := map[string]string{m.snapStatusLabelKey: "current"}
+	labels := map[string]string{m.snapStatusLabelKey: snapshotStatusCurrent}
 	snap := newSnapshot("snap-1", labels)
 
 	// Re-create mover with the pre-labeled snapshot
@@ -120,7 +121,7 @@ func TestSetSnapshotStatus_AlreadySet(t *testing.T) {
 	ctx := t.Context()
 
 	// Should be a no-op (label already set)
-	if err := m.setSnapshotStatus(ctx, snap, "current"); err != nil {
+	if err := m.setSnapshotStatus(ctx, snap, snapshotStatusCurrent); err != nil {
 		t.Errorf("setSnapshotStatus() error: %v", err)
 	}
 }
@@ -131,17 +132,17 @@ func TestListSnapshotsWithStatus(t *testing.T) {
 	labelKey := m.snapStatusLabelKey
 
 	snap1 := newSnapshot("snap-1",
-		map[string]string{labelKey: "current"})
+		map[string]string{labelKey: snapshotStatusCurrent})
 	snap2 := newSnapshot("snap-2",
-		map[string]string{labelKey: "previous"})
+		map[string]string{labelKey: snapshotStatusPrevious})
 	snap3 := newSnapshot("snap-3",
-		map[string]string{labelKey: "current"})
+		map[string]string{labelKey: snapshotStatusCurrent})
 
 	m = newTestMover(t, true, constant.MoverCephFS, snap1, snap2, snap3)
 	ctx := t.Context()
 
 	// List current snapshots
-	current, err := m.listSnapshotsWithStatus(ctx, "current")
+	current, err := m.listSnapshotsWithStatus(ctx, snapshotStatusCurrent)
 	if err != nil {
 		t.Fatalf("listSnapshotsWithStatus() error: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestListSnapshotsWithStatus(t *testing.T) {
 	}
 
 	// List previous snapshots
-	previous, err := m.listSnapshotsWithStatus(ctx, "previous")
+	previous, err := m.listSnapshotsWithStatus(ctx, snapshotStatusPrevious)
 	if err != nil {
 		t.Fatalf("listSnapshotsWithStatus() error: %v", err)
 	}
@@ -185,7 +186,7 @@ func TestFindSnapshotWithStatus(t *testing.T) {
 
 	// With a matching snapshot
 	snap := newSnapshot("snap-1",
-		map[string]string{labelKey: "current"})
+		map[string]string{labelKey: snapshotStatusCurrent})
 	m = newTestMover(t, true, constant.MoverCephFS, snap)
 
 	found, err = m.findCurrentSnapshot(ctx)
@@ -206,9 +207,9 @@ func TestTransitionSnapshotStatuses(t *testing.T) {
 	labelKey := m.snapStatusLabelKey
 
 	current := newSnapshot("snap-current",
-		map[string]string{labelKey: "current"})
+		map[string]string{labelKey: snapshotStatusCurrent})
 	prev := newSnapshot("snap-prev",
-		map[string]string{labelKey: "previous"})
+		map[string]string{labelKey: snapshotStatusPrevious})
 
 	m = newTestMover(t, true, constant.MoverCephFS, current, prev)
 	ctx := t.Context()
@@ -222,7 +223,72 @@ func TestTransitionSnapshotStatuses(t *testing.T) {
 	if err := m.client.Get(ctx, client.ObjectKeyFromObject(current), updated); err != nil {
 		t.Fatalf("Get(current) error: %v", err)
 	}
-	if got := updated.Labels[labelKey]; got != "previous" {
-		t.Errorf("current snapshot label = %q, want %q", got, "previous")
+	if got := updated.Labels[labelKey]; got != snapshotStatusPrevious {
+		t.Errorf("current snapshot label = %q, want %q", got, snapshotStatusPrevious)
+	}
+}
+
+func TestPvcIsFilesystemMode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		mode *corev1.PersistentVolumeMode
+		want bool
+	}{
+		{"nil defaults to filesystem", nil, true},
+		{"explicit filesystem", ptrTo(corev1.PersistentVolumeFilesystem), true},
+		{"block mode", ptrTo(corev1.PersistentVolumeBlock), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pvc := &corev1.PersistentVolumeClaim{}
+			pvc.Spec.VolumeMode = tt.mode
+			if got := pvcIsFilesystemMode(pvc); got != tt.want {
+				t.Errorf("pvcIsFilesystemMode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnsureAllowVolumeModeChangeAnnotation(t *testing.T) {
+	t.Parallel()
+	contentName := "test-content"
+	snap, content := newSnapshotWithContent("snap-1", contentName, nil)
+	m := newTestMover(t, true, constant.MoverRBD, snap, content)
+	ctx := t.Context()
+
+	// First call should set annotation
+	if err := m.ensureAllowVolumeModeChangeAnnotation(ctx, m.logger, snap); err != nil {
+		t.Fatalf("ensureAllowVolumeModeChangeAnnotation() error: %v", err)
+	}
+
+	// Verify annotation was set
+	updated := &snapv1.VolumeSnapshotContent{}
+	if err := m.client.Get(ctx, client.ObjectKey{Name: contentName}, updated); err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if got := updated.Annotations[annotationAllowVolumeModeChange]; got != annotationAllowVolumeModeChangeValue {
+		t.Errorf("annotation = %q, want %q", got, annotationAllowVolumeModeChangeValue)
+	}
+
+	// Second call should be idempotent (no error)
+	if err := m.ensureAllowVolumeModeChangeAnnotation(ctx, m.logger, snap); err != nil {
+		t.Errorf("idempotent call error: %v", err)
+	}
+}
+
+func TestEnsureAllowVolumeModeChangeAnnotation_AlreadySet(t *testing.T) {
+	t.Parallel()
+	contentName := "test-content-annotated"
+	snap, content := newSnapshotWithContent("snap-2", contentName, nil)
+	content.Annotations = map[string]string{
+		annotationAllowVolumeModeChange: annotationAllowVolumeModeChangeValue,
+	}
+	m := newTestMover(t, true, constant.MoverRBD, snap, content)
+	ctx := t.Context()
+
+	if err := m.ensureAllowVolumeModeChangeAnnotation(ctx, m.logger, snap); err != nil {
+		t.Errorf("ensureAllowVolumeModeChangeAnnotation() error: %v", err)
 	}
 }

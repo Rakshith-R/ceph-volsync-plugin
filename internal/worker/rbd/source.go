@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -139,44 +141,59 @@ func (w *SourceWorker) Sync(
 	}
 	defer func() { _ = device.Close() }()
 
+	// Exchange certs over stunnel
 	syncClient := apiv1.NewSyncServiceClient(conn)
+	clientCert, err := common.GenerateEphemeralCert()
+	if err != nil {
+		return fmt.Errorf("generate client cert: %w", err)
+	}
+	resp, err := syncClient.ExchangeCerts(ctx, &apiv1.ExchangeCertsRequest{
+		ClientCertPem: clientCert.CertPEM,
+	})
+	if err != nil {
+		return fmt.Errorf("exchange certs: %w", err)
+	}
+	tlsConfig, err := common.NewClientTLSConfig(clientCert, resp.ServerCertPem)
+	if err != nil {
+		return fmt.Errorf("build TLS config: %w", err)
+	}
+	destAddr := os.Getenv(constant.EnvDestinationAddress)
+	directAddr := net.JoinHostPort(destAddr, strconv.Itoa(int(resp.DirectTlsPort)))
+	dataConn, err := common.ConnectDirectTLS(ctx, w.Logger, directAddr, tlsConfig)
+	if err != nil {
+		return fmt.Errorf("direct TLS connect: %w", err)
+	}
+	defer func() { _ = dataConn.Close() }()
+
+	dataSyncClient := apiv1.NewSyncServiceClient(dataConn)
 
 	newStream := func(
 		ctx context.Context,
 	) (grpc.BidiStreamingClient[
 		apiv1.WriteRequest, apiv1.WriteResponse,
 	], error) {
-		return syncClient.Write(ctx)
+		return dataSyncClient.Write(ctx)
 	}
-	newHashStream := func(
-		ctx context.Context,
-	) (grpc.BidiStreamingClient[
-		apiv1.HashRequest,
-		apiv1.HashResponse,
-	], error) {
-		return syncClient.CompareHashes(ctx)
-	}
-
-	cfg := pipeline.Config{}
+	cfg := pipeline.Config{ReadWorkers: 16, MaxWindow: 256}
 	cfg.SetDefaults()
 
 	win := pipeline.NewWindowSemaphore(cfg.MaxWindow)
 	adapter := &rbdIterAdapter{
-		iter:      iter,
-		totalSize: int64(volSize), //nolint:gosec // G115: volume size within range
+		iter:       &rbdDiffIterWrapper{iter: iter},
+		totalSize:  int64(volSize), //nolint:gosec // G115: volume size within range
+		chunkSize:  cfg.ChunkSize,
+		isFullDiff: sc.fromSnapID == 0,
 	}
 
 	p := pipeline.New(cfg)
 	reader := &fileDataReader{file: device}
-	if err := p.Run(
-		ctx, adapter, reader,
-		newStream, newHashStream, win,
-	); err != nil {
+	if err := p.Run(ctx, adapter, reader, newStream, win); err != nil {
 		return err
 	}
 
 	w.Logger.Info("Pipeline completed",
 		"blocksProcessed", adapter.reqID,
+		"stats", p.Stats.Summary(),
 	)
 
 	// Wait for all acks before committing
@@ -186,7 +203,7 @@ func (w *SourceWorker) Sync(
 			"No changed blocks in diff," +
 				" skipping commit",
 		)
-		return w.closeAndSignalDone(ctx, conn)
+		return w.closeAndSignalDone(ctx, dataConn)
 	}
 	lastReqID--
 	for !win.IsReleased(lastReqID) {
@@ -201,7 +218,7 @@ func (w *SourceWorker) Sync(
 	}
 
 	// Send commit for the device
-	commitStream, err := syncClient.Commit(ctx)
+	commitStream, err := dataSyncClient.Commit(ctx)
 	if err != nil {
 		return fmt.Errorf("open commit stream: %w", err)
 	}
@@ -218,7 +235,7 @@ func (w *SourceWorker) Sync(
 	}
 	_ = commitStream.CloseSend()
 
-	return w.closeAndSignalDone(ctx, conn)
+	return w.closeAndSignalDone(ctx, dataConn)
 }
 
 // resolveSourceConfig reads environment variables,
@@ -464,27 +481,151 @@ func (w *SourceWorker) resolveSnapshotDiff(
 	return nil
 }
 
-// rbdIterAdapter adapts cephrbd.RBDBlockDiffIterator to pipeline.BlockIterator.
-type rbdIterAdapter struct {
-	iter      *cephrbd.RBDBlockDiffIterator
-	reqID     uint64
-	totalSize int64
+// diffBlock represents a single changed extent from the RBD diff.
+type diffBlock struct {
+	Offset int64
+	Len    int64
 }
 
-func (a *rbdIterAdapter) Next() (*pipeline.ChangeBlock, bool) {
-	cb, ok := a.iter.Next()
+// diffIterator abstracts the RBD block diff iterator for testability.
+type diffIterator interface {
+	Next() (*diffBlock, bool)
+	Close() error
+}
+
+// rbdDiffIterWrapper wraps cephrbd.RBDBlockDiffIterator to implement diffIterator.
+type rbdDiffIterWrapper struct {
+	iter *cephrbd.RBDBlockDiffIterator
+}
+
+func (w *rbdDiffIterWrapper) Next() (*diffBlock, bool) {
+	cb, ok := w.iter.Next()
 	if !ok {
 		return nil, false
 	}
+	return &diffBlock{Offset: cb.Offset, Len: cb.Len}, true
+}
+
+func (w *rbdDiffIterWrapper) Close() error {
+	return w.iter.Close()
+}
+
+// rbdIterAdapter adapts diffIterator to pipeline.BlockIterator.
+// Large extents from the RBD diff are split into chunkSize-sized pieces
+// to stay within the gRPC message size limit. For full diffs, zero blocks
+// are emitted for gaps between allocated extents.
+type rbdIterAdapter struct {
+	iter       diffIterator
+	reqID      uint64
+	totalSize  int64
+	chunkSize  int64
+	isFullDiff bool
+	currentPos int64
+	// remainder tracks a partially consumed extent.
+	remOffset int64
+	remLen    int64
+	remIsZero bool
+	hasRem    bool
+	// pending holds the next data extent when a gap must be emitted first.
+	pendingOffset int64
+	pendingLen    int64
+	hasPending    bool
+	iterDone      bool
+}
+
+func (a *rbdIterAdapter) Next() (*pipeline.ChangeBlock, bool) {
+	if a.hasRem {
+		return a.emitFromRemainder(), true
+	}
+	if !a.loadNext() {
+		return nil, false
+	}
+	return a.emitFromRemainder(), true
+}
+
+func (a *rbdIterAdapter) loadNext() bool {
+	if a.hasPending {
+		a.remOffset = a.pendingOffset
+		a.remLen = a.pendingLen
+		a.remIsZero = false
+		a.hasRem = true
+		a.hasPending = false
+		return true
+	}
+
+	for {
+		if a.iterDone {
+			return false
+		}
+
+		cb, ok := a.iter.Next()
+		if !ok {
+			a.iterDone = true
+			if a.isFullDiff && a.currentPos < a.totalSize {
+				a.remOffset = a.currentPos
+				a.remLen = a.totalSize - a.currentPos
+				a.remIsZero = true
+				a.hasRem = true
+				return true
+			}
+			return false
+		}
+
+		if a.isFullDiff && cb.Offset > a.currentPos {
+			a.pendingOffset = cb.Offset
+			a.pendingLen = cb.Len
+			a.hasPending = true
+			a.remOffset = a.currentPos
+			a.remLen = cb.Offset - a.currentPos
+			a.remIsZero = true
+			a.hasRem = true
+			return true
+		}
+
+		// Clamp offset to currentPos to prevent backward
+		// movement from overlapping extents.
+		offset := cb.Offset
+		length := cb.Len
+		if offset < a.currentPos {
+			overlap := a.currentPos - offset
+			if overlap >= length {
+				continue
+			}
+			offset += overlap
+			length -= overlap
+		}
+
+		a.remOffset = offset
+		a.remLen = length
+		a.remIsZero = false
+		a.hasRem = true
+		return true
+	}
+}
+
+func (a *rbdIterAdapter) emitFromRemainder() *pipeline.ChangeBlock {
+	emitLen := a.remLen
+	if a.chunkSize > 0 && emitLen > a.chunkSize {
+		emitLen = a.chunkSize
+	}
+
+	offset := a.remOffset
 	block := &pipeline.ChangeBlock{
 		FilePath:  constant.DevicePath,
-		Offset:    cb.Offset,
-		Len:       cb.Len,
+		Offset:    offset,
+		Len:       emitLen,
 		ReqID:     a.reqID,
 		TotalSize: a.totalSize,
+		IsZero:    a.remIsZero,
 	}
 	a.reqID++
-	return block, true
+	a.remOffset += emitLen
+	a.remLen -= emitLen
+	if a.remLen <= 0 {
+		a.hasRem = false
+	}
+	a.currentPos = offset + emitLen
+	return block
 }
 
 func (a *rbdIterAdapter) Close() error {

@@ -21,45 +21,10 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
-	"github.com/pierrec/lz4/v4"
 
 	apiv1 "github.com/RamenDR/ceph-volsync-plugin/internal/proto/api/v1"
+	"golang.org/x/sys/unix"
 )
-
-func TestWriteBlocks_LZ4Compressed(t *testing.T) {
-	f, err := os.CreateTemp("", "desttest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Remove(f.Name()) }()
-	_ = f.Truncate(1024)
-
-	original := []byte("hello world data")
-	maxDst := lz4.CompressBlockBound(len(original))
-	compressed := make([]byte, maxDst)
-	n, err := lz4.CompressBlock(original, compressed, nil)
-	if err != nil || n == 0 {
-		t.Fatal("compression failed")
-	}
-	compressed = compressed[:n]
-
-	srv := &RBDDataServer{logger: logr.Discard(), devicePath: f.Name()}
-	err = srv.writeBlocks(f, &apiv1.WriteRequest{
-		Blocks: []*apiv1.ChangedBlock{{
-			Offset: 0, Length: uint64(len(original)),
-			Data: compressed, Compression: apiv1.CompressionAlgo_COMPRESSION_LZ4,
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	buf := make([]byte, len(original))
-	_, _ = f.ReadAt(buf, 0)
-	if string(buf) != string(original) {
-		t.Fatalf("data mismatch: %q", buf)
-	}
-}
 
 func TestWriteBlocks_Uncompressed(t *testing.T) {
 	f, err := os.CreateTemp("", "desttest")
@@ -84,5 +49,48 @@ func TestWriteBlocks_Uncompressed(t *testing.T) {
 	_, _ = f.ReadAt(buf, 0)
 	if string(buf) != string(data) {
 		t.Fatalf("data mismatch: %q", buf)
+	}
+}
+
+func TestWriteBlocks_ZeroBlockFallocate(t *testing.T) {
+	f, err := os.CreateTemp("", "desttest-zero")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(f.Name()) }()
+	_ = f.Truncate(1024)
+
+	// Check if fallocate PUNCH_HOLE is supported on this filesystem
+	if err := unix.Fallocate(int(f.Fd()), unix.FALLOC_FL_PUNCH_HOLE|unix.FALLOC_FL_KEEP_SIZE, 0, 16); err != nil {
+		t.Skipf("FALLOC_FL_PUNCH_HOLE not supported: %v", err)
+	}
+
+	// Write non-zero data first
+	nonZero := make([]byte, 512)
+	for i := range nonZero {
+		nonZero[i] = 0xFF
+	}
+	if _, err := f.WriteAt(nonZero, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &RBDDataServer{logger: logr.Discard(), devicePath: f.Name()}
+	err = srv.writeBlocks(f, &apiv1.WriteRequest{
+		Blocks: []*apiv1.ChangedBlock{{
+			Offset: 0, Length: 512, IsZero: true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	buf := make([]byte, 512)
+	if _, err := f.ReadAt(buf, 0); err != nil {
+		t.Fatal(err)
+	}
+	for i, b := range buf {
+		if b != 0 {
+			t.Fatalf("byte %d not zero after fallocate: %x", i, b)
+		}
 	}
 }

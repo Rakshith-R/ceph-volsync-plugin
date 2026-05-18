@@ -26,6 +26,15 @@ import (
 	cephcsi "github.com/ceph/ceph-csi/api/deploy/kubernetes"
 )
 
+const (
+	testClusterID1    = "cluster-1"
+	testClusterID2    = "cluster-2"
+	testClusterID5    = "cluster-5"
+	testCSINamespace  = "ceph-csi"
+	testCephFSSecret1 = "cephfs-secret-1"
+	testRBDSecret1    = "rbd-secret-1"
+)
+
 var (
 	csiClusters = "csi-clusters.json"
 	clusterID1  = "test1"
@@ -139,6 +148,94 @@ func TestCSIConfig(t *testing.T) {
 	}
 }
 
+func TestReadClusterInfoFromData(t *testing.T) {
+	t.Parallel()
+	data := []byte(`[{"clusterID":"c1","monitors":["mon1","mon2"]},{"clusterID":"c2","monitors":["mon3"]}]`)
+
+	info, err := ReadClusterInfoFromData(data, "c1")
+	if err != nil {
+		t.Fatalf("ReadClusterInfoFromData() error: %v", err)
+	}
+	if info.ClusterID != "c1" {
+		t.Errorf("ClusterID = %q, want %q", info.ClusterID, "c1")
+	}
+	if len(info.Monitors) != 2 {
+		t.Errorf("Monitors count = %d, want 2", len(info.Monitors))
+	}
+
+	_, err = ReadClusterInfoFromData(data, "missing")
+	if err == nil {
+		t.Error("expected error for missing clusterID")
+	}
+
+	_, err = ReadClusterInfoFromData([]byte("invalid"), "c1")
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+func TestGetRBDControllerPublishSecretRefFromData(t *testing.T) {
+	t.Parallel()
+	csiConfig := []cephcsi.ClusterInfo{
+		{
+			ClusterID: testClusterID1,
+			RBD: cephcsi.RBD{
+				ControllerPublishSecretRef: corev1.SecretReference{
+					Name: testRBDSecret1, Namespace: testCSINamespace,
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(csiConfig)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+
+	name, ns, err := GetRBDControllerPublishSecretRefFromData(data, testClusterID1)
+	if err != nil {
+		t.Fatalf("GetRBDControllerPublishSecretRefFromData() error: %v", err)
+	}
+	if name != testRBDSecret1 || ns != testCSINamespace {
+		t.Errorf("got (%q, %q), want (%q, %q)", name, ns, testRBDSecret1, testCSINamespace)
+	}
+
+	_, _, err = GetRBDControllerPublishSecretRefFromData(data, "missing")
+	if err == nil {
+		t.Error("expected error for missing clusterID")
+	}
+}
+
+func TestGetCephFSControllerPublishSecretRefFromData(t *testing.T) {
+	t.Parallel()
+	csiConfig := []cephcsi.ClusterInfo{
+		{
+			ClusterID: testClusterID1,
+			CephFS: cephcsi.CephFS{
+				ControllerPublishSecretRef: corev1.SecretReference{
+					Name: testCephFSSecret1, Namespace: testCSINamespace,
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(csiConfig)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+
+	name, ns, err := GetCephFSControllerPublishSecretRefFromData(data, testClusterID1)
+	if err != nil {
+		t.Fatalf("GetCephFSControllerPublishSecretRefFromData() error: %v", err)
+	}
+	if name != testCephFSSecret1 || ns != testCSINamespace {
+		t.Errorf("got (%q, %q), want (%q, %q)", name, ns, testCephFSSecret1, testCSINamespace)
+	}
+
+	_, _, err = GetCephFSControllerPublishSecretRefFromData(data, "missing")
+	if err == nil {
+		t.Error("expected error for missing clusterID")
+	}
+}
+
 func TestGetRBDControllerPublishSecretRef(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -148,43 +245,43 @@ func TestGetRBDControllerPublishSecretRef(t *testing.T) {
 	}{
 		{
 			name:      "get secret in cluster-1",
-			clusterID: "cluster-1",
+			clusterID: testClusterID1,
 			want: corev1.SecretReference{
-				Name:      "rbd-secret-1",
-				Namespace: "ceph-csi",
+				Name:      testRBDSecret1,
+				Namespace: testCSINamespace,
 			},
 		},
 		{
 			name:      "get secret in cluster-2",
-			clusterID: "cluster-2",
+			clusterID: testClusterID2,
 			want: corev1.SecretReference{
 				Name:      "rbd-secret-2",
-				Namespace: "ceph-csi",
+				Namespace: testCSINamespace,
 			},
 		},
 		{
 			name:      "get secret where not provided in cluster-5",
-			clusterID: "cluster-5",
+			clusterID: testClusterID5,
 			want:      corev1.SecretReference{Name: "", Namespace: ""},
 		},
 	}
 
 	csiConfig := []cephcsi.ClusterInfo{
 		{
-			ClusterID: "cluster-1",
+			ClusterID: testClusterID1,
 			RBD: cephcsi.RBD{
 				ControllerPublishSecretRef: corev1.SecretReference{
-					Name:      "rbd-secret-1",
-					Namespace: "ceph-csi",
+					Name:      testRBDSecret1,
+					Namespace: testCSINamespace,
 				},
 			},
 		},
 		{
-			ClusterID: "cluster-2",
+			ClusterID: testClusterID2,
 			RBD: cephcsi.RBD{
 				ControllerPublishSecretRef: corev1.SecretReference{
 					Name:      "rbd-secret-2",
-					Namespace: "ceph-csi",
+					Namespace: testCSINamespace,
 				},
 			},
 		},
@@ -193,7 +290,7 @@ func TestGetRBDControllerPublishSecretRef(t *testing.T) {
 			RBD: cephcsi.RBD{
 				ControllerPublishSecretRef: corev1.SecretReference{
 					Name:      "",
-					Namespace: "ceph-csi",
+					Namespace: testCSINamespace,
 				},
 			},
 		},
@@ -207,7 +304,7 @@ func TestGetRBDControllerPublishSecretRef(t *testing.T) {
 			},
 		},
 		{
-			ClusterID: "cluster-5",
+			ClusterID: testClusterID5,
 			RBD:       cephcsi.RBD{},
 		},
 	}
@@ -246,43 +343,43 @@ func TestGetCephFSControllerPublishSecretRef(t *testing.T) {
 	}{
 		{
 			name:      "get secret in cluster-1",
-			clusterID: "cluster-1",
+			clusterID: testClusterID1,
 			want: corev1.SecretReference{
-				Name:      "cephfs-secret-1",
-				Namespace: "ceph-csi",
+				Name:      testCephFSSecret1,
+				Namespace: testCSINamespace,
 			},
 		},
 		{
 			name:      "get secret in cluster-2",
-			clusterID: "cluster-2",
+			clusterID: testClusterID2,
 			want: corev1.SecretReference{
 				Name:      "cephfs-secret-2",
-				Namespace: "ceph-csi",
+				Namespace: testCSINamespace,
 			},
 		},
 		{
 			name:      "get secret where not provided in cluster-5",
-			clusterID: "cluster-5",
+			clusterID: testClusterID5,
 			want:      corev1.SecretReference{Name: "", Namespace: ""},
 		},
 	}
 
 	csiConfig := []cephcsi.ClusterInfo{
 		{
-			ClusterID: "cluster-1",
+			ClusterID: testClusterID1,
 			CephFS: cephcsi.CephFS{
 				ControllerPublishSecretRef: corev1.SecretReference{
-					Name:      "cephfs-secret-1",
-					Namespace: "ceph-csi",
+					Name:      testCephFSSecret1,
+					Namespace: testCSINamespace,
 				},
 			},
 		},
 		{
-			ClusterID: "cluster-2",
+			ClusterID: testClusterID2,
 			CephFS: cephcsi.CephFS{
 				ControllerPublishSecretRef: corev1.SecretReference{
 					Name:      "cephfs-secret-2",
-					Namespace: "ceph-csi",
+					Namespace: testCSINamespace,
 				},
 			},
 		},
@@ -291,7 +388,7 @@ func TestGetCephFSControllerPublishSecretRef(t *testing.T) {
 			CephFS: cephcsi.CephFS{
 				ControllerPublishSecretRef: corev1.SecretReference{
 					Name:      "",
-					Namespace: "ceph-csi",
+					Namespace: testCSINamespace,
 				},
 			},
 		},
@@ -305,7 +402,7 @@ func TestGetCephFSControllerPublishSecretRef(t *testing.T) {
 			},
 		},
 		{
-			ClusterID: "cluster-5",
+			ClusterID: testClusterID5,
 			CephFS:    cephcsi.CephFS{},
 		},
 	}

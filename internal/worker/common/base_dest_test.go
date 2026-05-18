@@ -47,7 +47,7 @@ func TestBaseDestWorker_ListensOnPort(
 
 	errCh := make(chan error, 1)
 	go func() {
-		syncServer := NewSyncServer(&mockWriteHandler{}, nil, nil, nil)
+		syncServer := NewSyncServer(&mockWriteHandler{}, nil, nil)
 		errCh <- w.Run(ctx, syncServer)
 	}()
 
