@@ -1,0 +1,22 @@
+resources:
+- ../bases
+- ../../default
+- ../../samples
+- ../../scorecard
+
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/name
+      value: odr-volsync-plugin-operator.v0.0.0
+    - op: replace
+      path: /spec/displayName
+      value: OpenShift DR VolSync Plugin Operator
+    - op: replace
+      path: /spec/description
+      value: OpenShift DR VolSync Plugin Operator provides Ceph-native volume replication
+        for disaster recovery. It integrates with VolSync to enable efficient data protection
+        for CephFS and RBD volumes across OpenShift clusters.
+  target:
+    kind: ClusterServiceVersion
+    name: ceph-volsync-plugin-operator.v0.0.0

@@ -77,6 +77,15 @@ CEPH_CSI_CONFIG_NAME ?= ceph-csi-config
 # CEPH_CSI_CONFIG_NAMESPACE is the namespace of the ceph-csi ConfigMap.
 CEPH_CSI_CONFIG_NAMESPACE ?= rook-ceph
 
+# BUNDLE_OVERLAY selects a kustomize overlay subdirectory under config/manifests/.
+# When empty (default), uses config/manifests/ directly (upstream).
+# Set to "odr" for downstream Red Hat builds: make bundle BUNDLE_OVERLAY=odr BUNDLE_PACKAGE=odr-volsync-plugin-operator
+BUNDLE_OVERLAY ?=
+
+# BUNDLE_PACKAGE overrides the OLM package name (and CSV name prefix) in the generated bundle.
+# When empty, operator-sdk uses the projectName from the PROJECT file.
+BUNDLE_PACKAGE ?=
+
 # Mover container --build-arg flags
 MOVER_BUILD_ARGS = \
 	--build-arg CEPH_BASE_IMAGE=$(CEPH_BASE_IMAGE) \
@@ -416,7 +425,7 @@ bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metada
 	cd config/manifests/bases && $(KUSTOMIZE) edit add annotation --force 'olm.skipRange':"$(SKIP_RANGE)"
 	cd config/manifests/bases && $(KUSTOMIZE) edit add patch --name ceph-volsync-plugin-operator.v0.0.1 --kind ClusterServiceVersion\
 		--patch '[{"op": "replace", "path": "/spec/replaces", "value": "$(REPLACES)"}]'
-	$(KUSTOMIZE) build config/manifests | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g; s|CEPH_CSI_CONFIG_NAME_PLACEHOLDER|${CEPH_CSI_CONFIG_NAME}|g; s|CEPH_CSI_CONFIG_NAMESPACE_PLACEHOLDER|${CEPH_CSI_CONFIG_NAMESPACE}|g' | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
+	$(KUSTOMIZE) build config/manifests$(if $(BUNDLE_OVERLAY),/$(BUNDLE_OVERLAY)) | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g; s|CEPH_CSI_CONFIG_NAME_PLACEHOLDER|${CEPH_CSI_CONFIG_NAME}|g; s|CEPH_CSI_CONFIG_NAMESPACE_PLACEHOLDER|${CEPH_CSI_CONFIG_NAMESPACE}|g' | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS) $(if $(BUNDLE_PACKAGE),--package=$(BUNDLE_PACKAGE))
 	$(OPERATOR_SDK) bundle validate ./bundle
 
 .PHONY: bundle-build
