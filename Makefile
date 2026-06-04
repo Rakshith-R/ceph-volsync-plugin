@@ -425,6 +425,7 @@ bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metada
 	cd config/manifests/bases && $(KUSTOMIZE) edit add annotation --force 'olm.skipRange':"$(SKIP_RANGE)"
 	cd config/manifests/bases && $(KUSTOMIZE) edit add patch --name ceph-volsync-plugin-operator.v0.0.1 --kind ClusterServiceVersion\
 		--patch '[{"op": "replace", "path": "/spec/replaces", "value": "$(REPLACES)"}]'
+	rm -f bundle/manifests/*clusterserviceversion.yaml
 	$(KUSTOMIZE) build config/manifests$(if $(BUNDLE_OVERLAY),/$(BUNDLE_OVERLAY)) | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g; s|CEPH_CSI_CONFIG_NAME_PLACEHOLDER|${CEPH_CSI_CONFIG_NAME}|g; s|CEPH_CSI_CONFIG_NAMESPACE_PLACEHOLDER|${CEPH_CSI_CONFIG_NAMESPACE}|g' | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS) $(if $(BUNDLE_PACKAGE),--package=$(BUNDLE_PACKAGE))
 	$(OPERATOR_SDK) bundle validate ./bundle
 
