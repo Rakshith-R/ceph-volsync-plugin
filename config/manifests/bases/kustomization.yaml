@@ -4,8 +4,3 @@ resources:
 - ceph-volsync-plugin-operator.clusterserviceversion.yaml
 commonAnnotations:
   olm.skipRange: ""
-patches:
-- patch: '[{"op": "replace", "path": "/spec/replaces", "value": ""}]'
-  target:
-    kind: ClusterServiceVersion
-    name: ceph-volsync-plugin-operator.v0.0.1

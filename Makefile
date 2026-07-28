@@ -18,6 +18,8 @@ VOLSYNC_VERSION ?= v0.14.0
 # Creating the New CatalogSource requires publishing CSVs that replace one operator,
 # but can skip several. This can be accomplished using the skipRange annotation:
 SKIP_RANGE ?=
+# REPLACES defines the CSV name this version replaces for OLM upgrade path.
+REPLACES ?=
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -423,8 +425,10 @@ bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metada
 	$(OPERATOR_SDK) generate kustomize manifests -q
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
 	cd config/manifests/bases && $(KUSTOMIZE) edit add annotation --force 'olm.skipRange':"$(SKIP_RANGE)"
-	cd config/manifests/bases && $(KUSTOMIZE) edit add patch --name ceph-volsync-plugin-operator.v0.0.1 --kind ClusterServiceVersion\
-		--patch '[{"op": "replace", "path": "/spec/replaces", "value": "$(REPLACES)"}]'
+ifneq ($(REPLACES),)
+	cd config/manifests/bases && $(KUSTOMIZE) edit add patch --name ceph-volsync-plugin-operator.v0.0.0 --kind ClusterServiceVersion\
+		--patch '[{"op": "add", "path": "/spec/replaces", "value": "$(REPLACES)"}]'
+endif
 	rm -f bundle/manifests/*clusterserviceversion.yaml
 	$(KUSTOMIZE) build config/manifests$(if $(BUNDLE_OVERLAY),/$(BUNDLE_OVERLAY)) | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g; s|CEPH_CSI_CONFIG_NAME_PLACEHOLDER|${CEPH_CSI_CONFIG_NAME}|g; s|CEPH_CSI_CONFIG_NAMESPACE_PLACEHOLDER|${CEPH_CSI_CONFIG_NAMESPACE}|g' | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS) $(if $(BUNDLE_PACKAGE),--package=$(BUNDLE_PACKAGE))
 	$(OPERATOR_SDK) bundle validate ./bundle
