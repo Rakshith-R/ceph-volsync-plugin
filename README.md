@@ -84,7 +84,9 @@ The install manifest includes CRDs, RBAC, and the operator deployment with versi
 container image references baked in. By default it deploys into the `ceph-volsync`
 namespace and reads the Ceph CSI config from `ceph-csi-config` ConfigMap in `rook-ceph`.
 
-To customize the namespace or CSI config location, download and patch the manifest:
+#### Customizing the release manifest
+
+To change the namespace or CSI config location, download and patch the manifest:
 
 ```bash
 export RELEASE=v0.1.0
@@ -99,30 +101,30 @@ curl -sL "https://github.com/RamenDR/ceph-volsync-plugin/releases/download/${REL
   | kubectl apply -f -
 ```
 
-| Default | Sed target | Description |
-|---------|-----------|-------------|
-| `ceph-volsync` | `namespace: ceph-volsync` | Operator deployment namespace |
-| `ceph-csi-config` | `value: ceph-csi-config` | Ceph CSI ConfigMap name |
-| `rook-ceph` | `value: rook-ceph` | Ceph CSI ConfigMap namespace |
+| Variable | Default | Sed target | Description |
+|----------|---------|-----------|-------------|
+| `NAMESPACE` | `ceph-volsync` | `namespace: ceph-volsync` | Operator deployment namespace |
+| `CEPH_CSI_CONFIG_NAME` | `ceph-csi-config` | `value: ceph-csi-config` | Ceph CSI ConfigMap name |
+| `CEPH_CSI_CONFIG_NAMESPACE` | `rook-ceph` | `value: rook-ceph` | Ceph CSI ConfigMap namespace |
 
 ### Install from source
 
-For full control over all configuration, build and deploy from source:
+For full control over all configuration, build and deploy from source.
+
+To change the deployment namespace, edit `namespace:` in `config/default/kustomization.yaml`.
+To change the CSI ConfigMap name or namespace, pass them as Make variables:
 
 ```bash
 # Install CRDs (VolSync CRDs must already be present)
 make install
 
-# Deploy with custom namespace and CSI config
+# Deploy with custom CSI config
 make deploy \
   IMG=quay.io/ramendr/ceph-volsync-plugin-operator:latest \
   MOVER_IMG=quay.io/ramendr/ceph-volsync-plugin-mover:latest \
   CEPH_CSI_CONFIG_NAME=my-csi-configmap \
   CEPH_CSI_CONFIG_NAMESPACE=my-ceph-namespace
 ```
-
-To change the deployment namespace, edit `config/default/kustomization.yaml` before running
-`make deploy`.
 
 ### Configure replication
 
