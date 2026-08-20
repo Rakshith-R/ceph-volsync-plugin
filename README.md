@@ -70,7 +70,20 @@ It registers as an external mover with VolSync and handles `ReplicationSource` a
 
 ## Quick Start
 
-### Install the operator
+### Install from a release (recommended)
+
+```bash
+# Set the desired release version
+RELEASE=v0.1.0
+
+# Apply the consolidated install manifest
+kubectl apply -f "https://github.com/RamenDR/ceph-volsync-plugin/releases/download/${RELEASE}/install.yaml"
+```
+
+The install manifest includes CRDs, RBAC, and the operator deployment with versioned
+container image references baked in.
+
+### Install from source
 
 ```bash
 # Install CRDs (VolSync CRDs must already be present)
