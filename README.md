@@ -81,18 +81,48 @@ kubectl apply -f "https://github.com/RamenDR/ceph-volsync-plugin/releases/downlo
 ```
 
 The install manifest includes CRDs, RBAC, and the operator deployment with versioned
-container image references baked in.
+container image references baked in. By default it deploys into the `ceph-volsync`
+namespace and reads the Ceph CSI config from `ceph-csi-config` ConfigMap in `rook-ceph`.
+
+To customize the namespace or CSI config location, download and patch the manifest:
+
+```bash
+export RELEASE=v0.1.0
+export NAMESPACE=my-namespace
+export CEPH_CSI_CONFIG_NAME=my-csi-configmap
+export CEPH_CSI_CONFIG_NAMESPACE=my-ceph-namespace
+
+curl -sL "https://github.com/RamenDR/ceph-volsync-plugin/releases/download/${RELEASE}/install.yaml" \
+  | sed "s/namespace: ceph-volsync/namespace: ${NAMESPACE}/g" \
+  | sed "s/value: ceph-csi-config/value: ${CEPH_CSI_CONFIG_NAME}/g" \
+  | sed "s/value: rook-ceph/value: ${CEPH_CSI_CONFIG_NAMESPACE}/g" \
+  | kubectl apply -f -
+```
+
+| Default | Sed target | Description |
+|---------|-----------|-------------|
+| `ceph-volsync` | `namespace: ceph-volsync` | Operator deployment namespace |
+| `ceph-csi-config` | `value: ceph-csi-config` | Ceph CSI ConfigMap name |
+| `rook-ceph` | `value: rook-ceph` | Ceph CSI ConfigMap namespace |
 
 ### Install from source
+
+For full control over all configuration, build and deploy from source:
 
 ```bash
 # Install CRDs (VolSync CRDs must already be present)
 make install
 
-# Deploy the operator using the published image
-make deploy IMG=quay.io/ramendr/ceph-volsync-plugin-operator:latest \
-  MOVER_IMG=quay.io/ramendr/ceph-volsync-plugin-mover:latest
+# Deploy with custom namespace and CSI config
+make deploy \
+  IMG=quay.io/ramendr/ceph-volsync-plugin-operator:latest \
+  MOVER_IMG=quay.io/ramendr/ceph-volsync-plugin-mover:latest \
+  CEPH_CSI_CONFIG_NAME=my-csi-configmap \
+  CEPH_CSI_CONFIG_NAMESPACE=my-ceph-namespace
 ```
+
+To change the deployment namespace, edit `config/default/kustomization.yaml` before running
+`make deploy`.
 
 ### Configure replication
 
