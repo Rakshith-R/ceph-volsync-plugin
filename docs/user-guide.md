@@ -50,8 +50,12 @@ make install
 
 ### 2. Deploy the Operator
 
+Set `NAMESPACE` to match `namespace:` in `config/default/kustomization.yaml`
+(the default is `ceph-volsync`).
+
 ```bash
-kubectl create namespace ceph-volsync --dry-run=client -o yaml | kubectl apply -f -
+NAMESPACE=ceph-volsync
+kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 make deploy IMG=quay.io/ramendr/ceph-volsync-plugin-operator:latest \
   MOVER_IMG=quay.io/ramendr/ceph-volsync-plugin-mover:latest
@@ -91,9 +95,12 @@ edit `config/default/kustomization.yaml`:
 namespace: my-custom-namespace
 ```
 
-Then deploy:
+Set `NAMESPACE` to the same value, create the namespace, and deploy:
 
 ```bash
+NAMESPACE=my-custom-namespace
+kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
 make deploy IMG=quay.io/ramendr/ceph-volsync-plugin-operator:latest \
   MOVER_IMG=quay.io/ramendr/ceph-volsync-plugin-mover:latest
 ```
@@ -106,7 +113,7 @@ with the `MOVER_IMAGE` environment variable on the operator Deployment.
 ### 3. Verify
 
 ```bash
-kubectl get pods -n ceph-volsync
+kubectl get pods -n "${NAMESPACE}"
 ```
 
 The controller-manager pod should be in `Running` state.

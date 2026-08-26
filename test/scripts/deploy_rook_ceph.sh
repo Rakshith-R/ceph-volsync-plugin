@@ -8,7 +8,7 @@ SCRIPT_DIR="$(dirname "${0}")"
 # shellcheck disable=SC1091
 [ ! -e "${SCRIPT_DIR}"/utils.sh ] || source "${SCRIPT_DIR}"/utils.sh
 
-ROOK_VERSION="${ROOK_VERSION:-v1.19.2}"
+ROOK_VERSION="${ROOK_VERSION:-v1.19.9}"
 ROOK_DIR="${ROOK_DIR:-/tmp/rook}"
 ROOK_EXAMPLES="${ROOK_DIR}/deploy/examples"
 ROOK_HELPER="${ROOK_DIR}/tests/scripts/github-action-helper.sh"

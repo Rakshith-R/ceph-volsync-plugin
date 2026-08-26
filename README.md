@@ -113,6 +113,7 @@ curl -sL "https://github.com/RamenDR/ceph-volsync-plugin/releases/download/${REL
 For full control over all configuration, build and deploy from source.
 
 To change the deployment namespace, edit `namespace:` in `config/default/kustomization.yaml`.
+Set `NAMESPACE` below to the same value (the default is `ceph-volsync`).
 To change the CSI ConfigMap name or namespace, pass them as Make variables:
 
 ```bash
@@ -120,7 +121,8 @@ To change the CSI ConfigMap name or namespace, pass them as Make variables:
 make install
 
 # Create the namespace configured in config/default/kustomization.yaml
-kubectl create namespace ceph-volsync --dry-run=client -o yaml | kubectl apply -f -
+NAMESPACE=ceph-volsync
+kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 # Deploy with custom CSI config
 make deploy \
