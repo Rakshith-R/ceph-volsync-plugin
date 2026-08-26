@@ -298,10 +298,10 @@ docker-buildx-mover: ## Build and push docker image for the mover for cross-plat
 	rm build/Containerfile.mover.cross
 
 .PHONY: build-installer
-build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
+build-installer: manifests generate kustomize ## Generate a consolidated YAML with namespace, RBAC, and deployment.
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g; s|CEPH_CSI_CONFIG_NAME_PLACEHOLDER|${CEPH_CSI_CONFIG_NAME}|g; s|CEPH_CSI_CONFIG_NAMESPACE_PLACEHOLDER|${CEPH_CSI_CONFIG_NAMESPACE}|g' > dist/install.yaml
+	$(KUSTOMIZE) build config/installer | sed 's|MOVER_IMAGE_PLACEHOLDER|${MOVER_IMG}|g; s|CEPH_CSI_CONFIG_NAME_PLACEHOLDER|${CEPH_CSI_CONFIG_NAME}|g; s|CEPH_CSI_CONFIG_NAMESPACE_PLACEHOLDER|${CEPH_CSI_CONFIG_NAMESPACE}|g' > dist/install.yaml
 
 ##@ Deployment
 

@@ -51,6 +51,8 @@ make install
 ### 2. Deploy the Operator
 
 ```bash
+kubectl create namespace ceph-volsync --dry-run=client -o yaml | kubectl apply -f -
+
 make deploy IMG=quay.io/ramendr/ceph-volsync-plugin-operator:latest \
   MOVER_IMG=quay.io/ramendr/ceph-volsync-plugin-mover:latest
 ```
@@ -317,7 +319,7 @@ Manager logs: use `--zap-log-level=debug` on the manager Deployment.
 ## Uninstalling
 
 ```bash
-make undeploy    # Remove operator Deployment, RBAC, and namespace
+make undeploy    # Remove operator Deployment and RBAC
 make uninstall   # Remove CRDs
 ```
 

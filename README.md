@@ -80,8 +80,8 @@ RELEASE=v0.1.0
 kubectl apply -f "https://github.com/RamenDR/ceph-volsync-plugin/releases/download/${RELEASE}/install.yaml"
 ```
 
-The install manifest includes CRDs, RBAC, and the operator deployment with versioned
-container image references baked in. By default it deploys into the `ceph-volsync`
+The install manifest includes the namespace, RBAC, and the operator deployment with
+versioned container image references baked in. By default it deploys into the `ceph-volsync`
 namespace and reads the Ceph CSI config from `ceph-csi-config` ConfigMap in `rook-ceph`.
 
 #### Customizing the release manifest
@@ -95,6 +95,7 @@ export CEPH_CSI_CONFIG_NAME=my-csi-configmap
 export CEPH_CSI_CONFIG_NAMESPACE=my-ceph-namespace
 
 curl -sL "https://github.com/RamenDR/ceph-volsync-plugin/releases/download/${RELEASE}/install.yaml" \
+  | sed "s/name: ceph-volsync$/name: ${NAMESPACE}/" \
   | sed "s/namespace: ceph-volsync/namespace: ${NAMESPACE}/g" \
   | sed "s/value: ceph-csi-config/value: ${CEPH_CSI_CONFIG_NAME}/g" \
   | sed "s/value: rook-ceph/value: ${CEPH_CSI_CONFIG_NAMESPACE}/g" \
@@ -117,6 +118,9 @@ To change the CSI ConfigMap name or namespace, pass them as Make variables:
 ```bash
 # Install CRDs (VolSync CRDs must already be present)
 make install
+
+# Create the namespace configured in config/default/kustomization.yaml
+kubectl create namespace ceph-volsync --dry-run=client -o yaml | kubectl apply -f -
 
 # Deploy with custom CSI config
 make deploy \
