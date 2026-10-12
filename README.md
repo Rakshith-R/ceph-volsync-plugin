@@ -3,7 +3,7 @@
 A [VolSync](https://volsync.readthedocs.io/) external mover plugin for Ceph storage, enabling efficient snapshot-based volume replication for CephFS and RBD volumes.
 
 [![Build](https://github.com/RamenDR/ceph-volsync-plugin/actions/workflows/build-image.yaml/badge.svg)](https://github.com/RamenDR/ceph-volsync-plugin/actions/workflows/build-image.yaml)
-[![Go version](https://img.shields.io/badge/go-1.25-blue)](go.mod)
+[![Go version](https://img.shields.io/badge/go-1.26-blue)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 ## Overview
@@ -232,7 +232,7 @@ make docker-buildx IMG=<registry>/ceph-volsync-plugin-operator:<tag>
 make docker-buildx-mover MOVER_IMG=<registry>/ceph-volsync-plugin-mover:<tag>
 ```
 
-**Pinned versions:** Go 1.25.7 · Ceph tentacle (`quay.io/ceph/ceph:v20`) · rsync 3.2.5 · stunnel 5.71
+**Pinned versions:** Go 1.26.9 · Ceph tentacle (`quay.io/ceph/ceph:v20`) · rsync 3.2.5 · stunnel 5.71
 
 ## Testing
 
