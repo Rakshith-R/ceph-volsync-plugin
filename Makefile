@@ -1,6 +1,6 @@
 # Include build configuration (versions, base images).
 # Variables can be overridden on the CLI:
-#   make docker-build-mover GOLANG_VERSION=1.26.6
+#   make docker-build-mover GOLANG_VERSION=1.26.9
 -include build/build.env
 
 # VERSION defines the project version for the bundle.
