@@ -188,6 +188,12 @@ func (m *Mover) Synchronize(ctx context.Context) (mover.Result, error) {
 		return mover.InProgress(), err
 	}
 
+	// Restrict ingress to the destination mover. Source movers are not given
+	// a NetworkPolicy because they run with hostNetwork, where it is not enforced.
+	if err := m.ensureNetworkPolicy(ctx); err != nil {
+		return mover.InProgress(), err
+	}
+
 	// Ensure Secrets/keys
 	rsyncPSKSecretName, err := m.ensureSecrets(ctx)
 	if rsyncPSKSecretName == nil || err != nil {
