@@ -129,7 +129,8 @@ func (r *RsyncDaemon) Stop() {
 		// Non-blocking: exitCh may already be drained if
 		// daemon exited prematurely during startup check.
 		select {
-		case <-r.exitCh:
+		case err := <-r.exitCh:
+			_ = err
 		default:
 		}
 	}
