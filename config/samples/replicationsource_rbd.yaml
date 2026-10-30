@@ -1,0 +1,55 @@
+# ReplicationSource example for an RBD (block) volume.
+#
+# The operator detects the rbd.csi.ceph.com provider and runs an RBD
+# mover job that performs block-level differential synchronization using
+# RBD's native snapshot diff capability.
+#
+# Prerequisites:
+#   - VolSync installed in the cluster
+#   - Ceph CSI driver (rbd.csi.ceph.com) configured
+#   - VolumeSnapshot CRDs and a VolumeSnapshotClass for RBD
+#   - Ceph provisioner secret accessible via ceph-csi-config ConfigMap
+#     (Ceph credentials are automatically obtained by the operator)
+#   - The corresponding ReplicationDestination created first to obtain
+#     the destination service address (spec.external.parameters.address)
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationSource
+metadata:
+  name: rbd-replication-source
+  namespace: default
+spec:
+  # PVC to replicate. Must be provisioned by the RBD CSI driver.
+  sourcePVC: my-rbd-pvc
+
+  # Sync trigger. Use a cron schedule for periodic replication.
+  # For on-demand sync, replace schedule with:
+  #   trigger:
+  #     manual: sync-1
+  trigger:
+    schedule: "*/5 * * * *"
+
+  external:
+    # Must match the CSI provisioner name for RBD volumes.
+    # Supported values: rbd.csi.ceph.com, nvmeof.csi.ceph.com
+    provider: rbd.csi.ceph.com
+
+    parameters:
+      # How to access the source data. "Snapshot" creates a point-in-time
+      # VolumeSnapshot before transferring; "Direct" reads the live PVC.
+      copyMethod: Snapshot
+
+      # StorageClass used to provision the temporary snapshot PVC.
+      # Must support the same RBD pool as the source PVC.
+      storageClassName: ceph-block
+
+      # VolumeSnapshotClass for creating RBD snapshots.
+      volumeSnapshotClassName: ceph-block-snapshot
+
+      # Service address from the ReplicationDestination status:
+      #   kubectl get replicationdestination <name> -o jsonpath='{.status.rsyncTLS.address}'
+      address: <copy-from-destination-status.rsyncTLS.address>
+
+      # PSK Secret from the ReplicationDestination status:
+      #   kubectl get replicationdestination <name> -o jsonpath='{.status.rsyncTLS.keySecret}'
+      # For cross-cluster, copy the Secret data into the source namespace.
+      keySecret: <copy-from-destination-status.rsyncTLS.keySecret>

@@ -1,1 +1,5 @@
-resources: []
+resources:
+- replicationsource_cephfs.yaml
+- replicationsource_rbd.yaml
+- replicationdestination_cephfs.yaml
+- replicationdestination_rbd.yaml

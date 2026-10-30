@@ -41,6 +41,9 @@ jobs:
           sudo dpkg -i cri-dockerd_0.3.21.3-0.ubuntu-focal_${ARCH}.deb
           rm -f cri-dockerd_0.3.21.3-0.ubuntu-focal_${ARCH}.deb
 
+      - name: Create CNI config directory
+        run: sudo mkdir -p /etc/cni/net.d
+
       - name: Setup Minikube
         uses: medyagh/setup-minikube@e9e035a86bbc3caea26a450bd4dbf9d0c453682e # v0.0.21
         with:

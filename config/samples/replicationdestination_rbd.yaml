@@ -1,0 +1,43 @@
+# ReplicationDestination example for an RBD (block) volume.
+#
+# The operator detects the rbd.csi.ceph.com provider and runs an RBD
+# mover job that receives block-level differential data from the source.
+#
+# Prerequisites:
+#   - VolSync installed in the cluster
+#   - Ceph CSI driver (rbd.csi.ceph.com) configured
+#   - VolumeSnapshot CRDs and a VolumeSnapshotClass for RBD
+#   - Ceph provisioner secret accessible via ceph-csi-config ConfigMap
+#     (Ceph credentials are automatically obtained by the operator)
+#
+# After applying, copy into the source CR's spec.external.parameters:
+#   status.rsyncTLS.address   -> source parameters.address
+#   status.rsyncTLS.keySecret -> source parameters.keySecret
+# For cross-cluster, also copy the PSK Secret data into the source namespace.
+apiVersion: volsync.backube/v1alpha1
+kind: ReplicationDestination
+metadata:
+  name: rbd-replication-destination
+  namespace: default
+spec:
+  external:
+    # Must match the CSI provisioner name for RBD volumes.
+    provider: rbd.csi.ceph.com
+
+    parameters:
+      # How to restore data. "Snapshot" creates point-in-time snapshots;
+      # "Direct" writes directly to the PVC.
+      copyMethod: Snapshot
+
+      # StorageClass used to provision the destination PVC.
+      storageClassName: ceph-block
+
+      # VolumeSnapshotClass for creating RBD snapshots.
+      volumeSnapshotClassName: ceph-block-snapshot
+
+      # (Optional) Name of a pre-shared key Secret for stunnel TLS (psk.txt).
+      # If omitted, the operator auto-generates one and shares it via CR status.
+      # keySecret: my-psk-secret
+
+      # Required. Pre-existing PVC to receive replicated data.
+      destinationPVC: my-dest-pvc

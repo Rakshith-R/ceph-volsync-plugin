@@ -63,7 +63,7 @@ func RunDestinationServer(
 	versionv1.RegisterVersionServiceServer(server, versionServer)
 	apiv1.RegisterSyncServiceServer(server, syncServer)
 
-	lis, err := net.Listen("tcp", ":"+serverPort)
+	lis, err := net.Listen("tcp", loopbackListenAddr(serverPort))
 	if err != nil {
 		return fmt.Errorf("failed to listen on port %s: %w", serverPort, err)
 	}
@@ -92,4 +92,11 @@ func RunDestinationServer(
 		syncServer.StopDirectTLS()
 		return nil
 	}
+}
+
+// loopbackListenAddr returns the address the plaintext gRPC server binds to.
+// Only the stunnel sidecar on 127.0.0.1 connects to it, so it must not be
+// reachable from other pods.
+func loopbackListenAddr(port string) string {
+	return "127.0.0.1:" + port
 }

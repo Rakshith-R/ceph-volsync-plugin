@@ -1,2 +1,5 @@
 resources:
-- allow-metrics-traffic.yaml
+- operator-network-policy.yaml
+# [METRICS] Uncomment when metrics are enabled to allow scraping from
+# namespaces labeled 'metrics: enabled'.
+#- allow-metrics-traffic.yaml
